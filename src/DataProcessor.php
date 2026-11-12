@@ -149,7 +149,7 @@ class DataProcessor
 
         if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 8) {
+            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 9) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
@@ -246,7 +246,9 @@ class DataProcessor
                 continue;
             }
 
-            $isSolRechazada = (mb_strtolower($row['estado_sol']) === 'rechazado');
+            $estadoSolLower = mb_strtolower($row['estado_sol']);
+            $isSolRechazada = ($estadoSolLower === 'rechazado');
+            $isSolBorrador  = ($estadoSolLower === 'borrador' || $estadoSolLower === 'draft');
             $isOcCancelada  = (mb_strtolower($row['estado_oc']) === 'cancelado');
 
             if ($row['no_oc_odoo'] !== '') {
@@ -260,7 +262,7 @@ class DataProcessor
                 }
 
                 // Tiempos de aprobación de OC para pasar a SAP usando exclusivamente 'Autorizador 1'
-                if (!$isSolRechazada && !$isOcCancelada && $row['ts_creacion_oc'] !== null && $row['ts_aprobacion_oc'] !== null) {
+                if (!$isSolRechazada && !$isSolBorrador && !$isOcCancelada && $row['ts_creacion_oc'] !== null && $row['ts_aprobacion_oc'] !== null) {
                     $diasAprobOc = round(max(0, ($row['ts_aprobacion_oc'] - $row['ts_creacion_oc']) / 86400), 2);
                     $aprobOcName = $row['autorizador_oc_1'] !== '' ? $row['autorizador_oc_1'] : 'Sin asignar';
 
@@ -286,6 +288,7 @@ class DataProcessor
                     'autorizador_sol'    => $aprobSolName,
                     'aprob_sol_excluido' => $this->isExcludedApprover($aprobSolName),
                     'is_rechazada'       => $isSolRechazada,
+                    'is_borrador'        => $isSolBorrador,
                     'comprador'          => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
                     'sociedad'           => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
                     'ts_creacion_sol'    => $row['ts_creacion_sol'],
@@ -321,7 +324,8 @@ class DataProcessor
             $compradores[$sol['comprador']] = true;
             $meses[$ym]                     = true;
 
-            $excluida = $sol['is_rechazada'] || ($sol['has_any_oc'] && $sol['all_ocs_canceled']);
+            // Excluir rechazadas, borradores (aún no llegan a bandeja del comprador) y solicitudes con todas sus OCs canceladas
+            $excluida = $sol['is_rechazada'] || $sol['is_borrador'] || ($sol['has_any_oc'] && $sol['all_ocs_canceled']);
 
             $diasAprobSol = null;
             if ($tsAprobacionSol && $tsAprobacionSol >= $tsCreacionSol) {
@@ -392,6 +396,7 @@ class DataProcessor
                 'oc_odoo'            => implode(', ', array_unique($ocCodes)),
                 'estado_oc'          => implode(', ', array_unique($ocStates)),
                 'is_rechazada'       => $sol['is_rechazada'],
+                'is_borrador'        => $sol['is_borrador'],
                 'excluida'           => $excluida,
                 'aprobada'           => ($tsAprobacionSol !== null),
                 'tiene_oc_odoo'      => $tieneOcOdoo,
@@ -412,7 +417,7 @@ class DataProcessor
         sort($listCompradores);
 
         $output = [
-            'schema_v'      => 8,
+            'schema_v'      => 9,
             'excel_mtime'   => $excelMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),

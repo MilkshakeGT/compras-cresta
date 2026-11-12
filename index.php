@@ -271,7 +271,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <div class="mb-3 flex items-start justify-between gap-2">
                     <div>
                         <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Ranking Aprobadores de Solicitud (Días Promedio)</h2>
-                        <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Creación Solicitud → Aprobación Solicitud · Ordenado de más ágil a más lento</p>
+                        <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Creación Solicitud → Aprobación · Activos con ≥5 aprobaciones (más ágil arriba)</p>
                     </div>
                     <span id="badgeAprobSolAvg" class="text-[10px] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">
                         Prom: 0.0 d
@@ -284,7 +284,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <div class="mb-3 flex items-start justify-between gap-2">
                     <div>
                         <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Ranking Aprobadores de OC Odoo (Días Promedio)</h2>
-                        <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Creación OC Odoo → Aprobación OC Odoo · Ordenado de más ágil a más lento</p>
+                        <p id="subAprobOc" class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Creación OC → Aprobación OC · Activos con ≥5 aprobaciones (más ágil arriba)</p>
                     </div>
                     <span id="badgeAprobOcAvg" class="text-[10px] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">
                         Prom: 0.0 d
@@ -935,10 +935,13 @@ function renderChartRezago(rezagoRecords) {
 // RANKING DE APROBADORES (SOLICITUD Y OC)
 // ==========================================
 function renderChartAprobadoresSol(currentRecords) {
-    const validas = currentRecords.filter(r => !r.excluida && r.aprobada && r.d_aprob_sol !== null && r.autorizador_sol && r.autorizador_sol !== 'Sin asignar');
-    const allDays = validas.map(r => r.d_aprob_sol);
-    const overallAvg = allDays.length ? avg(allDays) : 0;
-    document.getElementById('badgeAprobSolAvg').textContent = `Prom: ${overallAvg.toFixed(1)} d`;
+    // Excluir aprobadores retirados (ej. María Isabel) y muestras menores a 5 aprobaciones
+    const validas = currentRecords.filter(r =>
+        !r.excluida &&
+        r.aprobada &&
+        r.d_aprob_sol !== null &&
+        !r.aprob_sol_excluido
+    );
 
     const mapAprob = {};
     validas.forEach(r => {
@@ -952,8 +955,12 @@ function renderChartAprobadoresSol(currentRecords) {
             count: days.length,
             avgDays: Number(avg(days).toFixed(2))
         }))
-        .filter(item => item.count >= 2)
+        .filter(item => item.count >= 5)
         .sort((a, b) => a.avgDays - b.avgDays);
+
+    const activeDays = summary.flatMap(s => mapAprob[s.name]);
+    const overallAvg = activeDays.length ? avg(activeDays) : 0;
+    document.getElementById('badgeAprobSolAvg').textContent = `Prom: ${overallAvg.toFixed(1)} d`;
 
     const themeCfg = getChartThemeConfig();
     const options = {
@@ -986,11 +993,7 @@ function renderChartAprobadoresSol(currentRecords) {
 
 function renderChartAprobadoresOc(selectedYm) {
     const ocList = filterByPeriod(filterByEntity(RAW_DATA.oc_records || []), selectedYm, periodMode)
-        .filter(r => r.d_aprob_oc !== null && r.aprobador_oc && r.aprobador_oc !== 'Sin asignar');
-
-    const allDays = ocList.map(r => r.d_aprob_oc);
-    const overallAvg = allDays.length ? avg(allDays) : 0;
-    document.getElementById('badgeAprobOcAvg').textContent = `Prom: ${overallAvg.toFixed(1)} d`;
+        .filter(r => r.d_aprob_oc !== null && !r.aprob_oc_excluido);
 
     const mapAprob = {};
     ocList.forEach(r => {
@@ -998,19 +1001,36 @@ function renderChartAprobadoresOc(selectedYm) {
         mapAprob[r.aprobador_oc].push(r.d_aprob_oc);
     });
 
+    // Si en el periodo seleccionado hay al menos 2 aprobaciones por persona, mostrar (umbral >= 2 en mes, >= 5 en YTD)
+    const minSample = periodMode === 'ytd' ? 5 : 2;
     const summary = Object.entries(mapAprob)
         .map(([name, days]) => ({
             name,
             count: days.length,
             avgDays: Number(avg(days).toFixed(2))
         }))
-        .filter(item => item.count >= 2)
+        .filter(item => item.count >= minSample)
         .sort((a, b) => a.avgDays - b.avgDays);
+
+    const activeDays = summary.flatMap(s => mapAprob[s.name]);
+    const overallAvg = activeDays.length ? avg(activeDays) : 0;
+    document.getElementById('badgeAprobOcAvg').textContent = `Prom: ${overallAvg.toFixed(1)} d`;
+
+    const subEl = document.getElementById('subAprobOc');
+    if (summary.length === 0) {
+        subEl.textContent = 'Sin OCs con Autorizador/Aprobación registrada en este periodo';
+    } else {
+        subEl.textContent = 'Creación OC → Aprobación OC · Ordenado de más ágil a más lento';
+    }
 
     const themeCfg = getChartThemeConfig();
     const options = {
         chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
         theme: { mode: themeCfg.mode },
+        noData: {
+            text: 'Sin datos de Autorizador de OC en este filtro',
+            style: { color: themeCfg.labelColor, fontSize: '12px', fontFamily: 'Verdana' }
+        },
         plotOptions: {
             bar: {
                 horizontal: true,

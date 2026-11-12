@@ -156,7 +156,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                         <span class="text-[10px] text-cresta-navy dark:text-indigo-400 group-hover:underline font-bold">Auditar →</span>
                     </div>
                 </div>
-                <p id="kpi1Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Excluye rechazadas y OC canceladas</p>
+                <p id="kpi1Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Excluye borrador, rechazadas y OC canceladas</p>
             </div>
 
             <!-- KPI 2: Tiempo Gestión Comprador -->
@@ -393,7 +393,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
 <script>
 const RAW_DATA = <?= $jsonPayload ?>;
-let periodMode = 'month'; // 'month' | 'quarter' | 'ytd'
+let periodMode = 'month';
 let charts = {};
 let isDark = false;
 
@@ -587,7 +587,6 @@ function populateYearPeriodOptions(year) {
         selMes.value = yearMeses[yearMeses.length - 1];
     }
 
-    // Poblar trimestres disponibles en ese año
     const availableQs = new Set(yearMeses.map(getQuarterFromYm));
     selQ.innerHTML = '';
     QUARTER_DEFS.forEach(q => {
@@ -662,7 +661,6 @@ function filterBySociedadOnly(records) {
     return records.filter(r => soc === 'ALL' || r.sociedad === soc);
 }
 
-// Determina el mes límite superior (YYYY-MM) del filtro activo para gráficas de tendencia y rezago acumulado
 function getMaxYmForCurrentSelection() {
     const year = document.getElementById('filterYear').value;
     const yearMeses = RAW_DATA.filters.meses.filter(ym => ym.startsWith(`${year}-`));
@@ -687,7 +685,6 @@ function filterByActivePeriod(records) {
         const qDef = QUARTER_DEFS.find(q => q.id === qId) || QUARTER_DEFS[0];
         return records.filter(r => r.ym.startsWith(`${year}-`) && qDef.months.includes(r.ym.split('-')[1]));
     }
-    // YTD
     const targetYm = document.getElementById('filterMes').value;
     return records.filter(r => r.ym.startsWith(`${year}-`) && r.ym <= targetYm);
 }
@@ -763,7 +760,6 @@ function renderDashboard() {
     const currentStats = calcKpiStats(currentRecords);
     const maxYm = getMaxYmForCurrentSelection();
 
-    // Calcular periodo comparativo anterior (Mes anterior o Trimestre anterior)
     let prevCompData = null;
     if (periodMode === 'month') {
         const allMeses = RAW_DATA.filters.meses;
@@ -779,7 +775,6 @@ function renderDashboard() {
         prevCompData = getPreviousQuarterRecords(entityRecords, selectedYear, selectedQ);
     }
 
-    // Badge KPI 1
     document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
     if (periodMode === 'ytd') {
         document.getElementById('kpi1Badge').textContent = `YTD ${selectedYear}`;
@@ -789,7 +784,6 @@ function renderDashboard() {
         document.getElementById('kpi1Badge').textContent = formatYm(selectedYm);
     }
 
-    // KPI 2: Tiempo Gestión Comprador
     document.getElementById('kpiTimeValue').textContent = currentStats.avgDiasComp !== null ? currentStats.avgDiasComp.toFixed(1) : 'N/D';
     document.getElementById('kpiTimeSub').textContent = currentStats.medDiasComp !== null
         ? `Mediana: ${currentStats.medDiasComp.toFixed(1)} d · ${currentStats.conOcOdooList.length} OC`
@@ -808,7 +802,6 @@ function renderDashboard() {
         bTime.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
     }
 
-    // KPI 3: SLA Comprador <= 14d
     document.getElementById('kpi2Value').textContent = currentStats.pctComp14 !== null ? `${currentStats.pctComp14}%` : 'N/D';
     const b2 = document.getElementById('kpi2Badge');
     const sub2 = document.getElementById('kpi2Sub');
@@ -829,7 +822,6 @@ function renderDashboard() {
         sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
     }
 
-    // KPI 4: En SAP <= 14d
     document.getElementById('kpi3Value').textContent = currentStats.pctSap14 !== null ? `${currentStats.pctSap14}%` : 'N/D';
     const b3 = document.getElementById('kpi3Badge');
     const sub3 = document.getElementById('kpi3Sub');
@@ -850,7 +842,6 @@ function renderDashboard() {
         sub3.textContent = 'Ciclo desde aprobación (≥14d)';
     }
 
-    // Rezago acumulado hasta el corte máximo del periodo seleccionado
     const rezagoList = entityRecords
         .filter(r => r.ym <= maxYm && !r.excluida && r.aprobada && !r.tiene_oc_sap)
         .sort((a, b) => (b.d_to_sap || 0) - (a.d_to_sap || 0));
@@ -1083,9 +1074,6 @@ function renderChartRezago(rezagoRecords) {
     charts.rezago.render();
 }
 
-// ==========================================
-// RANKING DE APROBADORES (SOLICITUD Y OC)
-// ==========================================
 function renderChartAprobadoresSol(currentRecords) {
     const validas = currentRecords.filter(r =>
         !r.excluida &&

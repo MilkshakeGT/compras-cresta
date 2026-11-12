@@ -246,6 +246,24 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
+        <!-- Fila 3: Evolución Temporal de Días de Gestión del Comprador (Comparativa vs Individual) -->
+        <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
+            <div class="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                    <h2 id="chartCompTrendTitle" class="text-sm font-bold text-cresta-navy dark:text-white">
+                        Evolución Mensual: Días Promedio de Gestión por Comprador
+                    </h2>
+                    <p id="chartCompTrendSub" class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">
+                        Comparativa mensual de velocidad de respuesta (Aprobación Solicitud → OC en Odoo) · Menos días = mayor agilidad
+                    </p>
+                </div>
+                <span id="chartCompTrendBadge" class="text-[11px] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">
+                    Vista Comparativa Equipo
+                </span>
+            </div>
+            <div id="chartCompradorTrend" class="w-full h-80"></div>
+        </section>
+
         <!-- Tabla Ejecutiva Mensual -->
         <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm overflow-x-auto">
             <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -445,6 +463,10 @@ function formatYm(ym) {
     return `${MONTH_NAMES[m] || m} ${y}`;
 }
 
+function shortName(fullName) {
+    return fullName.split(' ').slice(0, 2).join(' ');
+}
+
 function median(arr) {
     if (!arr.length) return 0;
     const s = [...arr].sort((a, b) => a - b);
@@ -503,6 +525,11 @@ function filterByEntity(records) {
     });
 }
 
+function filterBySociedadOnly(records) {
+    const soc = document.getElementById('filterSociedad').value;
+    return records.filter(r => soc === 'ALL' || r.sociedad === soc);
+}
+
 function filterByPeriod(records, targetYm, mode) {
     const targetYear = targetYm.split('-')[0];
     return records.filter(r => {
@@ -515,7 +542,6 @@ function calcKpiStats(records) {
     const validas = records.filter(r => !r.excluida);
     const aprobadas = validas.filter(r => r.aprobada);
 
-    // Gestión del comprador sin cortes predefinidos (sobre solicitudes aprobadas con OC en Odoo)
     const conOcOdoo = aprobadas.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
     const diasCompArr = conOcOdoo.map(r => r.d_comprador);
     const avgDiasComp = diasCompArr.length ? avg(diasCompArr) : null;
@@ -544,6 +570,7 @@ function calcKpiStats(records) {
 
 function renderDashboard() {
     const selectedYm = document.getElementById('filterMes').value;
+    const selectedComp = document.getElementById('filterComprador').value;
     const entityRecords = filterByEntity(RAW_DATA.records);
     const currentRecords = filterByPeriod(entityRecords, selectedYm, periodMode);
     const currentStats = calcKpiStats(currentRecords);
@@ -557,7 +584,7 @@ function renderDashboard() {
     document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
     document.getElementById('kpi1Badge').textContent = periodMode === 'ytd' ? `YTD ${selectedYm.split('-')[0]}` : formatYm(selectedYm);
 
-    // KPI 2: Tiempo Gestión Comprador (Días promedio + Mediana)
+    // KPI 2: Tiempo Gestión Comprador
     document.getElementById('kpiTimeValue').textContent = currentStats.avgDiasComp !== null ? currentStats.avgDiasComp.toFixed(1) : 'N/D';
     document.getElementById('kpiTimeSub').textContent = currentStats.medDiasComp !== null
         ? `Mediana: ${currentStats.medDiasComp.toFixed(1)} d · ${currentStats.conOcOdooList.length} OC`
@@ -566,7 +593,6 @@ function renderDashboard() {
     const bTime = document.getElementById('kpiTimeBadge');
     if (periodMode === 'month' && prevStats && currentStats.avgDiasComp !== null && prevStats.avgDiasComp !== null) {
         const diffDays = Number((currentStats.avgDiasComp - prevStats.avgDiasComp).toFixed(1));
-        // Menos días = mejora (verde), más días = empeora (rojo)
         const improved = diffDays <= 0;
         bTime.textContent = `${diffDays > 0 ? '+' : ''}${diffDays.toFixed(1)}d vs ${MONTH_NAMES[prevYm.split('-')[1]]}`;
         bTime.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${improved
@@ -607,7 +633,6 @@ function renderDashboard() {
         .filter(r => r.ym <= selectedYm && !r.excluida && r.aprobada && !r.tiene_oc_sap)
         .sort((a, b) => (b.d_to_sap || 0) - (a.d_to_sap || 0));
 
-    // Guardar universos auditables para las 5 tarjetas KPI
     cachedUniverses.VALIDAS = [...currentStats.validasList].sort((a, b) => b.fecha.localeCompare(a.fecha));
     cachedUniverses.TIEMPO_COMP = [...currentStats.conOcOdooList].sort((a, b) => (b.d_comprador || 0) - (a.d_comprador || 0));
     cachedUniverses.SLA_COMP = [...currentStats.compEvaluablesList].sort((a, b) => (b.d_comprador ?? 9999) - (a.d_comprador ?? 9999));
@@ -622,6 +647,7 @@ function renderDashboard() {
     renderChartCiclo(entityRecords, selectedYm);
     renderChartCompradores(currentRecords);
     renderChartRezago(rezagoList);
+    renderChartCompradorTrend(selectedYm, selectedComp);
     renderMonthlyTable(entityRecords);
 }
 
@@ -759,7 +785,7 @@ function renderChartCompradores(currentRecords) {
         colors: summary.map(s => s.pct >= 70 ? '#15803D' : (s.pct >= 55 ? '#1B2A4A' : '#C8102E')),
         series: [{ name: '% SLA ≤14 días', data: summary.map(s => s.pct) }],
         xaxis: {
-            categories: summary.map(s => `${s.name.split(' ').slice(0, 2).join(' ')} (${s.total})`),
+            categories: summary.map(s => `${shortName(s.name)} (${s.total})`),
             min: 0,
             max: 100,
             labels: { formatter: v => v + '%', style: { colors: themeCfg.labelColor } }
@@ -821,6 +847,145 @@ function renderChartRezago(rezagoRecords) {
     charts.rezago.render();
 }
 
+// ==========================================
+// GRÁFICA EVOLUCIÓN DÍAS DE GESTIÓN COMPRADOR
+// ==========================================
+function renderChartCompradorTrend(selectedYm, selectedComp) {
+    const socRecords = filterBySociedadOnly(RAW_DATA.records)
+        .filter(r => !r.excluida && r.aprobada && r.tiene_oc_odoo && r.d_comprador !== null);
+
+    // Tomar últimos 6 meses hasta el mes seleccionado (o todo el año si es YTD)
+    const allMesesUpTo = RAW_DATA.filters.meses.filter(m => m <= selectedYm);
+    const meses = periodMode === 'ytd'
+        ? allMesesUpTo.filter(m => m.startsWith(selectedYm.split('-')[0]))
+        : allMesesUpTo.slice(-6);
+
+    const labels = meses.map(formatYm);
+    const themeCfg = getChartThemeConfig();
+
+    const titleEl = document.getElementById('chartCompTrendTitle');
+    const subEl = document.getElementById('chartCompTrendSub');
+    const badgeEl = document.getElementById('chartCompTrendBadge');
+
+    if (charts.compTrend) charts.compTrend.destroy();
+
+    if (selectedComp !== 'ALL') {
+        // MODO INDIVIDUAL: Progreso en el tiempo de un solo comprador (Promedio vs Mediana)
+        titleEl.textContent = `Evolución Mensual de Gestión: ${selectedComp}`;
+        subEl.textContent = 'Barras = Días promedio a OC en Odoo · Línea = Mediana (sin sesgo de casos atípicos)';
+        badgeEl.textContent = 'Progreso Individual';
+
+        const compRows = socRecords.filter(r => r.comprador === selectedComp);
+        const avgSeries = [];
+        const medSeries = [];
+        const teamAvgSeries = [];
+
+        meses.forEach(m => {
+            const mComp = compRows.filter(r => r.ym === m).map(r => r.d_comprador);
+            const mTeam = socRecords.filter(r => r.ym === m).map(r => r.d_comprador);
+
+            avgSeries.push(mComp.length ? Number(avg(mComp).toFixed(1)) : null);
+            medSeries.push(mComp.length ? Number(median(mComp).toFixed(1)) : null);
+            teamAvgSeries.push(mTeam.length ? Number(avg(mTeam).toFixed(1)) : null);
+        });
+
+        const options = {
+            chart: { type: 'line', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+            theme: { mode: themeCfg.mode },
+            stroke: { width: [0, 3, 2], curve: 'smooth', dashArray: [0, 0, 5] },
+            colors: isDark ? ['#6366F1', '#10B981', '#9CA3AF'] : ['#1B2A4A', '#C8102E', '#64748B'],
+            plotOptions: { bar: { borderRadius: 5, columnWidth: '45%' } },
+            series: [
+                { name: 'Promedio Comprador (días)', type: 'column', data: avgSeries },
+                { name: 'Mediana Comprador (días)', type: 'line', data: medSeries },
+                { name: 'Promedio Equipo (Ref.)', type: 'line', data: teamAvgSeries }
+            ],
+            xaxis: { categories: labels, labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
+            yaxis: {
+                min: 0,
+                title: { text: 'Días de gestión', style: { fontSize: '10px', color: themeCfg.labelColor } },
+                labels: { formatter: v => v !== null ? v.toFixed(1) + ' d' : '', style: { colors: themeCfg.labelColor } }
+            },
+            markers: { size: 4 },
+            dataLabels: {
+                enabled: true,
+                enabledOnSeries: [0, 1],
+                formatter: v => v !== null ? v.toFixed(1) : '',
+                style: { fontSize: '9px' }
+            },
+            grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
+            legend: { position: 'top', fontSize: '11px' }
+        };
+
+        charts.compTrend = new ApexCharts(document.querySelector('#chartCompradorTrend'), options);
+        charts.compTrend.render();
+    } else {
+        // MODO COMPARATIVO: Todos los compradores activos entre sí + Promedio Equipo
+        titleEl.textContent = 'Evolución Mensual: Días Promedio de Gestión por Comprador';
+        subEl.textContent = 'Comparativa mensual de velocidad (Aprobación Solicitud → OC en Odoo) · Menos días = mayor agilidad';
+        badgeEl.textContent = 'Comparativa Equipo';
+
+        // Filtrar compradores con al menos 10 OC generadas en la ventana para mantener la gráfica legible
+        const compCounts = {};
+        socRecords.filter(r => meses.includes(r.ym)).forEach(r => {
+            compCounts[r.comprador] = (compCounts[r.comprador] || 0) + 1;
+        });
+
+        const activeComps = Object.keys(compCounts)
+            .filter(c => compCounts[c] >= 10)
+            .sort((a, b) => compCounts[b] - compCounts[a]);
+
+        const palette = isDark
+            ? ['#38BDF8', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6', '#FB923C']
+            : ['#1B2A4A', '#C8102E', '#15803D', '#D97706', '#2563EB', '#7C3AED', '#0D9488'];
+
+        const series = activeComps.map(compName => {
+            const data = meses.map(m => {
+                const vals = socRecords
+                    .filter(r => r.comprador === compName && r.ym === m)
+                    .map(r => r.d_comprador);
+                // Requerir al menos 3 OC en el mes para evitar picos por 1 solo caso
+                return vals.length >= 3 ? Number(avg(vals).toFixed(1)) : null;
+            });
+            return { name: shortName(compName), data };
+        });
+
+        // Agregar línea punteada de Promedio General del Equipo
+        const teamData = meses.map(m => {
+            const vals = socRecords.filter(r => r.ym === m).map(r => r.d_comprador);
+            return vals.length ? Number(avg(vals).toFixed(1)) : null;
+        });
+        series.push({ name: 'Promedio Equipo', data: teamData });
+
+        const colors = [...palette.slice(0, activeComps.length), isDark ? '#E5E7EB' : '#64748B'];
+        const widths = [...activeComps.map(() => 2.5), 3];
+        const dashes = [...activeComps.map(() => 0), 6];
+
+        const options = {
+            chart: { type: 'line', height: 320, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+            theme: { mode: themeCfg.mode },
+            stroke: { width: widths, curve: 'smooth', dashArray: dashes },
+            colors: colors,
+            series: series,
+            xaxis: { categories: labels, labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
+            yaxis: {
+                min: 0,
+                title: { text: 'Días promedio a OC', style: { fontSize: '10px', color: themeCfg.labelColor } },
+                labels: { formatter: v => v !== null ? v.toFixed(1) + ' d' : '', style: { colors: themeCfg.labelColor } }
+            },
+            markers: { size: 4 },
+            tooltip: {
+                y: { formatter: v => v !== null ? `${v.toFixed(1)} días` : 'Sin muestra suficiente' }
+            },
+            grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
+            legend: { position: 'top', fontSize: '11px' }
+        };
+
+        charts.compTrend = new ApexCharts(document.querySelector('#chartCompradorTrend'), options);
+        charts.compTrend.render();
+    }
+}
+
 function renderMonthlyTable(entityRecords) {
     const meses = RAW_DATA.filters.meses;
     const thead = document.getElementById('monthlyTableHead');
@@ -838,7 +1003,7 @@ function renderMonthlyTable(entityRecords) {
         const rechazadas = allM.filter(r => r.is_rechazada);
 
         const conOc = aprobadas.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
-        const avgComp = conOc.length ? avg(conOc.map(r => r.d_comprador)).toFixed(1) : 'N/D';
+        const avgComp = conOc.length ? Number(avg(conOc.map(r => r.d_comprador)).toFixed(1)) : null;
 
         const e7 = aprobadas.filter(r => r.edad_dias >= 7);
         const p7 = e7.length >= 10 ? Math.round((e7.filter(r => r.tiene_oc_sap && r.d_to_sap <= 7).length / e7.length) * 100) : null;
@@ -864,6 +1029,7 @@ function renderMonthlyTable(entityRecords) {
         };
     });
 
+    const minAvgComp = Math.min(...metricsByMonth.map(x => x.avgComp ?? 9999));
     const maxP7 = Math.max(...metricsByMonth.map(x => x.p7 ?? -1));
     const maxP14 = Math.max(...metricsByMonth.map(x => x.p14 ?? -1));
     const maxP30 = Math.max(...metricsByMonth.map(x => x.p30 ?? -1));
@@ -883,7 +1049,13 @@ function renderMonthlyTable(entityRecords) {
         },
         {
             label: 'Promedio días gestión comprador (Odoo)',
-            vals: metricsByMonth.map(x => `<td class="py-2.5 px-3 text-right font-semibold text-cresta-blue dark:text-sky-400">${x.avgComp} d</td>`)
+            vals: metricsByMonth.map(x => {
+                if (x.avgComp === null) return `<td class="py-2.5 px-3 text-right text-slate-400">N/D</td>`;
+                const cls = x.avgComp === minAvgComp
+                    ? 'text-cresta-red dark:text-emerald-400 font-bold bg-red-50/60 dark:bg-emerald-950/30'
+                    : 'text-cresta-blue dark:text-sky-400 font-semibold';
+                return `<td class="py-2.5 px-3 text-right ${cls}">${x.avgComp.toFixed(1)} d</td>`;
+            })
         },
         {
             label: 'Enviadas a SAP en ≤ 7 días',

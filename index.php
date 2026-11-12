@@ -5,15 +5,17 @@ require_once __DIR__ . '/src/DataProcessor.php';
 
 $excelPath = __DIR__ . '/data/DB.xlsx';
 $cachePath = __DIR__ . '/data/cache.json';
+$forceSync = isset($_GET['sync']) && $_GET['sync'] === '1';
 
 try {
     $processor = new DataProcessor($excelPath, $cachePath);
-    $payload = $processor->getProcessedData();
+    $payload = $processor->getProcessedData($forceSync);
 } catch (Throwable $e) {
     http_response_code(500);
     die("Error cargando datos del dashboard: " . htmlspecialchars($e->getMessage()));
 }
 
+$syncInfo = $payload['sync_info'] ?? [];
 $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 ?>
 <!DOCTYPE html>
@@ -57,20 +59,25 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
     <header class="border-b border-slate-200 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 sticky top-0 z-30 backdrop-blur shadow-sm">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
-                <div class="flex items-center gap-2.5">
+                <div class="flex flex-wrap items-center gap-2.5">
                     <span class="px-2.5 py-0.5 text-[11px] font-bold rounded-md text-white bg-cresta-navy dark:bg-cresta-red tracking-wide">
                         GRUPO CRESTA · SUPPLY CHAIN
                     </span>
                     <span class="text-xs text-slate-500 dark:text-gray-400">
                         Corte de datos: <strong class="text-slate-800 dark:text-gray-200"><?= htmlspecialchars($payload['cutoff_date']) ?></strong>
                     </span>
+                    <?php if ($forceSync && !empty($syncInfo['message'])): ?>
+                        <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 font-semibold">
+                            <?= htmlspecialchars($syncInfo['message']) ?>
+                        </span>
+                    <?php endif; ?>
                 </div>
                 <h1 class="text-lg sm:text-xl font-bold text-cresta-navy dark:text-white mt-1">
                     Evolución del Ciclo de Compras · Grupo Cresta
                 </h1>
             </div>
 
-            <!-- Barra de Filtros + Toggle Modo Oscuro -->
+            <!-- Barra de Filtros + Sincronizar + Toggle Modo Oscuro -->
             <div class="flex flex-wrap items-center gap-2 text-xs">
                 <!-- Modo Periodo -->
                 <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-1 border border-slate-200 dark:border-gray-700">
@@ -100,6 +107,13 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                     class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-3 py-2 font-medium shadow-xs">
                     <option value="ALL">Todos los Compradores</option>
                 </select>
+
+                <!-- Botón Sincronizar OneDrive -->
+                <a href="?sync=1" title="Forzar actualización desde OneDrive"
+                    class="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
+                    <span>↻</span>
+                    <span class="hidden md:inline">Sincronizar</span>
+                </a>
 
                 <!-- Toggle Modo Claro / Oscuro -->
                 <button id="btnThemeToggle" type="button" onclick="toggleTheme()" title="Alternar modo claro / oscuro"
@@ -131,7 +145,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <p id="kpi1Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Excluye rechazadas y OC canceladas</p>
             </div>
 
-            <!-- KPI 2: Tiempo Gestión Comprador (Días promedio sin cortes) -->
+            <!-- KPI 2: Tiempo Gestión Comprador -->
             <div onclick="openAuditModal('TIEMPO_COMP', 'ALL')" title="Haz clic para auditar los tiempos de gestión por solicitud"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-blue dark:hover:border-sky-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -224,9 +238,14 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
         <!-- Fila 2 de Gráficas -->
         <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-7">
-                <div class="mb-3">
-                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Desempeño por Comprador (% OC en Odoo ≤14 días)</h2>
-                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Gestión pura del comprador (Aprobación Solicitud → Creación OC Odoo) · Meta 70%</p>
+                <div class="mb-3 flex items-start justify-between gap-2">
+                    <div>
+                        <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Desempeño por Comprador (% OC en Odoo ≤14 días)</h2>
+                        <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Gestión pura del comprador (Aprobación Solicitud → Creación OC Odoo) · Meta 70%</p>
+                    </div>
+                    <span id="badgeCompradoresPartial" class="hidden text-[10px] px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 font-bold shrink-0">
+                        Avance parcial (mes en curso)
+                    </span>
                 </div>
                 <div id="chartCompradores" class="w-full h-80"></div>
             </div>
@@ -246,7 +265,36 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 3: Evolución Temporal de Días de Gestión del Comprador (Comparativa vs Individual) -->
+        <!-- Fila 3: Ranking de Aprobadores (Solicitudes vs Órdenes de Compra) -->
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
+                <div class="mb-3 flex items-start justify-between gap-2">
+                    <div>
+                        <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Ranking Aprobadores de Solicitud (Días Promedio)</h2>
+                        <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Creación Solicitud → Aprobación Solicitud · Ordenado de más ágil a más lento</p>
+                    </div>
+                    <span id="badgeAprobSolAvg" class="text-[10px] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">
+                        Prom: 0.0 d
+                    </span>
+                </div>
+                <div id="chartAprobadoresSol" class="w-full h-80"></div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
+                <div class="mb-3 flex items-start justify-between gap-2">
+                    <div>
+                        <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Ranking Aprobadores de OC Odoo (Días Promedio)</h2>
+                        <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Creación OC Odoo → Aprobación OC Odoo · Ordenado de más ágil a más lento</p>
+                    </div>
+                    <span id="badgeAprobOcAvg" class="text-[10px] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">
+                        Prom: 0.0 d
+                    </span>
+                </div>
+                <div id="chartAprobadoresOc" class="w-full h-80"></div>
+            </div>
+        </section>
+
+        <!-- Fila 4: Evolución Temporal de Días de Gestión del Comprador -->
         <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
             <div class="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
@@ -335,8 +383,11 @@ let periodMode = 'month';
 let charts = {};
 let isDark = false;
 
-// Estado del Modal Universal de Auditoría
-let activeModalCategory = 'REZAGO'; // 'VALIDAS' | 'TIEMPO_COMP' | 'SLA_COMP' | 'SAP_14' | 'REZAGO'
+if (window.location.search.includes('sync=1')) {
+    window.history.replaceState({}, document.title, window.location.pathname);
+}
+
+let activeModalCategory = 'REZAGO';
 let activeModalSubFilter = 'ALL';
 let cachedUniverses = {
     VALIDAS: [],
@@ -377,7 +428,7 @@ const MODAL_CONFIG = {
         daysField: 'd_comprador',
         daysLabel: 'Días Comprador',
         tabs: [
-            { id: 'ALL', label: 'Todas las Evaluables (≥14d)' },
+            { id: 'ALL', label: 'Todas las Evaluables' },
             { id: 'OK_14', label: 'Cumplieron (≤ 14 días)' },
             { id: 'LATE_14', label: 'Fuera de SLA (> 14d / Sin OC)' }
         ]
@@ -388,7 +439,7 @@ const MODAL_CONFIG = {
         daysField: 'd_to_sap',
         daysLabel: 'Días hasta SAP',
         tabs: [
-            { id: 'ALL', label: 'Todas las Evaluables (≥14d)' },
+            { id: 'ALL', label: 'Todas las Evaluables' },
             { id: 'OK_14', label: 'En SAP ≤ 14 días' },
             { id: 'LATE_14', label: 'Fuera de Plazo (> 14d / Sin SAP)' }
         ]
@@ -547,11 +598,16 @@ function calcKpiStats(records) {
     const avgDiasComp = diasCompArr.length ? avg(diasCompArr) : null;
     const medDiasComp = diasCompArr.length ? median(diasCompArr) : null;
 
-    const compEvaluables = aprobadas.filter(r => r.edad_dias >= 14);
+    const matureComp = aprobadas.filter(r => r.edad_dias >= 14);
+    const isCompPartial = (matureComp.length === 0 && conOcOdoo.length > 0);
+    const compEvaluables = matureComp.length > 0 ? matureComp : conOcOdoo;
     const comp14 = compEvaluables.filter(r => r.tiene_oc_odoo && r.d_comprador !== null && r.d_comprador <= 14);
     const pctComp14 = compEvaluables.length ? Math.round((comp14.length / compEvaluables.length) * 100) : null;
 
-    const sapEvaluables = aprobadas.filter(r => r.edad_dias >= 14);
+    const conOcSap = aprobadas.filter(r => r.tiene_oc_sap && r.d_to_sap !== null);
+    const matureSap = aprobadas.filter(r => r.edad_dias >= 14);
+    const isSapPartial = (matureSap.length === 0 && conOcSap.length > 0);
+    const sapEvaluables = matureSap.length > 0 ? matureSap : conOcSap;
     const sap14 = sapEvaluables.filter(r => r.tiene_oc_sap && r.d_to_sap !== null && r.d_to_sap <= 14);
     const pctSap14 = sapEvaluables.length ? Math.round((sap14.length / sapEvaluables.length) * 100) : null;
 
@@ -560,6 +616,8 @@ function calcKpiStats(records) {
         conOcOdooList: conOcOdoo,
         compEvaluablesList: compEvaluables,
         sapEvaluablesList: sapEvaluables,
+        isCompPartial,
+        isSapPartial,
         totalValidas: validas.length,
         avgDiasComp,
         medDiasComp,
@@ -580,11 +638,9 @@ function renderDashboard() {
     const prevYm = idxYm > 0 ? allMeses[idxYm - 1] : null;
     const prevStats = prevYm ? calcKpiStats(filterByPeriod(entityRecords, prevYm, 'month')) : null;
 
-    // KPI 1: Solicitudes Válidas
     document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
     document.getElementById('kpi1Badge').textContent = periodMode === 'ytd' ? `YTD ${selectedYm.split('-')[0]}` : formatYm(selectedYm);
 
-    // KPI 2: Tiempo Gestión Comprador
     document.getElementById('kpiTimeValue').textContent = currentStats.avgDiasComp !== null ? currentStats.avgDiasComp.toFixed(1) : 'N/D';
     document.getElementById('kpiTimeSub').textContent = currentStats.medDiasComp !== null
         ? `Mediana: ${currentStats.medDiasComp.toFixed(1)} d · ${currentStats.conOcOdooList.length} OC`
@@ -603,30 +659,44 @@ function renderDashboard() {
         bTime.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
     }
 
-    // KPI 3: SLA Comprador <= 14d
     document.getElementById('kpi2Value').textContent = currentStats.pctComp14 !== null ? `${currentStats.pctComp14}%` : 'N/D';
-    if (periodMode === 'month' && prevStats && currentStats.pctComp14 !== null && prevStats.pctComp14 !== null) {
+    const b2 = document.getElementById('kpi2Badge');
+    const sub2 = document.getElementById('kpi2Sub');
+    if (currentStats.isCompPartial) {
+        b2.textContent = 'Avance parcial';
+        b2.className = 'text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800';
+        sub2.textContent = `Sobre ${currentStats.compEvaluablesList.length} OC generadas (mes abierto)`;
+    } else if (periodMode === 'month' && prevStats && currentStats.pctComp14 !== null && prevStats.pctComp14 !== null && !prevStats.isCompPartial) {
         const diff2 = currentStats.pctComp14 - prevStats.pctComp14;
-        const b2 = document.getElementById('kpi2Badge');
         b2.textContent = `${diff2 >= 0 ? '+' : ''}${diff2} pts`;
         b2.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${diff2 >= 0
             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
             : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
+        sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
     } else {
-        document.getElementById('kpi2Badge').textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
+        b2.textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
+        b2.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
+        sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
     }
 
-    // KPI 4: En SAP <= 14d
     document.getElementById('kpi3Value').textContent = currentStats.pctSap14 !== null ? `${currentStats.pctSap14}%` : 'N/D';
-    if (periodMode === 'month' && prevStats && currentStats.pctSap14 !== null && prevStats.pctSap14 !== null) {
+    const b3 = document.getElementById('kpi3Badge');
+    const sub3 = document.getElementById('kpi3Sub');
+    if (currentStats.isSapPartial) {
+        b3.textContent = 'Avance parcial';
+        b3.className = 'text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800';
+        sub3.textContent = `Sobre ${currentStats.sapEvaluablesList.length} cerradas en SAP (mes abierto)`;
+    } else if (periodMode === 'month' && prevStats && currentStats.pctSap14 !== null && prevStats.pctSap14 !== null && !prevStats.isSapPartial) {
         const diff3 = currentStats.pctSap14 - prevStats.pctSap14;
-        const b3 = document.getElementById('kpi3Badge');
         b3.textContent = `${diff3 >= 0 ? '+' : ''}${diff3} pts`;
         b3.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${diff3 >= 0
             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
             : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
+        sub3.textContent = 'Ciclo desde aprobación (≥14d)';
     } else {
-        document.getElementById('kpi3Badge').textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
+        b3.textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
+        b3.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
+        sub3.textContent = 'Ciclo desde aprobación (≥14d)';
     }
 
     const rezagoList = entityRecords
@@ -647,6 +717,8 @@ function renderDashboard() {
     renderChartCiclo(entityRecords, selectedYm);
     renderChartCompradores(currentRecords);
     renderChartRezago(rezagoList);
+    renderChartAprobadoresSol(currentRecords);
+    renderChartAprobadoresOc(selectedYm);
     renderChartCompradorTrend(selectedYm, selectedComp);
     renderMonthlyTable(entityRecords);
 }
@@ -753,8 +825,16 @@ function renderChartCiclo(entityRecords, selectedYm) {
 
 function renderChartCompradores(currentRecords) {
     const validas = currentRecords.filter(r => !r.excluida && r.aprobada);
-    const mapComp = {};
+    const hasMatureAny = validas.some(r => r.edad_dias >= 14);
+    const badgePartial = document.getElementById('badgeCompradoresPartial');
 
+    if (!hasMatureAny && validas.length > 0) {
+        badgePartial.classList.remove('hidden');
+    } else {
+        badgePartial.classList.add('hidden');
+    }
+
+    const mapComp = {};
     validas.forEach(r => {
         if (!mapComp[r.comprador]) mapComp[r.comprador] = [];
         mapComp[r.comprador].push(r);
@@ -762,12 +842,16 @@ function renderChartCompradores(currentRecords) {
 
     const summary = Object.entries(mapComp)
         .map(([name, rows]) => {
-            const evalRows = rows.filter(r => r.edad_dias >= 14);
+            const matureRows = rows.filter(r => r.edad_dias >= 14);
+            const evalRows = matureRows.length > 0
+                ? matureRows
+                : rows.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
+
             const okRows = evalRows.filter(r => r.tiene_oc_odoo && r.d_comprador <= 14);
             const pct = evalRows.length ? Math.round((okRows.length / evalRows.length) * 100) : 0;
-            return { name, total: rows.length, pct };
+            return { name, total: rows.length, evalCount: evalRows.length, pct };
         })
-        .filter(item => item.total >= 3)
+        .filter(item => item.total >= 3 && item.evalCount > 0)
         .sort((a, b) => b.pct - a.pct);
 
     const themeCfg = getChartThemeConfig();
@@ -848,13 +932,114 @@ function renderChartRezago(rezagoRecords) {
 }
 
 // ==========================================
-// GRÁFICA EVOLUCIÓN DÍAS DE GESTIÓN COMPRADOR
+// RANKING DE APROBADORES (SOLICITUD Y OC)
 // ==========================================
+function renderChartAprobadoresSol(currentRecords) {
+    const validas = currentRecords.filter(r => !r.excluida && r.aprobada && r.d_aprob_sol !== null && r.autorizador_sol && r.autorizador_sol !== 'Sin asignar');
+    const allDays = validas.map(r => r.d_aprob_sol);
+    const overallAvg = allDays.length ? avg(allDays) : 0;
+    document.getElementById('badgeAprobSolAvg').textContent = `Prom: ${overallAvg.toFixed(1)} d`;
+
+    const mapAprob = {};
+    validas.forEach(r => {
+        if (!mapAprob[r.autorizador_sol]) mapAprob[r.autorizador_sol] = [];
+        mapAprob[r.autorizador_sol].push(r.d_aprob_sol);
+    });
+
+    const summary = Object.entries(mapAprob)
+        .map(([name, days]) => ({
+            name,
+            count: days.length,
+            avgDays: Number(avg(days).toFixed(2))
+        }))
+        .filter(item => item.count >= 2)
+        .sort((a, b) => a.avgDays - b.avgDays);
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: {
+            bar: {
+                horizontal: true,
+                borderRadius: 5,
+                barHeight: '60%',
+                distributed: true
+            }
+        },
+        colors: summary.map(s => s.avgDays <= 2 ? '#15803D' : (s.avgDays <= 5 ? '#1B2A4A' : '#C8102E')),
+        series: [{ name: 'Días promedio aprobación', data: summary.map(s => s.avgDays) }],
+        xaxis: {
+            categories: summary.map(s => `${shortName(s.name)} (${s.count})`),
+            labels: { formatter: v => v.toFixed(1) + ' d', style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, formatter: v => v.toFixed(1) + ' d', style: { fontSize: '10px' } },
+        legend: { show: false },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.aprobSol) charts.aprobSol.destroy();
+    charts.aprobSol = new ApexCharts(document.querySelector('#chartAprobadoresSol'), options);
+    charts.aprobSol.render();
+}
+
+function renderChartAprobadoresOc(selectedYm) {
+    const ocList = filterByPeriod(filterByEntity(RAW_DATA.oc_records || []), selectedYm, periodMode)
+        .filter(r => r.d_aprob_oc !== null && r.aprobador_oc && r.aprobador_oc !== 'Sin asignar');
+
+    const allDays = ocList.map(r => r.d_aprob_oc);
+    const overallAvg = allDays.length ? avg(allDays) : 0;
+    document.getElementById('badgeAprobOcAvg').textContent = `Prom: ${overallAvg.toFixed(1)} d`;
+
+    const mapAprob = {};
+    ocList.forEach(r => {
+        if (!mapAprob[r.aprobador_oc]) mapAprob[r.aprobador_oc] = [];
+        mapAprob[r.aprobador_oc].push(r.d_aprob_oc);
+    });
+
+    const summary = Object.entries(mapAprob)
+        .map(([name, days]) => ({
+            name,
+            count: days.length,
+            avgDays: Number(avg(days).toFixed(2))
+        }))
+        .filter(item => item.count >= 2)
+        .sort((a, b) => a.avgDays - b.avgDays);
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: {
+            bar: {
+                horizontal: true,
+                borderRadius: 5,
+                barHeight: '60%',
+                distributed: true
+            }
+        },
+        colors: summary.map(s => s.avgDays <= 2 ? '#15803D' : (s.avgDays <= 5 ? '#264073' : '#C8102E')),
+        series: [{ name: 'Días promedio aprobación OC', data: summary.map(s => s.avgDays) }],
+        xaxis: {
+            categories: summary.map(s => `${shortName(s.name)} (${s.count})`),
+            labels: { formatter: v => v.toFixed(1) + ' d', style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, formatter: v => v.toFixed(1) + ' d', style: { fontSize: '10px' } },
+        legend: { show: false },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.aprobOc) charts.aprobOc.destroy();
+    charts.aprobOc = new ApexCharts(document.querySelector('#chartAprobadoresOc'), options);
+    charts.aprobOc.render();
+}
+
 function renderChartCompradorTrend(selectedYm, selectedComp) {
     const socRecords = filterBySociedadOnly(RAW_DATA.records)
         .filter(r => !r.excluida && r.aprobada && r.tiene_oc_odoo && r.d_comprador !== null);
 
-    // Tomar últimos 6 meses hasta el mes seleccionado (o todo el año si es YTD)
     const allMesesUpTo = RAW_DATA.filters.meses.filter(m => m <= selectedYm);
     const meses = periodMode === 'ytd'
         ? allMesesUpTo.filter(m => m.startsWith(selectedYm.split('-')[0]))
@@ -870,7 +1055,6 @@ function renderChartCompradorTrend(selectedYm, selectedComp) {
     if (charts.compTrend) charts.compTrend.destroy();
 
     if (selectedComp !== 'ALL') {
-        // MODO INDIVIDUAL: Progreso en el tiempo de un solo comprador (Promedio vs Mediana)
         titleEl.textContent = `Evolución Mensual de Gestión: ${selectedComp}`;
         subEl.textContent = 'Barras = Días promedio a OC en Odoo · Línea = Mediana (sin sesgo de casos atípicos)';
         badgeEl.textContent = 'Progreso Individual';
@@ -920,12 +1104,10 @@ function renderChartCompradorTrend(selectedYm, selectedComp) {
         charts.compTrend = new ApexCharts(document.querySelector('#chartCompradorTrend'), options);
         charts.compTrend.render();
     } else {
-        // MODO COMPARATIVO: Todos los compradores activos entre sí + Promedio Equipo
         titleEl.textContent = 'Evolución Mensual: Días Promedio de Gestión por Comprador';
         subEl.textContent = 'Comparativa mensual de velocidad (Aprobación Solicitud → OC en Odoo) · Menos días = mayor agilidad';
         badgeEl.textContent = 'Comparativa Equipo';
 
-        // Filtrar compradores con al menos 10 OC generadas en la ventana para mantener la gráfica legible
         const compCounts = {};
         socRecords.filter(r => meses.includes(r.ym)).forEach(r => {
             compCounts[r.comprador] = (compCounts[r.comprador] || 0) + 1;
@@ -944,13 +1126,11 @@ function renderChartCompradorTrend(selectedYm, selectedComp) {
                 const vals = socRecords
                     .filter(r => r.comprador === compName && r.ym === m)
                     .map(r => r.d_comprador);
-                // Requerir al menos 3 OC en el mes para evitar picos por 1 solo caso
                 return vals.length >= 3 ? Number(avg(vals).toFixed(1)) : null;
             });
             return { name: shortName(compName), data };
         });
 
-        // Agregar línea punteada de Promedio General del Equipo
         const teamData = meses.map(m => {
             const vals = socRecords.filter(r => r.ym === m).map(r => r.d_comprador);
             return vals.length ? Number(avg(vals).toFixed(1)) : null;
@@ -1086,9 +1266,6 @@ function renderMonthlyTable(entityRecords) {
     tbody.innerHTML = rowsHtml.map(r => `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40"><td class="py-2.5 px-4 text-slate-800 dark:text-gray-200 font-medium">${r.label}</td>${r.vals.join('')}</tr>`).join('');
 }
 
-// ==========================================
-// MODAL UNIVERSAL DE AUDITORÍA (5 TARJETAS)
-// ==========================================
 function openAuditModal(category, defaultSubFilter) {
     activeModalCategory = category || 'REZAGO';
     activeModalSubFilter = defaultSubFilter || 'ALL';

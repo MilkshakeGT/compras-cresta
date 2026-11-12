@@ -30,7 +30,6 @@ class DataProcessor
             return ['synced' => false, 'source' => 'local', 'message' => 'URL de OneDrive pendiente de configurar'];
         }
 
-        // Si no es forzado y el archivo local fue actualizado hace menos del TTL, omitir descarga
         if (!$force && file_exists($this->excelPath)) {
             $age = time() - filemtime($this->excelPath);
             if ($age < $ttl) {
@@ -46,11 +45,12 @@ class DataProcessor
         curl_setopt_array($ch, [
             CURLOPT_FILE           => $fp,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS      => 10,
-            CURLOPT_TIMEOUT        => 35,
-            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_MAXREDIRS      => 15,
+            CURLOPT_TIMEOUT        => 45,
+            CURLOPT_CONNECTTIMEOUT => 12,
             CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; MKSBox-SupplyChainSync/1.0)',
+            CURLOPT_COOKIEFILE     => '', // Habilita manejo de cookies en memoria para redirecciones de Microsoft
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         ]);
 
         $ok = curl_exec($ch);
@@ -68,10 +68,13 @@ class DataProcessor
             ];
         }
 
-        // Validar que el archivo descargado sea un .xlsx válido (ZIP con sheet1.xml) y no una página HTML de login
+        // Validación segura de ZipArchive en PHP 8.4 (sin acceder a $zip->status si open() falló)
         $zip = new ZipArchive();
-        $isValidXlsx = ($zip->open($tmpFile) === true && $zip->locateName('xl/worksheets/sheet1.xml') !== false);
-        if ($zip->status === ZipArchive::ER_OK) {
+        $openResult = $zip->open($tmpFile);
+        $isValidXlsx = false;
+
+        if ($openResult === true) {
+            $isValidXlsx = ($zip->locateName('xl/worksheets/sheet1.xml') !== false);
             $zip->close();
         }
 
@@ -80,11 +83,10 @@ class DataProcessor
             return [
                 'synced'  => false,
                 'source'  => 'local_fallback',
-                'message' => 'El enlace de OneDrive no devolvió un .xlsx válido (verifica que el vínculo sea público de solo lectura).'
+                'message' => 'El enlace de OneDrive no devolvió un archivo Excel válido (verifica permisos públicos de lectura o formato de URL). Usando copia local.'
             ];
         }
 
-        // Reemplazar DB.xlsx atómicamente solo si cambió su hash MD5 para no invalidar caché innecesariamente
         $newHash = md5_file($tmpFile);
         $oldHash = file_exists($this->excelPath) ? md5_file($this->excelPath) : '';
 
@@ -103,11 +105,18 @@ class DataProcessor
     {
         // Caso 1: OneDrive Empresarial / SharePoint (contiene sharepoint.com)
         if (str_contains($url, 'sharepoint.com')) {
-            $cleanUrl = strtok($url, '?');
-            return $cleanUrl . '?download=1';
+            // Si ya tiene query params, conservarlos y asegurar download=1
+            $parts = parse_url($url);
+            $query = [];
+            if (!empty($parts['query'])) {
+                parse_str($parts['query'], $query);
+            }
+            $query['download'] = '1';
+            $base = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '') . ($parts['path'] ?? '');
+            return $base . '?' . http_build_query($query);
         }
 
-        // Caso 2: OneDrive Personal (1drv.ms o onedrive.live.com) -> API de shares codificada en Base64URL
+        // Caso 2: OneDrive Personal (1drv.ms o onedrive.live.com)
         $base64 = rtrim(strtr(base64_encode($url), '+/', '-_'), '=');
         return "https://api.onedrive.com/v1.0/shares/u!{$base64}/root/content";
     }

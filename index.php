@@ -113,65 +113,92 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6 flex-1 w-full">
 
-        <!-- Tarjetas KPI Principales (Todas auditables al hacer clic) -->
-        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Tarjetas KPI Principales (5 tarjetas auditables al hacer clic) -->
+        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <!-- KPI 1 -->
             <div onclick="openAuditModal('VALIDAS', 'ALL')" title="Haz clic para auditar el listado de solicitudes válidas"
-                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm cursor-pointer hover:border-cresta-navy dark:hover:border-indigo-500/70 transition group">
-                <div class="flex items-center justify-between">
-                    <span class="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-navy dark:group-hover:text-white transition">Solicitudes Válidas</span>
-                    <span id="kpi1Badge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold">--</span>
-                </div>
-                <div class="flex items-baseline justify-between mt-2">
-                    <span id="kpi1Value" class="text-3xl font-bold text-cresta-navy dark:text-white">0</span>
-                    <span class="text-[11px] text-cresta-navy dark:text-indigo-400 group-hover:underline font-bold">Auditar lista →</span>
-                </div>
-                <p id="kpi1Sub" class="text-xs text-slate-500 dark:text-gray-400 mt-1.5">Excluye rechazadas y OC canceladas</p>
-            </div>
-
-            <!-- KPI 2 -->
-            <div onclick="openAuditModal('SLA_COMP', 'ALL')" title="Haz clic para auditar tiempos de gestión por comprador"
-                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm cursor-pointer hover:border-emerald-600 dark:hover:border-emerald-500/70 transition group">
-                <div class="flex items-center justify-between">
-                    <span class="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition">SLA Comprador (≤14d Odoo)</span>
-                    <span id="kpi2Badge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300">--</span>
-                </div>
-                <div class="flex items-baseline justify-between mt-2">
-                    <div class="flex items-baseline gap-2">
-                        <span id="kpi2Value" class="text-3xl font-bold text-emerald-600 dark:text-emerald-400">0%</span>
-                        <span class="text-xs text-slate-500 dark:text-gray-400">Meta: 70%</span>
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-navy dark:hover:border-indigo-500/70 transition group flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-navy dark:group-hover:text-white transition">Solicitudes Válidas</span>
+                        <span id="kpi1Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">--</span>
                     </div>
-                    <span class="text-[11px] text-emerald-700 dark:text-emerald-400 group-hover:underline font-bold">Auditar lista →</span>
+                    <div class="flex items-baseline justify-between mt-2">
+                        <span id="kpi1Value" class="text-2xl xl:text-3xl font-bold text-cresta-navy dark:text-white">0</span>
+                        <span class="text-[10px] text-cresta-navy dark:text-indigo-400 group-hover:underline font-bold">Auditar →</span>
+                    </div>
                 </div>
-                <p id="kpi2Sub" class="text-xs text-slate-500 dark:text-gray-400 mt-1.5">Solo solicitudes con ≥14d de madurez</p>
+                <p id="kpi1Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Excluye rechazadas y OC canceladas</p>
             </div>
 
-            <!-- KPI 3 -->
+            <!-- KPI 2: Tiempo Gestión Comprador (Días promedio sin cortes) -->
+            <div onclick="openAuditModal('TIEMPO_COMP', 'ALL')" title="Haz clic para auditar los tiempos de gestión por solicitud"
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-blue dark:hover:border-sky-500/70 transition group flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-blue dark:group-hover:text-sky-300 transition">Gestión Comprador</span>
+                        <span id="kpiTimeBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0">--</span>
+                    </div>
+                    <div class="flex items-baseline justify-between mt-2">
+                        <div class="flex items-baseline gap-1">
+                            <span id="kpiTimeValue" class="text-2xl xl:text-3xl font-bold text-cresta-navy dark:text-sky-400">0.0</span>
+                            <span class="text-xs font-bold text-slate-500 dark:text-gray-400">días</span>
+                        </div>
+                        <span class="text-[10px] text-cresta-blue dark:text-sky-400 group-hover:underline font-bold">Auditar →</span>
+                    </div>
+                </div>
+                <p id="kpiTimeSub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Mediana: 0.0 d · Promedio a OC</p>
+            </div>
+
+            <!-- KPI 3: SLA Comprador <= 14d -->
+            <div onclick="openAuditModal('SLA_COMP', 'ALL')" title="Haz clic para auditar tiempos de gestión por comprador"
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-emerald-600 dark:hover:border-emerald-500/70 transition group flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition">SLA Comprador ≤14d</span>
+                        <span id="kpi2Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0">--</span>
+                    </div>
+                    <div class="flex items-baseline justify-between mt-2">
+                        <div class="flex items-baseline gap-1.5">
+                            <span id="kpi2Value" class="text-2xl xl:text-3xl font-bold text-emerald-600 dark:text-emerald-400">0%</span>
+                            <span class="text-[10px] text-slate-500 dark:text-gray-400">Meta 70%</span>
+                        </div>
+                        <span class="text-[10px] text-emerald-700 dark:text-emerald-400 group-hover:underline font-bold">Auditar →</span>
+                    </div>
+                </div>
+                <p id="kpi2Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Solicitudes maduras ≥14d (Odoo)</p>
+            </div>
+
+            <!-- KPI 4: En SAP <= 14d -->
             <div onclick="openAuditModal('SAP_14', 'ALL')" title="Haz clic para auditar tiempos de ciclo hasta SAP"
-                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm cursor-pointer hover:border-cresta-blue dark:hover:border-indigo-500/70 transition group">
-                <div class="flex items-center justify-between">
-                    <span class="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-blue dark:group-hover:text-indigo-300 transition">En SAP ≤14 días</span>
-                    <span id="kpi3Badge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300">--</span>
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-blue dark:hover:border-indigo-500/70 transition group flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-blue dark:group-hover:text-indigo-300 transition">En SAP ≤14 días</span>
+                        <span id="kpi3Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0">--</span>
+                    </div>
+                    <div class="flex items-baseline justify-between mt-2">
+                        <span id="kpi3Value" class="text-2xl xl:text-3xl font-bold text-cresta-blue dark:text-indigo-400">0%</span>
+                        <span class="text-[10px] text-cresta-blue dark:text-indigo-400 group-hover:underline font-bold">Auditar →</span>
+                    </div>
                 </div>
-                <div class="flex items-baseline justify-between mt-2">
-                    <span id="kpi3Value" class="text-3xl font-bold text-cresta-blue dark:text-indigo-400">0%</span>
-                    <span class="text-[11px] text-cresta-blue dark:text-indigo-400 group-hover:underline font-bold">Auditar lista →</span>
-                </div>
-                <p id="kpi3Sub" class="text-xs text-slate-500 dark:text-gray-400 mt-1.5">Solo solicitudes con ≥14d de madurez</p>
+                <p id="kpi3Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Ciclo desde aprobación (≥14d)</p>
             </div>
 
-            <!-- KPI 4 -->
+            <!-- KPI 5: Rezago Sin Llegar a SAP -->
             <div onclick="openAuditModal('REZAGO', 'ALL')" title="Haz clic para auditar el detalle de solicitudes pendientes"
-                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm cursor-pointer hover:border-cresta-red dark:hover:border-amber-500/70 transition group relative">
-                <div class="flex items-center justify-between">
-                    <span class="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-red dark:group-hover:text-amber-300 transition">Rezago Sin Llegar a SAP</span>
-                    <span id="kpi4Badge" class="text-[11px] px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950 text-cresta-red dark:text-red-300 border border-red-200 dark:border-red-800 font-bold">0 > 30d</span>
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-red dark:hover:border-amber-500/70 transition group flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-red dark:group-hover:text-amber-300 transition">Rezago Sin SAP</span>
+                        <span id="kpi4Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950 text-cresta-red dark:text-red-300 border border-red-200 dark:border-red-800 font-bold shrink-0">0 > 30d</span>
+                    </div>
+                    <div class="flex items-baseline justify-between mt-2">
+                        <span id="kpi4Value" class="text-2xl xl:text-3xl font-bold text-cresta-red dark:text-amber-400">0</span>
+                        <span class="text-[10px] text-cresta-red dark:text-amber-400 group-hover:underline font-bold">Auditar →</span>
+                    </div>
                 </div>
-                <div class="flex items-baseline justify-between mt-2">
-                    <span id="kpi4Value" class="text-3xl font-bold text-cresta-red dark:text-amber-400">0</span>
-                    <span class="text-[11px] text-cresta-red dark:text-amber-400 group-hover:underline font-bold">Auditar lista →</span>
-                </div>
-                <p id="kpi4Sub" class="text-xs text-slate-500 dark:text-gray-400 mt-1.5">Solicitudes aprobadas abiertas al corte</p>
+                <p id="kpi4Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Aprobadas abiertas al corte</p>
             </div>
         </section>
 
@@ -291,10 +318,11 @@ let charts = {};
 let isDark = false;
 
 // Estado del Modal Universal de Auditoría
-let activeModalCategory = 'REZAGO'; // 'VALIDAS' | 'SLA_COMP' | 'SAP_14' | 'REZAGO'
+let activeModalCategory = 'REZAGO'; // 'VALIDAS' | 'TIEMPO_COMP' | 'SLA_COMP' | 'SAP_14' | 'REZAGO'
 let activeModalSubFilter = 'ALL';
 let cachedUniverses = {
     VALIDAS: [],
+    TIEMPO_COMP: [],
     SLA_COMP: [],
     SAP_14: [],
     REZAGO: []
@@ -311,6 +339,18 @@ const MODAL_CONFIG = {
             { id: 'IN_SAP', label: 'Completadas en SAP' },
             { id: 'IN_ODOO', label: 'Con OC Odoo (Sin SAP)' },
             { id: 'NO_OC', label: 'Sin OC en Odoo' }
+        ]
+    },
+    TIEMPO_COMP: {
+        badge: 'AUDITORÍA · GESTIÓN COMPRADOR (DÍAS)',
+        title: 'Tiempos de Gestión del Comprador (Aprobación Solicitud → Creación OC Odoo)',
+        daysField: 'd_comprador',
+        daysLabel: 'Días Gestión OC',
+        tabs: [
+            { id: 'ALL', label: 'Todas con OC Odoo' },
+            { id: 'FAST', label: 'Ágiles (≤ 7 días)' },
+            { id: 'MED', label: 'Moderadas (8 a 14 días)' },
+            { id: 'SLOW', label: 'Lentas (> 14 días)' }
         ]
     },
     SLA_COMP: {
@@ -475,6 +515,12 @@ function calcKpiStats(records) {
     const validas = records.filter(r => !r.excluida);
     const aprobadas = validas.filter(r => r.aprobada);
 
+    // Gestión del comprador sin cortes predefinidos (sobre solicitudes aprobadas con OC en Odoo)
+    const conOcOdoo = aprobadas.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
+    const diasCompArr = conOcOdoo.map(r => r.d_comprador);
+    const avgDiasComp = diasCompArr.length ? avg(diasCompArr) : null;
+    const medDiasComp = diasCompArr.length ? median(diasCompArr) : null;
+
     const compEvaluables = aprobadas.filter(r => r.edad_dias >= 14);
     const comp14 = compEvaluables.filter(r => r.tiene_oc_odoo && r.d_comprador !== null && r.d_comprador <= 14);
     const pctComp14 = compEvaluables.length ? Math.round((comp14.length / compEvaluables.length) * 100) : null;
@@ -485,9 +531,12 @@ function calcKpiStats(records) {
 
     return {
         validasList: validas,
+        conOcOdooList: conOcOdoo,
         compEvaluablesList: compEvaluables,
         sapEvaluablesList: sapEvaluables,
         totalValidas: validas.length,
+        avgDiasComp,
+        medDiasComp,
         pctComp14,
         pctSap14
     };
@@ -504,46 +553,70 @@ function renderDashboard() {
     const prevYm = idxYm > 0 ? allMeses[idxYm - 1] : null;
     const prevStats = prevYm ? calcKpiStats(filterByPeriod(entityRecords, prevYm, 'month')) : null;
 
+    // KPI 1: Solicitudes Válidas
     document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
     document.getElementById('kpi1Badge').textContent = periodMode === 'ytd' ? `YTD ${selectedYm.split('-')[0]}` : formatYm(selectedYm);
 
+    // KPI 2: Tiempo Gestión Comprador (Días promedio + Mediana)
+    document.getElementById('kpiTimeValue').textContent = currentStats.avgDiasComp !== null ? currentStats.avgDiasComp.toFixed(1) : 'N/D';
+    document.getElementById('kpiTimeSub').textContent = currentStats.medDiasComp !== null
+        ? `Mediana: ${currentStats.medDiasComp.toFixed(1)} d · ${currentStats.conOcOdooList.length} OC`
+        : 'Sin OC generadas aún';
+
+    const bTime = document.getElementById('kpiTimeBadge');
+    if (periodMode === 'month' && prevStats && currentStats.avgDiasComp !== null && prevStats.avgDiasComp !== null) {
+        const diffDays = Number((currentStats.avgDiasComp - prevStats.avgDiasComp).toFixed(1));
+        // Menos días = mejora (verde), más días = empeora (rojo)
+        const improved = diffDays <= 0;
+        bTime.textContent = `${diffDays > 0 ? '+' : ''}${diffDays.toFixed(1)}d vs ${MONTH_NAMES[prevYm.split('-')[1]]}`;
+        bTime.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${improved
+            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
+            : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
+    } else {
+        bTime.textContent = periodMode === 'ytd' ? 'YTD' : 'Base';
+        bTime.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
+    }
+
+    // KPI 3: SLA Comprador <= 14d
     document.getElementById('kpi2Value').textContent = currentStats.pctComp14 !== null ? `${currentStats.pctComp14}%` : 'N/D';
     if (periodMode === 'month' && prevStats && currentStats.pctComp14 !== null && prevStats.pctComp14 !== null) {
         const diff2 = currentStats.pctComp14 - prevStats.pctComp14;
         const b2 = document.getElementById('kpi2Badge');
-        b2.textContent = `${diff2 >= 0 ? '+' : ''}${diff2} pts vs ${formatYm(prevYm)}`;
-        b2.className = `text-[11px] px-2 py-0.5 rounded-full font-bold ${diff2 >= 0
+        b2.textContent = `${diff2 >= 0 ? '+' : ''}${diff2} pts`;
+        b2.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${diff2 >= 0
             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
             : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
     } else {
-        document.getElementById('kpi2Badge').textContent = periodMode === 'ytd' ? 'Acumulado YTD' : 'En maduración';
+        document.getElementById('kpi2Badge').textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
     }
 
+    // KPI 4: En SAP <= 14d
     document.getElementById('kpi3Value').textContent = currentStats.pctSap14 !== null ? `${currentStats.pctSap14}%` : 'N/D';
     if (periodMode === 'month' && prevStats && currentStats.pctSap14 !== null && prevStats.pctSap14 !== null) {
         const diff3 = currentStats.pctSap14 - prevStats.pctSap14;
         const b3 = document.getElementById('kpi3Badge');
-        b3.textContent = `${diff3 >= 0 ? '+' : ''}${diff3} pts vs ${formatYm(prevYm)}`;
-        b3.className = `text-[11px] px-2 py-0.5 rounded-full font-bold ${diff3 >= 0
+        b3.textContent = `${diff3 >= 0 ? '+' : ''}${diff3} pts`;
+        b3.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${diff3 >= 0
             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
             : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
     } else {
-        document.getElementById('kpi3Badge').textContent = periodMode === 'ytd' ? 'Acumulado YTD' : 'En maduración';
+        document.getElementById('kpi3Badge').textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
     }
 
     const rezagoList = entityRecords
         .filter(r => r.ym <= selectedYm && !r.excluida && r.aprobada && !r.tiene_oc_sap)
         .sort((a, b) => (b.d_to_sap || 0) - (a.d_to_sap || 0));
 
-    // Guardar universos auditables para las 4 tarjetas KPI
+    // Guardar universos auditables para las 5 tarjetas KPI
     cachedUniverses.VALIDAS = [...currentStats.validasList].sort((a, b) => b.fecha.localeCompare(a.fecha));
+    cachedUniverses.TIEMPO_COMP = [...currentStats.conOcOdooList].sort((a, b) => (b.d_comprador || 0) - (a.d_comprador || 0));
     cachedUniverses.SLA_COMP = [...currentStats.compEvaluablesList].sort((a, b) => (b.d_comprador ?? 9999) - (a.d_comprador ?? 9999));
     cachedUniverses.SAP_14 = [...currentStats.sapEvaluablesList].sort((a, b) => (b.d_to_sap ?? 9999) - (a.d_to_sap ?? 9999));
     cachedUniverses.REZAGO = rezagoList;
 
     const upToSelected30 = rezagoList.filter(r => r.d_to_sap !== null && r.d_to_sap > 30);
     document.getElementById('kpi4Value').textContent = rezagoList.length.toLocaleString();
-    document.getElementById('kpi4Badge').textContent = `${upToSelected30.length} > 30 días`;
+    document.getElementById('kpi4Badge').textContent = `${upToSelected30.length} > 30d`;
 
     renderChartQuincenas(entityRecords, selectedYm);
     renderChartCiclo(entityRecords, selectedYm);
@@ -764,6 +837,9 @@ function renderMonthlyTable(entityRecords) {
         const aprobadas = validas.filter(r => r.aprobada);
         const rechazadas = allM.filter(r => r.is_rechazada);
 
+        const conOc = aprobadas.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
+        const avgComp = conOc.length ? avg(conOc.map(r => r.d_comprador)).toFixed(1) : 'N/D';
+
         const e7 = aprobadas.filter(r => r.edad_dias >= 7);
         const p7 = e7.length >= 10 ? Math.round((e7.filter(r => r.tiene_oc_sap && r.d_to_sap <= 7).length / e7.length) * 100) : null;
 
@@ -781,6 +857,7 @@ function renderMonthlyTable(entityRecords) {
 
         return {
             creadas: validas.length,
+            avgComp,
             p7, p14, p30,
             medAprob: medAprob.toFixed(2),
             pctRech, pctCanc
@@ -803,6 +880,10 @@ function renderMonthlyTable(entityRecords) {
         {
             label: 'Solicitudes válidas creadas',
             vals: metricsByMonth.map(x => `<td class="py-2.5 px-3 text-right font-bold text-cresta-navy dark:text-white">${x.creadas}</td>`)
+        },
+        {
+            label: 'Promedio días gestión comprador (Odoo)',
+            vals: metricsByMonth.map(x => `<td class="py-2.5 px-3 text-right font-semibold text-cresta-blue dark:text-sky-400">${x.avgComp} d</td>`)
         },
         {
             label: 'Enviadas a SAP en ≤ 7 días',
@@ -834,7 +915,7 @@ function renderMonthlyTable(entityRecords) {
 }
 
 // ==========================================
-// MODAL UNIVERSAL DE AUDITORÍA (4 TARJETAS)
+// MODAL UNIVERSAL DE AUDITORÍA (5 TARJETAS)
 // ==========================================
 function openAuditModal(category, defaultSubFilter) {
     activeModalCategory = category || 'REZAGO';
@@ -891,6 +972,11 @@ function getFilteredModalRows() {
             if (activeModalSubFilter === 'IN_SAP' && !r.tiene_oc_sap) return false;
             if (activeModalSubFilter === 'IN_ODOO' && !(r.tiene_oc_odoo && !r.tiene_oc_sap)) return false;
             if (activeModalSubFilter === 'NO_OC' && r.tiene_oc_odoo) return false;
+        } else if (activeModalCategory === 'TIEMPO_COMP') {
+            const d = r.d_comprador ?? 0;
+            if (activeModalSubFilter === 'FAST' && d > 7) return false;
+            if (activeModalSubFilter === 'MED' && (d <= 7 || d > 14)) return false;
+            if (activeModalSubFilter === 'SLOW' && d <= 14) return false;
         } else if (activeModalCategory === 'SLA_COMP') {
             const ok = r.tiene_oc_odoo && r.d_comprador !== null && r.d_comprador <= 14;
             if (activeModalSubFilter === 'OK_14' && !ok) return false;
@@ -939,7 +1025,7 @@ function renderModalTable() {
 
     tbody.innerHTML = rows.slice(0, 300).map(r => {
         const rawDays = r[cfg.daysField];
-        const diasTxt = rawDays !== null && rawDays !== undefined ? `${Math.round(rawDays)} d` : '—';
+        const diasTxt = rawDays !== null && rawDays !== undefined ? `${rawDays.toFixed(1)} d` : '—';
 
         let diasCls = 'text-slate-700 dark:text-gray-300 font-bold';
         if (rawDays !== null && rawDays !== undefined) {
@@ -971,7 +1057,7 @@ function exportAuditCSV() {
             ? 'En SAP'
             : (r.tiene_oc_odoo ? (r.estado_oc || 'OC Odoo sin SAP') : (!r.aprobada ? (r.estado_sol || 'Sin aprobar') : 'Sin OC en Odoo'));
         const rawDays = r[cfg.daysField];
-        const daysVal = rawDays !== null && rawDays !== undefined ? Math.round(rawDays) : '';
+        const daysVal = rawDays !== null && rawDays !== undefined ? rawDays.toFixed(1) : '';
 
         const line = [
             `"${r.id}"`,

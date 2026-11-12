@@ -7,24 +7,130 @@ class DataProcessor
 {
     private string $excelPath;
     private string $cachePath;
+    private string $configPath;
 
-    public function __construct(string $excelPath, string $cachePath)
+    public function __construct(string $excelPath, string $cachePath, ?string $configPath = null)
     {
-        $this->excelPath = $excelPath;
-        $this->cachePath = $cachePath;
+        $this->excelPath  = $excelPath;
+        $this->cachePath  = $cachePath;
+        $this->configPath = $configPath ?? dirname($excelPath) . '/onedrive.config.php';
     }
 
-    public function getProcessedData(): array
+    public function syncFromOneDrive(bool $force = false): array
     {
+        if (!file_exists($this->configPath)) {
+            return ['synced' => false, 'source' => 'local', 'message' => 'Modo local (sin onedrive.config.php)'];
+        }
+
+        $cfg = require $this->configPath;
+        $rawUrl = trim((string)($cfg['onedrive_url'] ?? ''));
+        $ttl    = (int)($cfg['sync_ttl_seconds'] ?? 1800);
+
+        if ($rawUrl === '' || str_contains($rawUrl, 'PEGA_AQUI')) {
+            return ['synced' => false, 'source' => 'local', 'message' => 'URL de OneDrive pendiente de configurar'];
+        }
+
+        if (!$force && file_exists($this->excelPath)) {
+            $age = time() - filemtime($this->excelPath);
+            if ($age < $ttl) {
+                return ['synced' => false, 'source' => 'onedrive_cached', 'message' => 'Caché reciente'];
+            }
+        }
+
+        $downloadUrl = $this->buildDirectDownloadUrl($rawUrl);
+        $tmpFile = $this->excelPath . '.tmp.' . uniqid();
+
+        $ch = curl_init($downloadUrl);
+        $fp = fopen($tmpFile, 'wb');
+        curl_setopt_array($ch, [
+            CURLOPT_FILE           => $fp,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 15,
+            CURLOPT_TIMEOUT        => 45,
+            CURLOPT_CONNECTTIMEOUT => 12,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_COOKIEFILE     => '',
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        ]);
+
+        $ok = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr  = curl_error($ch);
+        curl_close($ch);
+        fclose($fp);
+
+        if (!$ok || $httpCode >= 400 || !file_exists($tmpFile) || filesize($tmpFile) < 2048) {
+            @unlink($tmpFile);
+            return [
+                'synced'  => false,
+                'source'  => 'local_fallback',
+                'message' => "No se pudo descargar desde OneDrive (HTTP {$httpCode} {$curlErr}). Usando copia local."
+            ];
+        }
+
+        $zip = new ZipArchive();
+        $openResult = $zip->open($tmpFile);
+        $isValidXlsx = false;
+
+        if ($openResult === true) {
+            $isValidXlsx = ($zip->locateName('xl/worksheets/sheet1.xml') !== false);
+            $zip->close();
+        }
+
+        if (!$isValidXlsx) {
+            @unlink($tmpFile);
+            return [
+                'synced'  => false,
+                'source'  => 'local_fallback',
+                'message' => 'El enlace de OneDrive no devolvió un archivo Excel válido. Usando copia local.'
+            ];
+        }
+
+        $newHash = md5_file($tmpFile);
+        $oldHash = file_exists($this->excelPath) ? md5_file($this->excelPath) : '';
+
+        if ($newHash !== $oldHash) {
+            rename($tmpFile, $this->excelPath);
+            touch($this->excelPath);
+            return ['synced' => true, 'source' => 'onedrive', 'message' => 'Actualizado desde OneDrive'];
+        }
+
+        @unlink($tmpFile);
+        touch($this->excelPath);
+        return ['synced' => true, 'source' => 'onedrive', 'message' => 'Sin cambios nuevos en OneDrive'];
+    }
+
+    private function buildDirectDownloadUrl(string $url): string
+    {
+        if (str_contains($url, 'sharepoint.com')) {
+            $parts = parse_url($url);
+            $query = [];
+            if (!empty($parts['query'])) {
+                parse_str($parts['query'], $query);
+            }
+            $query['download'] = '1';
+            $base = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '') . ($parts['path'] ?? '');
+            return $base . '?' . http_build_query($query);
+        }
+
+        $base64 = rtrim(strtr(base64_encode($url), '+/', '-_'), '=');
+        return "https://api.onedrive.com/v1.0/shares/u!{$base64}/root/content";
+    }
+
+    public function getProcessedData(bool $forceSync = false): array
+    {
+        $syncStatus = $this->syncFromOneDrive($forceSync);
+
         if (!file_exists($this->excelPath)) {
-            throw new RuntimeException("No se encontró el archivo data/DB.xlsx en el servidor.");
+            throw new RuntimeException("No se encontró el archivo data/DB.xlsx en el servidor. " . ($syncStatus['message'] ?? ''));
         }
 
         $excelMtime = filemtime($this->excelPath);
 
-        if (file_exists($this->cachePath)) {
+        if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 2) {
+            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 5) {
+                $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
         }
@@ -91,6 +197,7 @@ class DataProcessor
                 'estado_sol'         => trim((string)($lastHeaderData['Estado Solicitud'] ?? '')),
                 'solicitado_por'     => trim((string)($lastHeaderData['Solicitado por'] ?? '')),
                 'autorizador_sol'    => trim((string)($lastHeaderData['Autorizador Solicitud'] ?? '')),
+                'autorizador_oc'     => trim((string)($getCol($r, 'Autorizador') ?? '')),
                 'comprador'          => trim((string)($lastHeaderData['Comprador'] ?? 'Sin asignar')),
                 'sociedad'           => trim((string)($lastHeaderData['Sociedad'] ?? 'Sin sociedad')),
                 'no_oc_odoo'         => trim((string)($getCol($r, 'NO. OC Odoo') ?? '')),
@@ -108,6 +215,7 @@ class DataProcessor
 
         $solicitudesMap = [];
         $ocStats = [];
+        $ocRecords = [];
 
         foreach ($normalizedRows as $row) {
             $solId = $row['solicitud'];
@@ -127,6 +235,22 @@ class DataProcessor
                 if ($isOcCancelada) {
                     $ocStats[$ym]['canceladas']++;
                 }
+
+                // Tiempos de aprobación de OC (Creación OC Odoo -> Aprobación OC Odoo) usando la columna exacta 'Autorizador'
+                if (!$isSolRechazada && !$isOcCancelada && $row['ts_creacion_oc'] !== null && $row['ts_aprobacion_oc'] !== null) {
+                    $diasAprobOc = round(max(0, ($row['ts_aprobacion_oc'] - $row['ts_creacion_oc']) / 86400), 2);
+                    $aprobOcName = $row['autorizador_oc'] !== '' ? $row['autorizador_oc'] : 'Sin asignar';
+
+                    $ocRecords[] = [
+                        'oc_odoo'      => $row['no_oc_odoo'],
+                        'solicitud'    => $solId,
+                        'ym'           => date('Y-m', $row['ts_creacion_oc']),
+                        'sociedad'     => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
+                        'comprador'    => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                        'aprobador_oc' => $aprobOcName,
+                        'd_aprob_oc'   => $diasAprobOc,
+                    ];
+                }
             }
 
             if (!isset($solicitudesMap[$solId])) {
@@ -134,6 +258,7 @@ class DataProcessor
                     'solicitud'         => $solId,
                     'estado_sol'        => $row['estado_sol'],
                     'solicitado_por'    => $row['solicitado_por'],
+                    'autorizador_sol'   => $row['autorizador_sol'] !== '' ? $row['autorizador_sol'] : 'Sin asignar',
                     'is_rechazada'      => $isSolRechazada,
                     'comprador'         => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
                     'sociedad'          => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
@@ -234,6 +359,7 @@ class DataProcessor
                 'fecha'           => date('Y-m-d', $tsCreacionSol),
                 'sociedad'        => $sol['sociedad'],
                 'comprador'       => $sol['comprador'],
+                'autorizador_sol' => $sol['autorizador_sol'],
                 'solicitado_por'  => $sol['solicitado_por'],
                 'estado_sol'      => $sol['estado_sol'],
                 'oc_odoo'         => implode(', ', array_unique($ocCodes)),
@@ -259,10 +385,11 @@ class DataProcessor
         sort($listCompradores);
 
         $output = [
-            'schema_v'      => 2,
+            'schema_v'      => 5,
             'excel_mtime'   => $excelMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),
+            'sync_info'     => $syncStatus,
             'filters'       => [
                 'meses'       => array_keys($meses),
                 'sociedades'  => $listSociedades,
@@ -270,6 +397,7 @@ class DataProcessor
             ],
             'oc_stats'      => $ocStats,
             'records'       => $records,
+            'oc_records'    => $ocRecords,
         ];
 
         file_put_contents($this->cachePath, json_encode($output, JSON_UNESCAPED_UNICODE));

@@ -5,15 +5,17 @@ require_once __DIR__ . '/src/DataProcessor.php';
 
 $excelPath = __DIR__ . '/data/DB.xlsx';
 $cachePath = __DIR__ . '/data/cache.json';
+$forceSync = isset($_GET['sync']) && $_GET['sync'] === '1';
 
 try {
     $processor = new DataProcessor($excelPath, $cachePath);
-    $payload = $processor->getProcessedData();
+    $payload = $processor->getProcessedData($forceSync);
 } catch (Throwable $e) {
     http_response_code(500);
     die("Error cargando datos del dashboard: " . htmlspecialchars($e->getMessage()));
 }
 
+$syncInfo = $payload['sync_info'] ?? [];
 $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 ?>
 <!DOCTYPE html>
@@ -57,20 +59,25 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
     <header class="border-b border-slate-200 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 sticky top-0 z-30 backdrop-blur shadow-sm">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
-                <div class="flex items-center gap-2.5">
+                <div class="flex flex-wrap items-center gap-2.5">
                     <span class="px-2.5 py-0.5 text-[11px] font-bold rounded-md text-white bg-cresta-navy dark:bg-cresta-red tracking-wide">
                         GRUPO CRESTA · SUPPLY CHAIN
                     </span>
                     <span class="text-xs text-slate-500 dark:text-gray-400">
                         Corte de datos: <strong class="text-slate-800 dark:text-gray-200"><?= htmlspecialchars($payload['cutoff_date']) ?></strong>
                     </span>
+                    <?php if ($forceSync && !empty($syncInfo['message'])): ?>
+                        <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 font-semibold">
+                            <?= htmlspecialchars($syncInfo['message']) ?>
+                        </span>
+                    <?php endif; ?>
                 </div>
                 <h1 class="text-lg sm:text-xl font-bold text-cresta-navy dark:text-white mt-1">
                     Evolución del Ciclo de Compras · Grupo Cresta
                 </h1>
             </div>
 
-            <!-- Barra de Filtros + Toggle Modo Oscuro -->
+            <!-- Barra de Filtros + Sincronizar + Toggle Modo Oscuro -->
             <div class="flex flex-wrap items-center gap-2 text-xs">
                 <!-- Modo Periodo -->
                 <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-1 border border-slate-200 dark:border-gray-700">
@@ -100,6 +107,13 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                     class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-3 py-2 font-medium shadow-xs">
                     <option value="ALL">Todos los Compradores</option>
                 </select>
+
+                <!-- Botón Sincronizar OneDrive -->
+                <a href="?sync=1" title="Forzar actualización desde OneDrive"
+                    class="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
+                    <span>↻</span>
+                    <span class="hidden md:inline">Sincronizar</span>
+                </a>
 
                 <!-- Toggle Modo Claro / Oscuro -->
                 <button id="btnThemeToggle" type="button" onclick="toggleTheme()" title="Alternar modo claro / oscuro"
@@ -131,7 +145,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <p id="kpi1Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Excluye rechazadas y OC canceladas</p>
             </div>
 
-            <!-- KPI 2: Tiempo Gestión Comprador (Días promedio sin cortes) -->
+            <!-- KPI 2: Tiempo Gestión Comprador -->
             <div onclick="openAuditModal('TIEMPO_COMP', 'ALL')" title="Haz clic para auditar los tiempos de gestión por solicitud"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-blue dark:hover:border-sky-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -246,7 +260,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 3: Evolución Temporal de Días de Gestión del Comprador (Comparativa vs Individual) -->
+        <!-- Fila 3: Evolución Temporal de Días de Gestión del Comprador -->
         <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
             <div class="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
@@ -335,8 +349,12 @@ let periodMode = 'month';
 let charts = {};
 let isDark = false;
 
-// Estado del Modal Universal de Auditoría
-let activeModalCategory = 'REZAGO'; // 'VALIDAS' | 'TIEMPO_COMP' | 'SLA_COMP' | 'SAP_14' | 'REZAGO'
+// Limpiar ?sync=1 de la barra de direcciones tras recargar
+if (window.location.search.includes('sync=1')) {
+    window.history.replaceState({}, document.title, window.location.pathname);
+}
+
+let activeModalCategory = 'REZAGO';
 let activeModalSubFilter = 'ALL';
 let cachedUniverses = {
     VALIDAS: [],
@@ -580,11 +598,9 @@ function renderDashboard() {
     const prevYm = idxYm > 0 ? allMeses[idxYm - 1] : null;
     const prevStats = prevYm ? calcKpiStats(filterByPeriod(entityRecords, prevYm, 'month')) : null;
 
-    // KPI 1: Solicitudes Válidas
     document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
     document.getElementById('kpi1Badge').textContent = periodMode === 'ytd' ? `YTD ${selectedYm.split('-')[0]}` : formatYm(selectedYm);
 
-    // KPI 2: Tiempo Gestión Comprador
     document.getElementById('kpiTimeValue').textContent = currentStats.avgDiasComp !== null ? currentStats.avgDiasComp.toFixed(1) : 'N/D';
     document.getElementById('kpiTimeSub').textContent = currentStats.medDiasComp !== null
         ? `Mediana: ${currentStats.medDiasComp.toFixed(1)} d · ${currentStats.conOcOdooList.length} OC`
@@ -603,7 +619,6 @@ function renderDashboard() {
         bTime.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
     }
 
-    // KPI 3: SLA Comprador <= 14d
     document.getElementById('kpi2Value').textContent = currentStats.pctComp14 !== null ? `${currentStats.pctComp14}%` : 'N/D';
     if (periodMode === 'month' && prevStats && currentStats.pctComp14 !== null && prevStats.pctComp14 !== null) {
         const diff2 = currentStats.pctComp14 - prevStats.pctComp14;
@@ -616,7 +631,6 @@ function renderDashboard() {
         document.getElementById('kpi2Badge').textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
     }
 
-    // KPI 4: En SAP <= 14d
     document.getElementById('kpi3Value').textContent = currentStats.pctSap14 !== null ? `${currentStats.pctSap14}%` : 'N/D';
     if (periodMode === 'month' && prevStats && currentStats.pctSap14 !== null && prevStats.pctSap14 !== null) {
         const diff3 = currentStats.pctSap14 - prevStats.pctSap14;
@@ -847,14 +861,10 @@ function renderChartRezago(rezagoRecords) {
     charts.rezago.render();
 }
 
-// ==========================================
-// GRÁFICA EVOLUCIÓN DÍAS DE GESTIÓN COMPRADOR
-// ==========================================
 function renderChartCompradorTrend(selectedYm, selectedComp) {
     const socRecords = filterBySociedadOnly(RAW_DATA.records)
         .filter(r => !r.excluida && r.aprobada && r.tiene_oc_odoo && r.d_comprador !== null);
 
-    // Tomar últimos 6 meses hasta el mes seleccionado (o todo el año si es YTD)
     const allMesesUpTo = RAW_DATA.filters.meses.filter(m => m <= selectedYm);
     const meses = periodMode === 'ytd'
         ? allMesesUpTo.filter(m => m.startsWith(selectedYm.split('-')[0]))
@@ -870,7 +880,6 @@ function renderChartCompradorTrend(selectedYm, selectedComp) {
     if (charts.compTrend) charts.compTrend.destroy();
 
     if (selectedComp !== 'ALL') {
-        // MODO INDIVIDUAL: Progreso en el tiempo de un solo comprador (Promedio vs Mediana)
         titleEl.textContent = `Evolución Mensual de Gestión: ${selectedComp}`;
         subEl.textContent = 'Barras = Días promedio a OC en Odoo · Línea = Mediana (sin sesgo de casos atípicos)';
         badgeEl.textContent = 'Progreso Individual';
@@ -920,12 +929,10 @@ function renderChartCompradorTrend(selectedYm, selectedComp) {
         charts.compTrend = new ApexCharts(document.querySelector('#chartCompradorTrend'), options);
         charts.compTrend.render();
     } else {
-        // MODO COMPARATIVO: Todos los compradores activos entre sí + Promedio Equipo
         titleEl.textContent = 'Evolución Mensual: Días Promedio de Gestión por Comprador';
         subEl.textContent = 'Comparativa mensual de velocidad (Aprobación Solicitud → OC en Odoo) · Menos días = mayor agilidad';
         badgeEl.textContent = 'Comparativa Equipo';
 
-        // Filtrar compradores con al menos 10 OC generadas en la ventana para mantener la gráfica legible
         const compCounts = {};
         socRecords.filter(r => meses.includes(r.ym)).forEach(r => {
             compCounts[r.comprador] = (compCounts[r.comprador] || 0) + 1;
@@ -944,13 +951,11 @@ function renderChartCompradorTrend(selectedYm, selectedComp) {
                 const vals = socRecords
                     .filter(r => r.comprador === compName && r.ym === m)
                     .map(r => r.d_comprador);
-                // Requerir al menos 3 OC en el mes para evitar picos por 1 solo caso
                 return vals.length >= 3 ? Number(avg(vals).toFixed(1)) : null;
             });
             return { name: shortName(compName), data };
         });
 
-        // Agregar línea punteada de Promedio General del Equipo
         const teamData = meses.map(m => {
             const vals = socRecords.filter(r => r.ym === m).map(r => r.d_comprador);
             return vals.length ? Number(avg(vals).toFixed(1)) : null;
@@ -1086,9 +1091,6 @@ function renderMonthlyTable(entityRecords) {
     tbody.innerHTML = rowsHtml.map(r => `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40"><td class="py-2.5 px-4 text-slate-800 dark:text-gray-200 font-medium">${r.label}</td>${r.vals.join('')}</tr>`).join('');
 }
 
-// ==========================================
-// MODAL UNIVERSAL DE AUDITORÍA (5 TARJETAS)
-// ==========================================
 function openAuditModal(category, defaultSubFilter) {
     activeModalCategory = category || 'REZAGO';
     activeModalSubFilter = defaultSubFilter || 'ALL';

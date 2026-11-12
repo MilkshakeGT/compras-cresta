@@ -9,3 +9,8 @@ Thumbs.db
 
 # Logs de servidor
 *.log
+
+# OneDrive
+data/*.xlsx
+data/*.json
+data/onedrive.config.php

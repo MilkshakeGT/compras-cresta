@@ -7,24 +7,125 @@ class DataProcessor
 {
     private string $excelPath;
     private string $cachePath;
+    private string $configPath;
 
-    public function __construct(string $excelPath, string $cachePath)
+    public function __construct(string $excelPath, string $cachePath, ?string $configPath = null)
     {
-        $this->excelPath = $excelPath;
-        $this->cachePath = $cachePath;
+        $this->excelPath  = $excelPath;
+        $this->cachePath  = $cachePath;
+        $this->configPath = $configPath ?? dirname($excelPath) . '/onedrive.config.php';
     }
 
-    public function getProcessedData(): array
+    public function syncFromOneDrive(bool $force = false): array
     {
+        if (!file_exists($this->configPath)) {
+            return ['synced' => false, 'source' => 'local', 'message' => 'Modo local (sin onedrive.config.php)'];
+        }
+
+        $cfg = require $this->configPath;
+        $rawUrl = trim((string)($cfg['onedrive_url'] ?? ''));
+        $ttl    = (int)($cfg['sync_ttl_seconds'] ?? 1800);
+
+        if ($rawUrl === '' || str_contains($rawUrl, 'PEGA_AQUI')) {
+            return ['synced' => false, 'source' => 'local', 'message' => 'URL de OneDrive pendiente de configurar'];
+        }
+
+        // Si no es forzado y el archivo local fue actualizado hace menos del TTL, omitir descarga
+        if (!$force && file_exists($this->excelPath)) {
+            $age = time() - filemtime($this->excelPath);
+            if ($age < $ttl) {
+                return ['synced' => false, 'source' => 'onedrive_cached', 'message' => 'Caché reciente'];
+            }
+        }
+
+        $downloadUrl = $this->buildDirectDownloadUrl($rawUrl);
+        $tmpFile = $this->excelPath . '.tmp.' . uniqid();
+
+        $ch = curl_init($downloadUrl);
+        $fp = fopen($tmpFile, 'wb');
+        curl_setopt_array($ch, [
+            CURLOPT_FILE           => $fp,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 10,
+            CURLOPT_TIMEOUT        => 35,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; MKSBox-SupplyChainSync/1.0)',
+        ]);
+
+        $ok = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr  = curl_error($ch);
+        curl_close($ch);
+        fclose($fp);
+
+        if (!$ok || $httpCode >= 400 || !file_exists($tmpFile) || filesize($tmpFile) < 2048) {
+            @unlink($tmpFile);
+            return [
+                'synced'  => false,
+                'source'  => 'local_fallback',
+                'message' => "No se pudo descargar desde OneDrive (HTTP {$httpCode} {$curlErr}). Usando copia local."
+            ];
+        }
+
+        // Validar que el archivo descargado sea un .xlsx válido (ZIP con sheet1.xml) y no una página HTML de login
+        $zip = new ZipArchive();
+        $isValidXlsx = ($zip->open($tmpFile) === true && $zip->locateName('xl/worksheets/sheet1.xml') !== false);
+        if ($zip->status === ZipArchive::ER_OK) {
+            $zip->close();
+        }
+
+        if (!$isValidXlsx) {
+            @unlink($tmpFile);
+            return [
+                'synced'  => false,
+                'source'  => 'local_fallback',
+                'message' => 'El enlace de OneDrive no devolvió un .xlsx válido (verifica que el vínculo sea público de solo lectura).'
+            ];
+        }
+
+        // Reemplazar DB.xlsx atómicamente solo si cambió su hash MD5 para no invalidar caché innecesariamente
+        $newHash = md5_file($tmpFile);
+        $oldHash = file_exists($this->excelPath) ? md5_file($this->excelPath) : '';
+
+        if ($newHash !== $oldHash) {
+            rename($tmpFile, $this->excelPath);
+            touch($this->excelPath);
+            return ['synced' => true, 'source' => 'onedrive', 'message' => 'Actualizado desde OneDrive'];
+        }
+
+        @unlink($tmpFile);
+        touch($this->excelPath);
+        return ['synced' => true, 'source' => 'onedrive', 'message' => 'Sin cambios nuevos en OneDrive'];
+    }
+
+    private function buildDirectDownloadUrl(string $url): string
+    {
+        // Caso 1: OneDrive Empresarial / SharePoint (contiene sharepoint.com)
+        if (str_contains($url, 'sharepoint.com')) {
+            $cleanUrl = strtok($url, '?');
+            return $cleanUrl . '?download=1';
+        }
+
+        // Caso 2: OneDrive Personal (1drv.ms o onedrive.live.com) -> API de shares codificada en Base64URL
+        $base64 = rtrim(strtr(base64_encode($url), '+/', '-_'), '=');
+        return "https://api.onedrive.com/v1.0/shares/u!{$base64}/root/content";
+    }
+
+    public function getProcessedData(bool $forceSync = false): array
+    {
+        $syncStatus = $this->syncFromOneDrive($forceSync);
+
         if (!file_exists($this->excelPath)) {
-            throw new RuntimeException("No se encontró el archivo data/DB.xlsx en el servidor.");
+            throw new RuntimeException("No se encontró el archivo data/DB.xlsx en el servidor. " . ($syncStatus['message'] ?? ''));
         }
 
         $excelMtime = filemtime($this->excelPath);
 
-        if (file_exists($this->cachePath)) {
+        if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 2) {
+            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 3) {
+                $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
         }
@@ -259,10 +360,11 @@ class DataProcessor
         sort($listCompradores);
 
         $output = [
-            'schema_v'      => 2,
+            'schema_v'      => 3,
             'excel_mtime'   => $excelMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),
+            'sync_info'     => $syncStatus,
             'filters'       => [
                 'meses'       => array_keys($meses),
                 'sociedades'  => $listSociedades,

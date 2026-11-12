@@ -22,10 +22,9 @@ class DataProcessor
 
         $excelMtime = filemtime($this->excelPath);
 
-        // Si el caché existe y es más reciente que el Excel, devolver directo
         if (file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime) {
+            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 2) {
                 return $cached;
             }
         }
@@ -35,7 +34,6 @@ class DataProcessor
             throw new RuntimeException("El archivo Excel no contiene datos suficientes.");
         }
 
-        // Mapear encabezados dinámicamente por nombre
         $headers = array_map(fn($h) => trim((string)$h), $rawRows[0]);
         $colMap = array_flip($headers);
 
@@ -47,7 +45,6 @@ class DataProcessor
             return $row[$idx] ?? null;
         };
 
-        // 1. Normalizar filas y aplicar Fill-Down si hubiera celdas vacías heredadas de Odoo
         $lastHeaderData = [
             'Solicitud'             => null,
             'Estado Solicitud'      => null,
@@ -74,7 +71,6 @@ class DataProcessor
                     $lastHeaderData[$k] = $getCol($r, $k);
                 }
             } else {
-                // Heredar de fila anterior si Odoo dejó la cabecera en blanco
                 if ($lastHeaderData['Solicitud'] === null) {
                     continue;
                 }
@@ -108,10 +104,8 @@ class DataProcessor
             ];
         }
 
-        // Fecha de corte = última fecha registrada en el Excel
         $cutoffTs = $maxDateTs > 0 ? $maxDateTs : time();
 
-        // 2. Agrupar a nivel de Solicitud Única para evitar distorsión por múltiples OCs
         $solicitudesMap = [];
         $ocStats = [];
 
@@ -124,7 +118,6 @@ class DataProcessor
             $isSolRechazada = (mb_strtolower($row['estado_sol']) === 'rechazado');
             $isOcCancelada  = (mb_strtolower($row['estado_oc']) === 'cancelado');
 
-            // Conteo de OCs válidas vs canceladas para tasa de cancelación
             if ($row['no_oc_odoo'] !== '') {
                 $ym = date('Y-m', $row['ts_creacion_sol']);
                 if (!isset($ocStats[$ym])) {
@@ -140,6 +133,7 @@ class DataProcessor
                 $solicitudesMap[$solId] = [
                     'solicitud'         => $solId,
                     'estado_sol'        => $row['estado_sol'],
+                    'solicitado_por'    => $row['solicitado_por'],
                     'is_rechazada'      => $isSolRechazada,
                     'comprador'         => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
                     'sociedad'          => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
@@ -160,7 +154,6 @@ class DataProcessor
             }
         }
 
-        // 3. Calcular tiempos exactos por Solicitud Única
         $records = [];
         $sociedades = [];
         $compradores = [];
@@ -177,20 +170,25 @@ class DataProcessor
             $compradores[$sol['comprador']] = true;
             $meses[$ym]                     = true;
 
-            // Excluir solicitudes rechazadas o donde todas sus OCs fueron canceladas
             $excluida = $sol['is_rechazada'] || ($sol['has_any_oc'] && $sol['all_ocs_canceled']);
 
-            // Días de aprobación de solicitud
             $diasAprobSol = null;
             if ($tsAprobacionSol && $tsAprobacionSol >= $tsCreacionSol) {
                 $diasAprobSol = round(($tsAprobacionSol - $tsCreacionSol) / 86400, 2);
             }
 
-            // Evaluar OCs válidas asociadas a la solicitud (tomamos la primera OC creada en Odoo / última llegada a SAP)
             $firstOcOdooTs = null;
             $firstSapTs    = null;
+            $ocCodes       = [];
+            $ocStates      = [];
 
             foreach ($sol['valid_ocs'] as $oc) {
+                if ($oc['no_oc_odoo'] !== '') {
+                    $ocCodes[] = $oc['no_oc_odoo'];
+                }
+                if ($oc['estado_oc'] !== '') {
+                    $ocStates[] = $oc['estado_oc'];
+                }
                 if ($oc['ts_creacion_oc'] !== null) {
                     if ($firstOcOdooTs === null || $oc['ts_creacion_oc'] < $firstOcOdooTs) {
                         $firstOcOdooTs = $oc['ts_creacion_oc'];
@@ -203,7 +201,6 @@ class DataProcessor
                 }
             }
 
-            // Tramo 1: Gestión pura del comprador (Aprobación Solicitud -> Creación OC en Odoo)
             $diasGestionComprador = null;
             $tieneOcOdoo = ($firstOcOdooTs !== null);
             if (!$excluida && $tsAprobacionSol !== null) {
@@ -211,27 +208,23 @@ class DataProcessor
                 $diasGestionComprador = round(max(0, ($endTs - $tsAprobacionSol) / 86400), 2);
             }
 
-            // Tramo 2: Aprobación OC y sincronización SAP (Creación OC Odoo -> Creación OC SAP)
             $diasAprobSap = null;
             $tieneOcSap = ($firstSapTs !== null);
             if (!$excluida && $tieneOcOdoo && $tieneOcSap) {
                 $diasAprobSap = round(max(0, ($firstSapTs - $firstOcOdooTs) / 86400), 2);
             }
 
-            // Tramo 3: Ciclo completo hacia SAP desde aprobación de solicitud (Aprobación Sol -> SAP)
             $diasAprobToSap = null;
             if (!$excluida && $tsAprobacionSol !== null) {
                 $endSapTs = $tieneOcSap ? $firstSapTs : $cutoffTs;
                 $diasAprobToSap = round(max(0, ($endSapTs - $tsAprobacionSol) / 86400), 2);
             }
 
-            // Tramo 4: Ciclo Total End-to-End (Creación Solicitud -> SAP)
             $diasCicloTotal = null;
             if (!$excluida && $tieneOcSap) {
                 $diasCicloTotal = round(max(0, ($firstSapTs - $tsCreacionSol) / 86400), 2);
             }
 
-            // Antigüedad de la solicitud respecto a la fecha de corte (para evitar censura en <=14d y <=30d)
             $edadDias = round(($cutoffTs - $tsCreacionSol) / 86400, 1);
 
             $records[] = [
@@ -241,7 +234,10 @@ class DataProcessor
                 'fecha'           => date('Y-m-d', $tsCreacionSol),
                 'sociedad'        => $sol['sociedad'],
                 'comprador'       => $sol['comprador'],
+                'solicitado_por'  => $sol['solicitado_por'],
                 'estado_sol'      => $sol['estado_sol'],
+                'oc_odoo'         => implode(', ', array_unique($ocCodes)),
+                'estado_oc'       => implode(', ', array_unique($ocStates)),
                 'is_rechazada'    => $sol['is_rechazada'],
                 'excluida'        => $excluida,
                 'aprobada'        => ($tsAprobacionSol !== null),
@@ -263,6 +259,7 @@ class DataProcessor
         sort($listCompradores);
 
         $output = [
+            'schema_v'      => 2,
             'excel_mtime'   => $excelMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),

@@ -113,43 +113,55 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6 flex-1 w-full">
 
-        <!-- Tarjetas KPI Principales -->
+        <!-- Tarjetas KPI Principales (Todas auditables al hacer clic) -->
         <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <!-- KPI 1 -->
-            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
+            <div onclick="openAuditModal('VALIDAS', 'ALL')" title="Haz clic para auditar el listado de solicitudes válidas"
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm cursor-pointer hover:border-cresta-navy dark:hover:border-indigo-500/70 transition group">
                 <div class="flex items-center justify-between">
-                    <span class="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase">Solicitudes Válidas</span>
+                    <span class="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-navy dark:group-hover:text-white transition">Solicitudes Válidas</span>
                     <span id="kpi1Badge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold">--</span>
                 </div>
-                <div id="kpi1Value" class="text-3xl font-bold text-cresta-navy dark:text-white mt-2">0</div>
+                <div class="flex items-baseline justify-between mt-2">
+                    <span id="kpi1Value" class="text-3xl font-bold text-cresta-navy dark:text-white">0</span>
+                    <span class="text-[11px] text-cresta-navy dark:text-indigo-400 group-hover:underline font-bold">Auditar lista →</span>
+                </div>
                 <p id="kpi1Sub" class="text-xs text-slate-500 dark:text-gray-400 mt-1.5">Excluye rechazadas y OC canceladas</p>
             </div>
 
             <!-- KPI 2 -->
-            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
+            <div onclick="openAuditModal('SLA_COMP', 'ALL')" title="Haz clic para auditar tiempos de gestión por comprador"
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm cursor-pointer hover:border-emerald-600 dark:hover:border-emerald-500/70 transition group">
                 <div class="flex items-center justify-between">
-                    <span class="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase">SLA Comprador (≤14d Odoo)</span>
+                    <span class="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition">SLA Comprador (≤14d Odoo)</span>
                     <span id="kpi2Badge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300">--</span>
                 </div>
-                <div class="flex items-baseline gap-2 mt-2">
-                    <span id="kpi2Value" class="text-3xl font-bold text-emerald-600 dark:text-emerald-400">0%</span>
-                    <span class="text-xs text-slate-500 dark:text-gray-400">Meta: 70%</span>
+                <div class="flex items-baseline justify-between mt-2">
+                    <div class="flex items-baseline gap-2">
+                        <span id="kpi2Value" class="text-3xl font-bold text-emerald-600 dark:text-emerald-400">0%</span>
+                        <span class="text-xs text-slate-500 dark:text-gray-400">Meta: 70%</span>
+                    </div>
+                    <span class="text-[11px] text-emerald-700 dark:text-emerald-400 group-hover:underline font-bold">Auditar lista →</span>
                 </div>
                 <p id="kpi2Sub" class="text-xs text-slate-500 dark:text-gray-400 mt-1.5">Solo solicitudes con ≥14d de madurez</p>
             </div>
 
             <!-- KPI 3 -->
-            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
+            <div onclick="openAuditModal('SAP_14', 'ALL')" title="Haz clic para auditar tiempos de ciclo hasta SAP"
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm cursor-pointer hover:border-cresta-blue dark:hover:border-indigo-500/70 transition group">
                 <div class="flex items-center justify-between">
-                    <span class="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase">En SAP ≤14 días</span>
+                    <span class="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-blue dark:group-hover:text-indigo-300 transition">En SAP ≤14 días</span>
                     <span id="kpi3Badge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300">--</span>
                 </div>
-                <div id="kpi3Value" class="text-3xl font-bold text-cresta-blue dark:text-indigo-400 mt-2">0%</div>
+                <div class="flex items-baseline justify-between mt-2">
+                    <span id="kpi3Value" class="text-3xl font-bold text-cresta-blue dark:text-indigo-400">0%</span>
+                    <span class="text-[11px] text-cresta-blue dark:text-indigo-400 group-hover:underline font-bold">Auditar lista →</span>
+                </div>
                 <p id="kpi3Sub" class="text-xs text-slate-500 dark:text-gray-400 mt-1.5">Solo solicitudes con ≥14d de madurez</p>
             </div>
 
             <!-- KPI 4 -->
-            <div onclick="openRezagoModal('ALL')" title="Haz clic para auditar el detalle de solicitudes pendientes"
+            <div onclick="openAuditModal('REZAGO', 'ALL')" title="Haz clic para auditar el detalle de solicitudes pendientes"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm cursor-pointer hover:border-cresta-red dark:hover:border-amber-500/70 transition group relative">
                 <div class="flex items-center justify-between">
                     <span class="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-red dark:group-hover:text-amber-300 transition">Rezago Sin Llegar a SAP</span>
@@ -157,7 +169,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 </div>
                 <div class="flex items-baseline justify-between mt-2">
                     <span id="kpi4Value" class="text-3xl font-bold text-cresta-red dark:text-amber-400">0</span>
-                    <span class="text-[11px] text-cresta-navy dark:text-indigo-400 group-hover:underline font-bold">Auditar lista →</span>
+                    <span class="text-[11px] text-cresta-red dark:text-amber-400 group-hover:underline font-bold">Auditar lista →</span>
                 </div>
                 <p id="kpi4Sub" class="text-xs text-slate-500 dark:text-gray-400 mt-1.5">Solicitudes aprobadas abiertas al corte</p>
             </div>
@@ -198,7 +210,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                         <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Rezago Abierto Sin SAP por Mes de Origen</h2>
                         <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Solicitudes aprobadas pendientes de sincronizar en SAP</p>
                     </div>
-                    <button type="button" onclick="openRezagoModal('GT30')"
+                    <button type="button" onclick="openAuditModal('REZAGO', 'GT30')"
                         class="text-[11px] px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 dark:bg-red-950/80 dark:hover:bg-red-900 text-cresta-red dark:text-red-200 border border-red-200 dark:border-red-800 font-bold shrink-0">
                         Ver > 30d
                     </button>
@@ -232,37 +244,32 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
         </p>
     </footer>
 
-    <!-- Modal de Auditoría de Solicitudes Rezagadas -->
-    <div id="rezagoModal" class="fixed inset-0 z-50 hidden bg-slate-900/60 dark:bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-        <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-700 rounded-2xl max-w-5xl w-full max-h-[88vh] flex flex-col shadow-2xl">
+    <!-- Modal Universal de Auditoría de Solicitudes -->
+    <div id="auditModal" class="fixed inset-0 z-50 hidden bg-slate-900/60 dark:bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-700 rounded-2xl max-w-6xl w-full max-h-[88vh] flex flex-col shadow-2xl">
             <div class="p-5 border-b border-slate-200 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
                     <div class="flex items-center gap-2">
-                        <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-navy dark:bg-cresta-red text-white">AUDITORÍA DE REZAGO</span>
+                        <span id="modalBadge" class="px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-navy dark:bg-cresta-red text-white">AUDITORÍA</span>
                         <span id="modalSubtitle" class="text-xs text-slate-500 dark:text-gray-400"></span>
                     </div>
-                    <h3 class="text-base font-bold text-cresta-navy dark:text-white mt-1">Solicitudes Aprobadas Pendientes de Llegar a SAP</h3>
+                    <h3 id="modalTitle" class="text-base font-bold text-cresta-navy dark:text-white mt-1">Detalle de Solicitudes</h3>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button type="button" onclick="exportRezagoCSV()"
+                    <button type="button" onclick="exportAuditCSV()"
                         class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
                         Descargar CSV
                     </button>
-                    <button type="button" onclick="closeRezagoModal()"
+                    <button type="button" onclick="closeAuditModal()"
                         class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-300 text-xs font-bold">
                         Cerrar ✕
                     </button>
                 </div>
             </div>
 
-            <!-- Controles internos del modal -->
+            <!-- Controles internos dinámicos del modal -->
             <div class="px-5 py-3 bg-slate-50 dark:bg-gray-800/40 border-b border-slate-200 dark:border-gray-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div class="flex flex-wrap gap-1.5">
-                    <button type="button" id="tabRezAll" onclick="setModalFilter('ALL')" class="px-3 py-1 rounded-md font-bold bg-cresta-navy text-white">Todas</button>
-                    <button type="button" id="tabRezGt30" onclick="setModalFilter('GT30')" class="px-3 py-1 rounded-md font-bold bg-slate-200 dark:bg-gray-800 text-slate-700 dark:text-gray-300">Críticas (> 30 días)</button>
-                    <button type="button" id="tabRezNoOc" onclick="setModalFilter('NO_OC')" class="px-3 py-1 rounded-md font-bold bg-slate-200 dark:bg-gray-800 text-slate-700 dark:text-gray-300">Sin OC en Odoo (Comprador)</button>
-                    <button type="button" id="tabRezPendSap" onclick="setModalFilter('PEND_SAP')" class="px-3 py-1 rounded-md font-bold bg-slate-200 dark:bg-gray-800 text-slate-700 dark:text-gray-300">Con OC Odoo (Falta Aprob/SAP)</button>
-                </div>
+                <div id="modalTabsContainer" class="flex flex-wrap gap-1.5"></div>
                 <input id="modalSearch" type="text" oninput="renderModalTable()" placeholder="Buscar solicitud, comprador, OC..."
                     class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 rounded-lg px-3 py-1.5 text-slate-800 dark:text-gray-100 w-60">
             </div>
@@ -270,17 +277,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             <!-- Tabla del modal -->
             <div class="overflow-auto flex-1 p-5">
                 <table class="w-full text-xs text-left border-collapse">
-                    <thead class="bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 sticky top-0">
-                        <tr>
-                            <th class="py-2.5 px-3">Solicitud</th>
-                            <th class="py-2.5 px-3">Fecha Creación</th>
-                            <th class="py-2.5 px-3">Sociedad</th>
-                            <th class="py-2.5 px-3">Comprador</th>
-                            <th class="py-2.5 px-3">OC Odoo</th>
-                            <th class="py-2.5 px-3">Cuello Actual</th>
-                            <th class="py-2.5 px-3 text-right">Días desde Aprob.</th>
-                        </tr>
-                    </thead>
+                    <thead id="modalTableHead" class="bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 sticky top-0"></thead>
                     <tbody id="modalTableBody" class="divide-y divide-slate-200 dark:divide-gray-800"></tbody>
                 </table>
             </div>
@@ -291,9 +288,66 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 const RAW_DATA = <?= $jsonPayload ?>;
 let periodMode = 'month';
 let charts = {};
-let currentRezagoList = [];
-let modalFilterType = 'ALL';
 let isDark = false;
+
+// Estado del Modal Universal de Auditoría
+let activeModalCategory = 'REZAGO'; // 'VALIDAS' | 'SLA_COMP' | 'SAP_14' | 'REZAGO'
+let activeModalSubFilter = 'ALL';
+let cachedUniverses = {
+    VALIDAS: [],
+    SLA_COMP: [],
+    SAP_14: [],
+    REZAGO: []
+};
+
+const MODAL_CONFIG = {
+    VALIDAS: {
+        badge: 'AUDITORÍA · SOLICITUDES VÁLIDAS',
+        title: 'Solicitudes Válidas del Periodo Seleccionado',
+        daysField: 'd_ciclo_total',
+        daysLabel: 'Ciclo Total (días)',
+        tabs: [
+            { id: 'ALL', label: 'Todas' },
+            { id: 'IN_SAP', label: 'Completadas en SAP' },
+            { id: 'IN_ODOO', label: 'Con OC Odoo (Sin SAP)' },
+            { id: 'NO_OC', label: 'Sin OC en Odoo' }
+        ]
+    },
+    SLA_COMP: {
+        badge: 'AUDITORÍA · SLA COMPRADOR',
+        title: 'Evaluación SLA Comprador (Aprobación Solicitud → Creación OC Odoo)',
+        daysField: 'd_comprador',
+        daysLabel: 'Días Comprador',
+        tabs: [
+            { id: 'ALL', label: 'Todas las Evaluables (≥14d)' },
+            { id: 'OK_14', label: 'Cumplieron (≤ 14 días)' },
+            { id: 'LATE_14', label: 'Fuera de SLA (> 14d / Sin OC)' }
+        ]
+    },
+    SAP_14: {
+        badge: 'AUDITORÍA · EN SAP ≤14 DÍAS',
+        title: 'Evaluación Ciclo a SAP (Aprobación Solicitud → Creación en SAP)',
+        daysField: 'd_to_sap',
+        daysLabel: 'Días hasta SAP',
+        tabs: [
+            { id: 'ALL', label: 'Todas las Evaluables (≥14d)' },
+            { id: 'OK_14', label: 'En SAP ≤ 14 días' },
+            { id: 'LATE_14', label: 'Fuera de Plazo (> 14d / Sin SAP)' }
+        ]
+    },
+    REZAGO: {
+        badge: 'AUDITORÍA · REZAGO SIN SAP',
+        title: 'Solicitudes Aprobadas Pendientes de Llegar a SAP',
+        daysField: 'd_to_sap',
+        daysLabel: 'Días desde Aprob.',
+        tabs: [
+            { id: 'ALL', label: 'Todas' },
+            { id: 'GT30', label: 'Críticas (> 30 días)' },
+            { id: 'NO_OC', label: 'Sin OC en Odoo (Comprador)' },
+            { id: 'PEND_SAP', label: 'Con OC Odoo (Falta Aprob/SAP)' }
+        ]
+    }
+};
 
 const MONTH_NAMES = {
     '01': 'Ene', '02': 'Feb', '03': 'Mar', '04': 'Abr',
@@ -430,6 +484,9 @@ function calcKpiStats(records) {
     const pctSap14 = sapEvaluables.length ? Math.round((sap14.length / sapEvaluables.length) * 100) : null;
 
     return {
+        validasList: validas,
+        compEvaluablesList: compEvaluables,
+        sapEvaluablesList: sapEvaluables,
         totalValidas: validas.length,
         pctComp14,
         pctSap14
@@ -474,18 +531,24 @@ function renderDashboard() {
         document.getElementById('kpi3Badge').textContent = periodMode === 'ytd' ? 'Acumulado YTD' : 'En maduración';
     }
 
-    currentRezagoList = entityRecords
+    const rezagoList = entityRecords
         .filter(r => r.ym <= selectedYm && !r.excluida && r.aprobada && !r.tiene_oc_sap)
         .sort((a, b) => (b.d_to_sap || 0) - (a.d_to_sap || 0));
 
-    const upToSelected30 = currentRezagoList.filter(r => r.d_to_sap !== null && r.d_to_sap > 30);
-    document.getElementById('kpi4Value').textContent = currentRezagoList.length.toLocaleString();
+    // Guardar universos auditables para las 4 tarjetas KPI
+    cachedUniverses.VALIDAS = [...currentStats.validasList].sort((a, b) => b.fecha.localeCompare(a.fecha));
+    cachedUniverses.SLA_COMP = [...currentStats.compEvaluablesList].sort((a, b) => (b.d_comprador ?? 9999) - (a.d_comprador ?? 9999));
+    cachedUniverses.SAP_14 = [...currentStats.sapEvaluablesList].sort((a, b) => (b.d_to_sap ?? 9999) - (a.d_to_sap ?? 9999));
+    cachedUniverses.REZAGO = rezagoList;
+
+    const upToSelected30 = rezagoList.filter(r => r.d_to_sap !== null && r.d_to_sap > 30);
+    document.getElementById('kpi4Value').textContent = rezagoList.length.toLocaleString();
     document.getElementById('kpi4Badge').textContent = `${upToSelected30.length} > 30 días`;
 
     renderChartQuincenas(entityRecords, selectedYm);
     renderChartCiclo(entityRecords, selectedYm);
     renderChartCompradores(currentRecords);
-    renderChartRezago(currentRezagoList);
+    renderChartRezago(rezagoList);
     renderMonthlyTable(entityRecords);
 }
 
@@ -770,50 +833,103 @@ function renderMonthlyTable(entityRecords) {
     tbody.innerHTML = rowsHtml.map(r => `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40"><td class="py-2.5 px-4 text-slate-800 dark:text-gray-200 font-medium">${r.label}</td>${r.vals.join('')}</tr>`).join('');
 }
 
-// Funciones del Modal de Rezago
-function openRezagoModal(filterType) {
-    document.getElementById('rezagoModal').classList.remove('hidden');
-    setModalFilter(filterType || 'ALL');
-}
+// ==========================================
+// MODAL UNIVERSAL DE AUDITORÍA (4 TARJETAS)
+// ==========================================
+function openAuditModal(category, defaultSubFilter) {
+    activeModalCategory = category || 'REZAGO';
+    activeModalSubFilter = defaultSubFilter || 'ALL';
+    document.getElementById('modalSearch').value = '';
 
-function closeRezagoModal() {
-    document.getElementById('rezagoModal').classList.add('hidden');
-}
+    const cfg = MODAL_CONFIG[activeModalCategory];
+    document.getElementById('modalBadge').textContent = cfg.badge;
+    document.getElementById('modalTitle').textContent = cfg.title;
 
-function setModalFilter(type) {
-    modalFilterType = type;
-    const tabs = {
-        'ALL': 'tabRezAll',
-        'GT30': 'tabRezGt30',
-        'NO_OC': 'tabRezNoOc',
-        'PEND_SAP': 'tabRezPendSap'
-    };
-    Object.entries(tabs).forEach(([k, id]) => {
-        const el = document.getElementById(id);
-        el.className = k === type
-            ? 'px-3 py-1 rounded-md font-bold bg-cresta-navy dark:bg-cresta-red text-white'
-            : 'px-3 py-1 rounded-md font-bold bg-slate-200 dark:bg-gray-800 text-slate-700 dark:text-gray-300 hover:opacity-80';
-    });
+    document.getElementById('modalTableHead').innerHTML = `<tr>
+        <th class="py-2.5 px-3">Solicitud</th>
+        <th class="py-2.5 px-3">Fecha Creación</th>
+        <th class="py-2.5 px-3">Sociedad</th>
+        <th class="py-2.5 px-3">Comprador</th>
+        <th class="py-2.5 px-3">OC Odoo</th>
+        <th class="py-2.5 px-3">Estatus / Etapas</th>
+        <th class="py-2.5 px-3 text-right">${cfg.daysLabel}</th>
+    </tr>`;
+
+    renderModalTabs();
+    document.getElementById('auditModal').classList.remove('hidden');
     renderModalTable();
 }
 
+function closeAuditModal() {
+    document.getElementById('auditModal').classList.add('hidden');
+}
+
+function setModalSubFilter(subFilter) {
+    activeModalSubFilter = subFilter;
+    renderModalTabs();
+    renderModalTable();
+}
+
+function renderModalTabs() {
+    const cfg = MODAL_CONFIG[activeModalCategory];
+    const container = document.getElementById('modalTabsContainer');
+    container.innerHTML = cfg.tabs.map(t => {
+        const isActive = (t.id === activeModalSubFilter);
+        const cls = isActive
+            ? 'px-3 py-1 rounded-md font-bold bg-cresta-navy dark:bg-cresta-red text-white'
+            : 'px-3 py-1 rounded-md font-bold bg-slate-200 dark:bg-gray-800 text-slate-700 dark:text-gray-300 hover:opacity-80';
+        return `<button type="button" onclick="setModalSubFilter('${t.id}')" class="${cls}">${t.label}</button>`;
+    }).join('');
+}
+
 function getFilteredModalRows() {
+    const baseList = cachedUniverses[activeModalCategory] || [];
     const q = document.getElementById('modalSearch').value.trim().toLowerCase();
-    return currentRezagoList.filter(r => {
-        if (modalFilterType === 'GT30' && !(r.d_to_sap !== null && r.d_to_sap > 30)) return false;
-        if (modalFilterType === 'NO_OC' && r.tiene_oc_odoo) return false;
-        if (modalFilterType === 'PEND_SAP' && !r.tiene_oc_odoo) return false;
+
+    return baseList.filter(r => {
+        if (activeModalCategory === 'VALIDAS') {
+            if (activeModalSubFilter === 'IN_SAP' && !r.tiene_oc_sap) return false;
+            if (activeModalSubFilter === 'IN_ODOO' && !(r.tiene_oc_odoo && !r.tiene_oc_sap)) return false;
+            if (activeModalSubFilter === 'NO_OC' && r.tiene_oc_odoo) return false;
+        } else if (activeModalCategory === 'SLA_COMP') {
+            const ok = r.tiene_oc_odoo && r.d_comprador !== null && r.d_comprador <= 14;
+            if (activeModalSubFilter === 'OK_14' && !ok) return false;
+            if (activeModalSubFilter === 'LATE_14' && ok) return false;
+        } else if (activeModalCategory === 'SAP_14') {
+            const ok = r.tiene_oc_sap && r.d_to_sap !== null && r.d_to_sap <= 14;
+            if (activeModalSubFilter === 'OK_14' && !ok) return false;
+            if (activeModalSubFilter === 'LATE_14' && ok) return false;
+        } else if (activeModalCategory === 'REZAGO') {
+            if (activeModalSubFilter === 'GT30' && !(r.d_to_sap !== null && r.d_to_sap > 30)) return false;
+            if (activeModalSubFilter === 'NO_OC' && r.tiene_oc_odoo) return false;
+            if (activeModalSubFilter === 'PEND_SAP' && !r.tiene_oc_odoo) return false;
+        }
+
         if (q) {
-            const hay = `${r.id} ${r.sociedad} ${r.comprador} ${r.oc_odoo} ${r.estado_oc}`.toLowerCase();
+            const hay = `${r.id} ${r.sociedad} ${r.comprador} ${r.oc_odoo} ${r.estado_oc} ${r.estado_sol}`.toLowerCase();
             if (!hay.includes(q)) return false;
         }
         return true;
     });
 }
 
+function getRowStatusBadge(r) {
+    if (r.tiene_oc_sap) {
+        return `<span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800">En SAP</span>`;
+    }
+    if (r.tiene_oc_odoo) {
+        return `<span class="px-2 py-0.5 rounded bg-slate-100 text-cresta-navy border border-slate-300 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800">${r.estado_oc || 'OC Odoo (Sin SAP)'}</span>`;
+    }
+    if (!r.aprobada) {
+        return `<span class="px-2 py-0.5 rounded bg-gray-100 text-gray-700 border border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700">${r.estado_sol || 'Sin aprobar'}</span>`;
+    }
+    return `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">Sin OC en Odoo</span>`;
+}
+
 function renderModalTable() {
+    const cfg = MODAL_CONFIG[activeModalCategory];
     const rows = getFilteredModalRows();
-    document.getElementById('modalSubtitle').textContent = `${rows.length} solicitudes encontradas`;
+    document.getElementById('modalSubtitle').textContent = `${rows.length.toLocaleString()} solicitudes encontradas`;
     const tbody = document.getElementById('modalTableBody');
 
     if (!rows.length) {
@@ -821,12 +937,16 @@ function renderModalTable() {
         return;
     }
 
-    tbody.innerHTML = rows.slice(0, 250).map(r => {
-        const dias = r.d_to_sap !== null ? Math.round(r.d_to_sap) : 0;
-        const cuello = !r.tiene_oc_odoo
-            ? `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">Sin OC en Odoo</span>`
-            : `<span class="px-2 py-0.5 rounded bg-slate-100 text-cresta-navy border border-slate-300 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800">${r.estado_oc || 'Pendiente SAP'}</span>`;
-        const diasCls = dias > 30 ? 'text-cresta-red dark:text-red-400 font-bold' : 'text-amber-700 dark:text-amber-300 font-bold';
+    tbody.innerHTML = rows.slice(0, 300).map(r => {
+        const rawDays = r[cfg.daysField];
+        const diasTxt = rawDays !== null && rawDays !== undefined ? `${Math.round(rawDays)} d` : '—';
+
+        let diasCls = 'text-slate-700 dark:text-gray-300 font-bold';
+        if (rawDays !== null && rawDays !== undefined) {
+            if (rawDays <= 14) diasCls = 'text-emerald-700 dark:text-emerald-400 font-bold';
+            else if (rawDays <= 30) diasCls = 'text-amber-700 dark:text-amber-300 font-bold';
+            else diasCls = 'text-cresta-red dark:text-red-400 font-bold';
+        }
 
         return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/50">
             <td class="py-2 px-3 font-bold text-cresta-navy dark:text-white">${r.id}</td>
@@ -834,26 +954,33 @@ function renderModalTable() {
             <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${r.sociedad}</td>
             <td class="py-2 px-3 text-slate-700 dark:text-gray-300">${r.comprador}</td>
             <td class="py-2 px-3 text-slate-500 dark:text-gray-400">${r.oc_odoo || '—'}</td>
-            <td class="py-2 px-3">${cuello}</td>
-            <td class="py-2 px-3 text-right ${diasCls}">${dias} d</td>
+            <td class="py-2 px-3">${getRowStatusBadge(r)}</td>
+            <td class="py-2 px-3 text-right ${diasCls}">${diasTxt}</td>
         </tr>`;
     }).join('');
 }
 
-function exportRezagoCSV() {
+function exportAuditCSV() {
+    const cfg = MODAL_CONFIG[activeModalCategory];
     const rows = getFilteredModalRows();
-    const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Comprador', 'OC Odoo', 'Estado OC', 'Dias desde Aprobacion'];
+    const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Comprador', 'OC Odoo', 'Estatus', cfg.daysLabel];
     const csvLines = [headers.join(',')];
 
     rows.forEach(r => {
+        const statusTxt = r.tiene_oc_sap
+            ? 'En SAP'
+            : (r.tiene_oc_odoo ? (r.estado_oc || 'OC Odoo sin SAP') : (!r.aprobada ? (r.estado_sol || 'Sin aprobar') : 'Sin OC en Odoo'));
+        const rawDays = r[cfg.daysField];
+        const daysVal = rawDays !== null && rawDays !== undefined ? Math.round(rawDays) : '';
+
         const line = [
             `"${r.id}"`,
             `"${r.fecha}"`,
             `"${r.sociedad}"`,
             `"${r.comprador}"`,
             `"${r.oc_odoo || ''}"`,
-            `"${r.tiene_oc_odoo ? (r.estado_oc || 'Pendiente SAP') : 'Sin OC en Odoo'}"`,
-            Math.round(r.d_to_sap || 0)
+            `"${statusTxt}"`,
+            daysVal
         ];
         csvLines.push(line.join(','));
     });
@@ -862,7 +989,7 @@ function exportRezagoCSV() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `rezago_compras_cresta_${RAW_DATA.cutoff_date}.csv`;
+    a.download = `auditoria_${activeModalCategory.toLowerCase()}_cresta_${RAW_DATA.cutoff_date}.csv`;
     a.click();
     URL.revokeObjectURL(url);
 }

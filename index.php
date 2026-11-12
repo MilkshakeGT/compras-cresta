@@ -238,9 +238,14 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
         <!-- Fila 2 de Gráficas -->
         <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-7">
-                <div class="mb-3">
-                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Desempeño por Comprador (% OC en Odoo ≤14 días)</h2>
-                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Gestión pura del comprador (Aprobación Solicitud → Creación OC Odoo) · Meta 70%</p>
+                <div class="mb-3 flex items-start justify-between gap-2">
+                    <div>
+                        <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Desempeño por Comprador (% OC en Odoo ≤14 días)</h2>
+                        <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Gestión pura del comprador (Aprobación Solicitud → Creación OC Odoo) · Meta 70%</p>
+                    </div>
+                    <span id="badgeCompradoresPartial" class="hidden text-[10px] px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 font-bold shrink-0">
+                        Avance parcial (mes en curso)
+                    </span>
                 </div>
                 <div id="chartCompradores" class="w-full h-80"></div>
             </div>
@@ -349,7 +354,6 @@ let periodMode = 'month';
 let charts = {};
 let isDark = false;
 
-// Limpiar ?sync=1 de la barra de direcciones tras recargar
 if (window.location.search.includes('sync=1')) {
     window.history.replaceState({}, document.title, window.location.pathname);
 }
@@ -395,7 +399,7 @@ const MODAL_CONFIG = {
         daysField: 'd_comprador',
         daysLabel: 'Días Comprador',
         tabs: [
-            { id: 'ALL', label: 'Todas las Evaluables (≥14d)' },
+            { id: 'ALL', label: 'Todas las Evaluables' },
             { id: 'OK_14', label: 'Cumplieron (≤ 14 días)' },
             { id: 'LATE_14', label: 'Fuera de SLA (> 14d / Sin OC)' }
         ]
@@ -406,7 +410,7 @@ const MODAL_CONFIG = {
         daysField: 'd_to_sap',
         daysLabel: 'Días hasta SAP',
         tabs: [
-            { id: 'ALL', label: 'Todas las Evaluables (≥14d)' },
+            { id: 'ALL', label: 'Todas las Evaluables' },
             { id: 'OK_14', label: 'En SAP ≤ 14 días' },
             { id: 'LATE_14', label: 'Fuera de Plazo (> 14d / Sin SAP)' }
         ]
@@ -565,11 +569,18 @@ function calcKpiStats(records) {
     const avgDiasComp = diasCompArr.length ? avg(diasCompArr) : null;
     const medDiasComp = diasCompArr.length ? median(diasCompArr) : null;
 
-    const compEvaluables = aprobadas.filter(r => r.edad_dias >= 14);
+    // 1) SLA Comprador <= 14d: maduras >= 14d; si es mes en curso sin maduras, fallback a avance parcial sobre cerradas en Odoo
+    const matureComp = aprobadas.filter(r => r.edad_dias >= 14);
+    const isCompPartial = (matureComp.length === 0 && conOcOdoo.length > 0);
+    const compEvaluables = matureComp.length > 0 ? matureComp : conOcOdoo;
     const comp14 = compEvaluables.filter(r => r.tiene_oc_odoo && r.d_comprador !== null && r.d_comprador <= 14);
     const pctComp14 = compEvaluables.length ? Math.round((comp14.length / compEvaluables.length) * 100) : null;
 
-    const sapEvaluables = aprobadas.filter(r => r.edad_dias >= 14);
+    // 2) En SAP <= 14d: maduras >= 14d; si es mes en curso sin maduras, fallback a avance parcial sobre cerradas en SAP
+    const conOcSap = aprobadas.filter(r => r.tiene_oc_sap && r.d_to_sap !== null);
+    const matureSap = aprobadas.filter(r => r.edad_dias >= 14);
+    const isSapPartial = (matureSap.length === 0 && conOcSap.length > 0);
+    const sapEvaluables = matureSap.length > 0 ? matureSap : conOcSap;
     const sap14 = sapEvaluables.filter(r => r.tiene_oc_sap && r.d_to_sap !== null && r.d_to_sap <= 14);
     const pctSap14 = sapEvaluables.length ? Math.round((sap14.length / sapEvaluables.length) * 100) : null;
 
@@ -578,6 +589,8 @@ function calcKpiStats(records) {
         conOcOdooList: conOcOdoo,
         compEvaluablesList: compEvaluables,
         sapEvaluablesList: sapEvaluables,
+        isCompPartial,
+        isSapPartial,
         totalValidas: validas.length,
         avgDiasComp,
         medDiasComp,
@@ -598,9 +611,11 @@ function renderDashboard() {
     const prevYm = idxYm > 0 ? allMeses[idxYm - 1] : null;
     const prevStats = prevYm ? calcKpiStats(filterByPeriod(entityRecords, prevYm, 'month')) : null;
 
+    // KPI 1: Solicitudes Válidas
     document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
     document.getElementById('kpi1Badge').textContent = periodMode === 'ytd' ? `YTD ${selectedYm.split('-')[0]}` : formatYm(selectedYm);
 
+    // KPI 2: Tiempo Gestión Comprador
     document.getElementById('kpiTimeValue').textContent = currentStats.avgDiasComp !== null ? currentStats.avgDiasComp.toFixed(1) : 'N/D';
     document.getElementById('kpiTimeSub').textContent = currentStats.medDiasComp !== null
         ? `Mediana: ${currentStats.medDiasComp.toFixed(1)} d · ${currentStats.conOcOdooList.length} OC`
@@ -619,28 +634,46 @@ function renderDashboard() {
         bTime.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
     }
 
+    // KPI 3: SLA Comprador <= 14d
     document.getElementById('kpi2Value').textContent = currentStats.pctComp14 !== null ? `${currentStats.pctComp14}%` : 'N/D';
-    if (periodMode === 'month' && prevStats && currentStats.pctComp14 !== null && prevStats.pctComp14 !== null) {
+    const b2 = document.getElementById('kpi2Badge');
+    const sub2 = document.getElementById('kpi2Sub');
+    if (currentStats.isCompPartial) {
+        b2.textContent = 'Avance parcial';
+        b2.className = 'text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800';
+        sub2.textContent = `Sobre ${currentStats.compEvaluablesList.length} OC generadas (mes abierto)`;
+    } else if (periodMode === 'month' && prevStats && currentStats.pctComp14 !== null && prevStats.pctComp14 !== null && !prevStats.isCompPartial) {
         const diff2 = currentStats.pctComp14 - prevStats.pctComp14;
-        const b2 = document.getElementById('kpi2Badge');
         b2.textContent = `${diff2 >= 0 ? '+' : ''}${diff2} pts`;
         b2.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${diff2 >= 0
             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
             : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
+        sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
     } else {
-        document.getElementById('kpi2Badge').textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
+        b2.textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
+        b2.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
+        sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
     }
 
+    // KPI 4: En SAP <= 14d
     document.getElementById('kpi3Value').textContent = currentStats.pctSap14 !== null ? `${currentStats.pctSap14}%` : 'N/D';
-    if (periodMode === 'month' && prevStats && currentStats.pctSap14 !== null && prevStats.pctSap14 !== null) {
+    const b3 = document.getElementById('kpi3Badge');
+    const sub3 = document.getElementById('kpi3Sub');
+    if (currentStats.isSapPartial) {
+        b3.textContent = 'Avance parcial';
+        b3.className = 'text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800';
+        sub3.textContent = `Sobre ${currentStats.sapEvaluablesList.length} cerradas en SAP (mes abierto)`;
+    } else if (periodMode === 'month' && prevStats && currentStats.pctSap14 !== null && prevStats.pctSap14 !== null && !prevStats.isSapPartial) {
         const diff3 = currentStats.pctSap14 - prevStats.pctSap14;
-        const b3 = document.getElementById('kpi3Badge');
         b3.textContent = `${diff3 >= 0 ? '+' : ''}${diff3} pts`;
         b3.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${diff3 >= 0
             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
             : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
+        sub3.textContent = 'Ciclo desde aprobación (≥14d)';
     } else {
-        document.getElementById('kpi3Badge').textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
+        b3.textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
+        b3.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
+        sub3.textContent = 'Ciclo desde aprobación (≥14d)';
     }
 
     const rezagoList = entityRecords
@@ -767,8 +800,16 @@ function renderChartCiclo(entityRecords, selectedYm) {
 
 function renderChartCompradores(currentRecords) {
     const validas = currentRecords.filter(r => !r.excluida && r.aprobada);
-    const mapComp = {};
+    const hasMatureAny = validas.some(r => r.edad_dias >= 14);
+    const badgePartial = document.getElementById('badgeCompradoresPartial');
 
+    if (!hasMatureAny && validas.length > 0) {
+        badgePartial.classList.remove('hidden');
+    } else {
+        badgePartial.classList.add('hidden');
+    }
+
+    const mapComp = {};
     validas.forEach(r => {
         if (!mapComp[r.comprador]) mapComp[r.comprador] = [];
         mapComp[r.comprador].push(r);
@@ -776,12 +817,17 @@ function renderChartCompradores(currentRecords) {
 
     const summary = Object.entries(mapComp)
         .map(([name, rows]) => {
-            const evalRows = rows.filter(r => r.edad_dias >= 14);
+            const matureRows = rows.filter(r => r.edad_dias >= 14);
+            // Si aún no hay maduras en el mes en curso, evaluar sobre las ya gestionadas con OC en Odoo
+            const evalRows = matureRows.length > 0
+                ? matureRows
+                : rows.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
+
             const okRows = evalRows.filter(r => r.tiene_oc_odoo && r.d_comprador <= 14);
             const pct = evalRows.length ? Math.round((okRows.length / evalRows.length) * 100) : 0;
-            return { name, total: rows.length, pct };
+            return { name, total: rows.length, evalCount: evalRows.length, pct };
         })
-        .filter(item => item.total >= 3)
+        .filter(item => item.total >= 3 && item.evalCount > 0)
         .sort((a, b) => b.pct - a.pct);
 
     const themeCfg = getChartThemeConfig();

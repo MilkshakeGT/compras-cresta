@@ -38,7 +38,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
         .brand-accent {
             background-color: #5B45FF;
         }
-        select, button {
+        select, button, input {
             outline: none;
         }
     </style>
@@ -64,7 +64,6 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
             <!-- Barra de Filtros -->
             <div class="flex flex-wrap items-center gap-2.5 text-xs">
-                <!-- Modo Periodo -->
                 <div class="inline-flex rounded-lg bg-gray-800 p-1 border border-gray-700">
                     <button id="btnModeMonth" type="button" onclick="setPeriodMode('month')"
                         class="px-3 py-1.5 rounded-md font-bold text-white brand-accent transition">
@@ -76,18 +75,15 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                     </button>
                 </div>
 
-                <!-- Selector de Mes -->
                 <select id="filterMes" onchange="renderDashboard()"
                     class="bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-3 py-2 font-medium">
                 </select>
 
-                <!-- Selector de Sociedad -->
                 <select id="filterSociedad" onchange="renderDashboard()"
                     class="bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-3 py-2 font-medium">
                     <option value="ALL">Todas las Sociedades</option>
                 </select>
 
-                <!-- Selector de Comprador -->
                 <select id="filterComprador" onchange="renderDashboard()"
                     class="bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-3 py-2 font-medium">
                     <option value="ALL">Todos los Compradores</option>
@@ -120,7 +116,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                     <span id="kpi2Value" class="text-3xl font-bold text-emerald-400">0%</span>
                     <span class="text-xs text-gray-400">Meta: 70%</span>
                 </div>
-                <p id="kpi2Sub" class="text-xs text-gray-400 mt-1.5">Aprob. Solicitud → Creación OC Odoo</p>
+                <p id="kpi2Sub" class="text-xs text-gray-400 mt-1.5">Solo solicitudes con ≥14d de madurez</p>
             </div>
 
             <!-- KPI 3 -->
@@ -130,26 +126,30 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                     <span id="kpi3Badge" class="text-[11px] px-2 py-0.5 rounded-full bg-gray-800 text-gray-300">--</span>
                 </div>
                 <div id="kpi3Value" class="text-3xl font-bold text-indigo-400 mt-2">0%</div>
-                <p id="kpi3Sub" class="text-xs text-gray-400 mt-1.5">Ciclo completo desde aprobación</p>
+                <p id="kpi3Sub" class="text-xs text-gray-400 mt-1.5">Solo solicitudes con ≥14d de madurez</p>
             </div>
 
-            <!-- KPI 4 -->
-            <div class="card p-5">
+            <!-- KPI 4 (Interactiva -> abre modal de detalle) -->
+            <div onclick="openRezagoModal('ALL')" title="Haz clic para auditar el detalle de solicitudes pendientes"
+                class="card p-5 cursor-pointer hover:border-amber-500/70 transition group relative">
                 <div class="flex items-center justify-between">
-                    <span class="text-xs text-gray-400 font-bold uppercase">Rezago Sin Llegar a SAP</span>
+                    <span class="text-xs text-gray-400 font-bold uppercase group-hover:text-amber-300 transition">Rezago Sin Llegar a SAP</span>
                     <span id="kpi4Badge" class="text-[11px] px-2 py-0.5 rounded-full bg-red-950 text-red-300 border border-red-800">0 > 30d</span>
                 </div>
-                <div id="kpi4Value" class="text-3xl font-bold text-amber-400 mt-2">0</div>
+                <div class="flex items-baseline justify-between mt-2">
+                    <span id="kpi4Value" class="text-3xl font-bold text-amber-400">0</span>
+                    <span class="text-[11px] text-indigo-400 group-hover:underline font-bold">Auditar lista →</span>
+                </div>
                 <p id="kpi4Sub" class="text-xs text-gray-400 mt-1.5">Solicitudes aprobadas abiertas al corte</p>
             </div>
         </section>
 
-        <!-- Fila 1 de Gráficas: Evolución Quincenal + Desglose Cuello de Botella -->
+        <!-- Fila 1 de Gráficas -->
         <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div class="card p-5 lg:col-span-7">
                 <div class="mb-3">
                     <h2 class="text-sm font-bold text-white">% Solicitudes en SAP dentro de plazo (por Quincena)</h2>
-                    <p class="text-xs text-gray-400 mt-0.5">Comparación sin sesgo: excluye quincenas recientes sin madurez suficiente para ≤14d o ≤30d</p>
+                    <p class="text-xs text-gray-400 mt-0.5">Evaluado estrictamente sobre solicitudes que ya cumplieron la ventana de 7, 14 o 30 días</p>
                 </div>
                 <div id="chartQuincenas" class="w-full h-72"></div>
             </div>
@@ -163,33 +163,39 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 2 de Gráficas: Desempeño por Comprador + Rezago por Mes de Creación -->
+        <!-- Fila 2 de Gráficas -->
         <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div class="card p-5 lg:col-span-7">
                 <div class="mb-3">
                     <h2 class="text-sm font-bold text-white">Desempeño por Comprador (% OC en Odoo ≤14 días)</h2>
-                    <p class="text-xs text-gray-400 mt-0.5">Mide gestión pura del comprador (Aprobación Solicitud → Creación OC en Odoo) · Meta 70%</p>
+                    <p class="text-xs text-gray-400 mt-0.5">Gestión pura del comprador (Aprobación Solicitud → Creación OC Odoo) · Meta 70%</p>
                 </div>
                 <div id="chartCompradores" class="w-full h-80"></div>
             </div>
 
             <div class="card p-5 lg:col-span-5">
-                <div class="mb-3">
-                    <h2 class="text-sm font-bold text-white">Rezago Abierto Sin SAP por Mes de Origen</h2>
-                    <p class="text-xs text-gray-400 mt-0.5">Solicitudes aprobadas pendientes de sincronizar en SAP según mes de creación</p>
+                <div class="mb-3 flex items-start justify-between gap-2">
+                    <div>
+                        <h2 class="text-sm font-bold text-white">Rezago Abierto Sin SAP por Mes de Origen</h2>
+                        <p class="text-xs text-gray-400 mt-0.5">Solicitudes aprobadas pendientes de sincronizar en SAP</p>
+                    </div>
+                    <button type="button" onclick="openRezagoModal('GT30')"
+                        class="text-[11px] px-2.5 py-1 rounded-lg bg-red-950/80 hover:bg-red-900 text-red-200 border border-red-800 font-bold shrink-0">
+                        Ver > 30d
+                    </button>
                 </div>
                 <div id="chartRezago" class="w-full h-80"></div>
             </div>
         </section>
 
-        <!-- Tabla Ejecutiva Mensual (Estilo Slide 4) -->
+        <!-- Tabla Ejecutiva Mensual -->
         <section class="card p-5 overflow-x-auto">
             <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
                     <h2 class="text-sm font-bold text-white">Indicadores Mensuales Consolidados</h2>
-                    <p class="text-xs text-gray-400 mt-0.5">Histórico completo filtrado por Sociedad y Comprador seleccionados</p>
+                    <p class="text-xs text-gray-400 mt-0.5">Porcentajes calculados exclusivamente sobre solicitudes maduras (sin sesgo de corte reciente)</p>
                 </div>
-                <span class="text-[11px] text-gray-400">* Celda resaltada indica mejor desempeño mensual</span>
+                <span class="text-[11px] text-gray-400">* Celda en verde indica mejor desempeño mensual</span>
             </div>
             <table class="w-full text-xs text-left border-collapse">
                 <thead id="monthlyTableHead" class="bg-gray-800/80 text-gray-300 border-b border-gray-700"></thead>
@@ -199,10 +205,67 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
     </main>
 
+    <!-- Modal de Auditoría de Solicitudes Rezagadas -->
+    <div id="rezagoModal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl max-w-5xl w-full max-h-[88vh] flex flex-col shadow-2xl">
+            <div class="p-5 border-b border-gray-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-0.5 text-[10px] font-bold rounded brand-accent text-white">AUDITORÍA DE REZAGO</span>
+                        <span id="modalSubtitle" class="text-xs text-gray-400"></span>
+                    </div>
+                    <h3 class="text-base font-bold text-white mt-1">Solicitudes Aprobadas Pendientes de Llegar a SAP</h3>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="exportRezagoCSV()"
+                        class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
+                        Descargar CSV
+                    </button>
+                    <button type="button" onclick="closeRezagoModal()"
+                        class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold">
+                        Cerrar ✕
+                    </button>
+                </div>
+            </div>
+
+            <!-- Controles internos del modal -->
+            <div class="px-5 py-3 bg-gray-800/40 border-b border-gray-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div class="flex flex-wrap gap-1.5">
+                    <button type="button" id="tabRezAll" onclick="setModalFilter('ALL')" class="px-3 py-1 rounded-md font-bold brand-accent text-white">Todas</button>
+                    <button type="button" id="tabRezGt30" onclick="setModalFilter('GT30')" class="px-3 py-1 rounded-md font-bold bg-gray-800 text-gray-300">Críticas (> 30 días)</button>
+                    <button type="button" id="tabRezNoOc" onclick="setModalFilter('NO_OC')" class="px-3 py-1 rounded-md font-bold bg-gray-800 text-gray-300">Sin OC en Odoo (Comprador)</button>
+                    <button type="button" id="tabRezPendSap" onclick="setModalFilter('PEND_SAP')" class="px-3 py-1 rounded-md font-bold bg-gray-800 text-gray-300">Con OC Odoo (Falta Aprob/SAP)</button>
+                </div>
+                <input id="modalSearch" type="text" oninput="renderModalTable()" placeholder="Buscar solicitud, comprador, OC..."
+                    class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-gray-100 w-60">
+            </div>
+
+            <!-- Tabla del modal -->
+            <div class="overflow-auto flex-1 p-5">
+                <table class="w-full text-xs text-left border-collapse">
+                    <thead class="bg-gray-800 text-gray-300 sticky top-0">
+                        <tr>
+                            <th class="py-2.5 px-3">Solicitud</th>
+                            <th class="py-2.5 px-3">Fecha Creación</th>
+                            <th class="py-2.5 px-3">Sociedad</th>
+                            <th class="py-2.5 px-3">Comprador</th>
+                            <th class="py-2.5 px-3">OC Odoo</th>
+                            <th class="py-2.5 px-3">Cuello Actual</th>
+                            <th class="py-2.5 px-3 text-right">Días desde Aprob.</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modalTableBody" class="divide-y divide-gray-800"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
 <script>
 const RAW_DATA = <?= $jsonPayload ?>;
-let periodMode = 'month'; // 'month' | 'ytd'
+let periodMode = 'month';
 let charts = {};
+let currentRezagoList = [];
+let modalFilterType = 'ALL';
 
 const MONTH_NAMES = {
     '01': 'Ene', '02': 'Feb', '03': 'Mar', '04': 'Abr',
@@ -293,26 +356,19 @@ function calcKpiStats(records) {
     const validas = records.filter(r => !r.excluida);
     const aprobadas = validas.filter(r => r.aprobada);
 
-    // SLA Comprador <= 14d (Odoo)
-    const compEvaluables = aprobadas.filter(r => r.tiene_oc_odoo || r.edad_dias >= 14);
+    // Evaluación estricta de madurez: solo solicitudes que ya cumplieron al menos 14 días desde creación
+    const compEvaluables = aprobadas.filter(r => r.edad_dias >= 14);
     const comp14 = compEvaluables.filter(r => r.tiene_oc_odoo && r.d_comprador !== null && r.d_comprador <= 14);
-    const pctComp14 = compEvaluables.length ? (comp14.length / compEvaluables.length) * 100 : 0;
+    const pctComp14 = compEvaluables.length ? Math.round((comp14.length / compEvaluables.length) * 100) : null;
 
-    // En SAP <= 14d
-    const sapEvaluables = aprobadas.filter(r => r.tiene_oc_sap || r.edad_dias >= 14);
+    const sapEvaluables = aprobadas.filter(r => r.edad_dias >= 14);
     const sap14 = sapEvaluables.filter(r => r.tiene_oc_sap && r.d_to_sap !== null && r.d_to_sap <= 14);
-    const pctSap14 = sapEvaluables.length ? (sap14.length / sapEvaluables.length) * 100 : 0;
-
-    // Rezago abierto sin SAP
-    const rezago = aprobadas.filter(r => !r.tiene_oc_sap);
-    const rezago30 = rezago.filter(r => r.d_to_sap !== null && r.d_to_sap > 30);
+    const pctSap14 = sapEvaluables.length ? Math.round((sap14.length / sapEvaluables.length) * 100) : null;
 
     return {
         totalValidas: validas.length,
-        pctComp14: Math.round(pctComp14),
-        pctSap14: Math.round(pctSap14),
-        rezagoTotal: rezago.length,
-        rezago30: rezago30.length
+        pctComp14,
+        pctSap14
     };
 }
 
@@ -322,51 +378,50 @@ function renderDashboard() {
     const currentRecords = filterByPeriod(entityRecords, selectedYm, periodMode);
     const currentStats = calcKpiStats(currentRecords);
 
-    // Mes anterior para delta en modo Mes
     const allMeses = RAW_DATA.filters.meses;
     const idxYm = allMeses.indexOf(selectedYm);
     const prevYm = idxYm > 0 ? allMeses[idxYm - 1] : null;
     const prevStats = prevYm ? calcKpiStats(filterByPeriod(entityRecords, prevYm, 'month')) : null;
 
-    // Actualizar Tarjetas KPI
     document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
     document.getElementById('kpi1Badge').textContent = periodMode === 'ytd' ? `YTD ${selectedYm.split('-')[0]}` : formatYm(selectedYm);
 
-    document.getElementById('kpi2Value').textContent = `${currentStats.pctComp14}%`;
-    if (periodMode === 'month' && prevStats) {
+    document.getElementById('kpi2Value').textContent = currentStats.pctComp14 !== null ? `${currentStats.pctComp14}%` : 'N/D';
+    if (periodMode === 'month' && prevStats && currentStats.pctComp14 !== null && prevStats.pctComp14 !== null) {
         const diff2 = currentStats.pctComp14 - prevStats.pctComp14;
         const b2 = document.getElementById('kpi2Badge');
         b2.textContent = `${diff2 >= 0 ? '+' : ''}${diff2} pts vs ${formatYm(prevYm)}`;
         b2.className = `text-[11px] px-2 py-0.5 rounded-full font-bold ${diff2 >= 0 ? 'bg-emerald-950 text-emerald-400' : 'bg-red-950 text-red-400'}`;
     } else {
-        document.getElementById('kpi2Badge').textContent = 'Acumulado YTD';
+        document.getElementById('kpi2Badge').textContent = periodMode === 'ytd' ? 'Acumulado YTD' : 'En maduración';
     }
 
-    document.getElementById('kpi3Value').textContent = `${currentStats.pctSap14}%`;
-    if (periodMode === 'month' && prevStats) {
+    document.getElementById('kpi3Value').textContent = currentStats.pctSap14 !== null ? `${currentStats.pctSap14}%` : 'N/D';
+    if (periodMode === 'month' && prevStats && currentStats.pctSap14 !== null && prevStats.pctSap14 !== null) {
         const diff3 = currentStats.pctSap14 - prevStats.pctSap14;
         const b3 = document.getElementById('kpi3Badge');
         b3.textContent = `${diff3 >= 0 ? '+' : ''}${diff3} pts vs ${formatYm(prevYm)}`;
         b3.className = `text-[11px] px-2 py-0.5 rounded-full font-bold ${diff3 >= 0 ? 'bg-emerald-950 text-emerald-400' : 'bg-red-950 text-red-400'}`;
     } else {
-        document.getElementById('kpi3Badge').textContent = 'Acumulado YTD';
+        document.getElementById('kpi3Badge').textContent = periodMode === 'ytd' ? 'Acumulado YTD' : 'En maduración';
     }
 
-    // Rezago acumulado total hasta el corte seleccionado
-    const upToSelected = entityRecords.filter(r => r.ym <= selectedYm && !r.excluida && r.aprobada && !r.tiene_oc_sap);
-    const upToSelected30 = upToSelected.filter(r => r.d_to_sap !== null && r.d_to_sap > 30);
-    document.getElementById('kpi4Value').textContent = upToSelected.length.toLocaleString();
+    currentRezagoList = entityRecords
+        .filter(r => r.ym <= selectedYm && !r.excluida && r.aprobada && !r.tiene_oc_sap)
+        .sort((a, b) => (b.d_to_sap || 0) - (a.d_to_sap || 0));
+
+    const upToSelected30 = currentRezagoList.filter(r => r.d_to_sap !== null && r.d_to_sap > 30);
+    document.getElementById('kpi4Value').textContent = currentRezagoList.length.toLocaleString();
     document.getElementById('kpi4Badge').textContent = `${upToSelected30.length} > 30 días`;
 
     renderChartQuincenas(entityRecords, selectedYm);
     renderChartCiclo(entityRecords, selectedYm);
     renderChartCompradores(currentRecords);
-    renderChartRezago(upToSelected);
+    renderChartRezago(currentRezagoList);
     renderMonthlyTable(entityRecords);
 }
 
 function renderChartQuincenas(entityRecords, selectedYm) {
-    // Tomar últimas 8 quincenas hasta el mes seleccionado
     const validas = entityRecords.filter(r => !r.excluida && r.aprobada && r.ym <= selectedYm);
     const quincenasSet = [...new Set(validas.map(r => r.quincena))].sort();
     const recentQ = quincenasSet.slice(-8);
@@ -378,17 +433,18 @@ function renderChartQuincenas(entityRecords, selectedYm) {
         const [ym, half] = q.split('-Q');
         labels.push(`${half === '1' ? '1ª Q' : '2ª Q'} ${formatYm(ym)}`);
 
-        const eval7 = rows.filter(r => r.tiene_oc_sap || r.edad_dias >= 7);
+        // Solo evaluar solicitudes maduras (edad >= plazo)
+        const eval7 = rows.filter(r => r.edad_dias >= 7);
         const ok7 = eval7.filter(r => r.tiene_oc_sap && r.d_to_sap <= 7);
-        s7.push(eval7.length ? Math.round((ok7.length / eval7.length) * 100) : null);
+        s7.push(eval7.length >= 10 ? Math.round((ok7.length / eval7.length) * 100) : null);
 
-        const eval14 = rows.filter(r => r.tiene_oc_sap || r.edad_dias >= 14);
+        const eval14 = rows.filter(r => r.edad_dias >= 14);
         const ok14 = eval14.filter(r => r.tiene_oc_sap && r.d_to_sap <= 14);
-        s14.push(eval14.length ? Math.round((ok14.length / eval14.length) * 100) : null);
+        s14.push(eval14.length >= 10 ? Math.round((ok14.length / eval14.length) * 100) : null);
 
-        const eval30 = rows.filter(r => r.tiene_oc_sap || r.edad_dias >= 30);
+        const eval30 = rows.filter(r => r.edad_dias >= 30);
         const ok30 = eval30.filter(r => r.tiene_oc_sap && r.d_to_sap <= 30);
-        s30.push(eval30.length >= 5 ? Math.round((ok30.length / eval30.length) * 100) : null);
+        s30.push(eval30.length >= 10 ? Math.round((ok30.length / eval30.length) * 100) : null);
     });
 
     const options = {
@@ -402,7 +458,7 @@ function renderChartQuincenas(entityRecords, selectedYm) {
             { name: '≤ 30 días', data: s30 }
         ],
         xaxis: { categories: labels, labels: { style: { fontSize: '10px', colors: '#9CA3AF' } } },
-        yaxis: { min: 0, max: 100, labels: { formatter: v => v + '%', style: { colors: '#9CA3AF' } } },
+        yaxis: { min: 0, max: 100, labels: { formatter: v => v !== null ? v + '%' : '', style: { colors: '#9CA3AF' } } },
         markers: { size: 4 },
         dataLabels: { enabled: true, formatter: v => v !== null ? v + '%' : '', style: { fontSize: '9px' } },
         grid: { borderColor: '#374151', strokeDashArray: 4 },
@@ -459,7 +515,7 @@ function renderChartCompradores(currentRecords) {
 
     const summary = Object.entries(mapComp)
         .map(([name, rows]) => {
-            const evalRows = rows.filter(r => r.tiene_oc_odoo || r.edad_dias >= 14);
+            const evalRows = rows.filter(r => r.edad_dias >= 14);
             const okRows = evalRows.filter(r => r.tiene_oc_odoo && r.d_comprador <= 14);
             const pct = evalRows.length ? Math.round((okRows.length / evalRows.length) * 100) : 0;
             return { name, total: rows.length, pct };
@@ -551,14 +607,14 @@ function renderMonthlyTable(entityRecords) {
         const aprobadas = validas.filter(r => r.aprobada);
         const rechazadas = allM.filter(r => r.is_rechazada);
 
-        const e7 = aprobadas.filter(r => r.tiene_oc_sap || r.edad_dias >= 7);
-        const p7 = e7.length ? Math.round((e7.filter(r => r.tiene_oc_sap && r.d_to_sap <= 7).length / e7.length) * 100) : 0;
+        const e7 = aprobadas.filter(r => r.edad_dias >= 7);
+        const p7 = e7.length >= 10 ? Math.round((e7.filter(r => r.tiene_oc_sap && r.d_to_sap <= 7).length / e7.length) * 100) : null;
 
-        const e14 = aprobadas.filter(r => r.tiene_oc_sap || r.edad_dias >= 14);
-        const p14 = e14.length ? Math.round((e14.filter(r => r.tiene_oc_sap && r.d_to_sap <= 14).length / e14.length) * 100) : 0;
+        const e14 = aprobadas.filter(r => r.edad_dias >= 14);
+        const p14 = e14.length >= 10 ? Math.round((e14.filter(r => r.tiene_oc_sap && r.d_to_sap <= 14).length / e14.length) * 100) : null;
 
-        const e30 = aprobadas.filter(r => r.tiene_oc_sap || r.edad_dias >= 30);
-        const p30 = e30.length ? Math.round((e30.filter(r => r.tiene_oc_sap && r.d_to_sap <= 30).length / e30.length) * 100) : 0;
+        const e30 = aprobadas.filter(r => r.edad_dias >= 30);
+        const p30 = e30.length >= 10 ? Math.round((e30.filter(r => r.tiene_oc_sap && r.d_to_sap <= 30).length / e30.length) * 100) : null;
 
         const medAprob = median(validas.map(r => r.d_aprob_sol).filter(v => v !== null));
         const pctRech = allM.length ? ((rechazadas.length / allM.length) * 100).toFixed(1) : '0.0';
@@ -574,9 +630,15 @@ function renderMonthlyTable(entityRecords) {
         };
     });
 
-    const maxP7 = Math.max(...metricsByMonth.map(x => x.p7));
-    const maxP14 = Math.max(...metricsByMonth.map(x => x.p14));
-    const maxP30 = Math.max(...metricsByMonth.map(x => x.p30));
+    const maxP7 = Math.max(...metricsByMonth.map(x => x.p7 ?? -1));
+    const maxP14 = Math.max(...metricsByMonth.map(x => x.p14 ?? -1));
+    const maxP30 = Math.max(...metricsByMonth.map(x => x.p30 ?? -1));
+
+    const fmtCell = (val, maxVal) => {
+        if (val === null) return `<td class="py-2.5 px-3 text-right text-gray-500 italic">En curso</td>`;
+        const cls = val === maxVal ? 'text-emerald-400 font-bold' : 'text-gray-300';
+        return `<td class="py-2.5 px-3 text-right ${cls}">${val}%</td>`;
+    };
 
     const rowsHtml = [
         {
@@ -585,15 +647,15 @@ function renderMonthlyTable(entityRecords) {
         },
         {
             label: 'Enviadas a SAP en ≤ 7 días',
-            vals: metricsByMonth.map(x => `<td class="py-2.5 px-3 text-right ${x.p7 === maxP7 ? 'text-emerald-400 font-bold' : 'text-gray-300'}">${x.p7}%</td>`)
+            vals: metricsByMonth.map(x => fmtCell(x.p7, maxP7))
         },
         {
             label: 'Enviadas a SAP en ≤ 14 días',
-            vals: metricsByMonth.map(x => `<td class="py-2.5 px-3 text-right ${x.p14 === maxP14 ? 'text-emerald-400 font-bold' : 'text-gray-300'}">${x.p14}%</td>`)
+            vals: metricsByMonth.map(x => fmtCell(x.p14, maxP14))
         },
         {
             label: 'Enviadas a SAP en ≤ 30 días',
-            vals: metricsByMonth.map(x => `<td class="py-2.5 px-3 text-right ${x.p30 === maxP30 ? 'text-emerald-400 font-bold' : 'text-gray-300'}">${x.p30}%</td>`)
+            vals: metricsByMonth.map(x => fmtCell(x.p30, maxP30))
         },
         {
             label: 'Mediana días aprobar solicitud',
@@ -610,6 +672,103 @@ function renderMonthlyTable(entityRecords) {
     ];
 
     tbody.innerHTML = rowsHtml.map(r => `<tr class="hover:bg-gray-800/40"><td class="py-2.5 px-4 text-gray-200 font-medium">${r.label}</td>${r.vals.join('')}</tr>`).join('');
+}
+
+// Funciones del Modal de Rezago
+function openRezagoModal(filterType) {
+    document.getElementById('rezagoModal').classList.remove('hidden');
+    setModalFilter(filterType || 'ALL');
+}
+
+function closeRezagoModal() {
+    document.getElementById('rezagoModal').classList.add('hidden');
+}
+
+function setModalFilter(type) {
+    modalFilterType = type;
+    const tabs = {
+        'ALL': 'tabRezAll',
+        'GT30': 'tabRezGt30',
+        'NO_OC': 'tabRezNoOc',
+        'PEND_SAP': 'tabRezPendSap'
+    };
+    Object.entries(tabs).forEach(([k, id]) => {
+        const el = document.getElementById(id);
+        el.className = k === type
+            ? 'px-3 py-1 rounded-md font-bold brand-accent text-white'
+            : 'px-3 py-1 rounded-md font-bold bg-gray-800 text-gray-300 hover:text-white';
+    });
+    renderModalTable();
+}
+
+function getFilteredModalRows() {
+    const q = document.getElementById('modalSearch').value.trim().toLowerCase();
+    return currentRezagoList.filter(r => {
+        if (modalFilterType === 'GT30' && !(r.d_to_sap !== null && r.d_to_sap > 30)) return false;
+        if (modalFilterType === 'NO_OC' && r.tiene_oc_odoo) return false;
+        if (modalFilterType === 'PEND_SAP' && !r.tiene_oc_odoo) return false;
+        if (q) {
+            const hay = `${r.id} ${r.sociedad} ${r.comprador} ${r.oc_odoo} ${r.estado_oc}`.toLowerCase();
+            if (!hay.includes(q)) return false;
+        }
+        return true;
+    });
+}
+
+function renderModalTable() {
+    const rows = getFilteredModalRows();
+    document.getElementById('modalSubtitle').textContent = `${rows.length} solicitudes encontradas`;
+    const tbody = document.getElementById('modalTableBody');
+
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-gray-400">No hay solicitudes con este filtro.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = rows.slice(0, 250).map(r => {
+        const dias = r.d_to_sap !== null ? Math.round(r.d_to_sap) : 0;
+        const cuello = !r.tiene_oc_odoo
+            ? `<span class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800">Sin OC en Odoo</span>`
+            : `<span class="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800">${r.estado_oc || 'Pendiente SAP'}</span>`;
+        const diasCls = dias > 30 ? 'text-red-400 font-bold' : 'text-amber-300 font-bold';
+
+        return `<tr class="hover:bg-gray-800/50">
+            <td class="py-2 px-3 font-bold text-white">${r.id}</td>
+            <td class="py-2 px-3 text-gray-300">${r.fecha}</td>
+            <td class="py-2 px-3 text-gray-300">${r.sociedad}</td>
+            <td class="py-2 px-3 text-gray-300">${r.comprador}</td>
+            <td class="py-2 px-3 text-gray-400">${r.oc_odoo || '—'}</td>
+            <td class="py-2 px-3">${cuello}</td>
+            <td class="py-2 px-3 text-right ${diasCls}">${dias} d</td>
+        </tr>`;
+    }).join('');
+}
+
+function exportRezagoCSV() {
+    const rows = getFilteredModalRows();
+    const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Comprador', 'OC Odoo', 'Estado OC', 'Dias desde Aprobacion'];
+    const csvLines = [headers.join(',')];
+
+    rows.forEach(r => {
+        const line = [
+            `"${r.id}"`,
+            `"${r.fecha}"`,
+            `"${r.sociedad}"`,
+            `"${r.comprador}"`,
+            `"${r.oc_odoo || ''}"`,
+            `"${r.tiene_oc_odoo ? (r.estado_oc || 'Pendiente SAP') : 'Sin OC en Odoo'}"`,
+            Math.round(r.d_to_sap || 0)
+        ];
+        csvLines.push(line.join(','));
+    });
+
+    const blob = new Blob(["\uFEFF" + csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `rezago_compras_cresta_${RAW_DATA.cutoff_date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
 }
 
 initFilters();

@@ -1,0 +1,8 @@
+# Bloquear acceso web directo a archivos Excel y JSON de caché
+<FilesMatch "\.(xlsx|xls|csv|json|cache)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+# Desactivar listado de directorio
+Options -Indexes

@@ -265,7 +265,36 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 3: Evolución Temporal de Días de Gestión del Comprador -->
+        <!-- Fila 3: Ranking de Aprobadores (Solicitudes vs Órdenes de Compra) -->
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
+                <div class="mb-3 flex items-start justify-between gap-2">
+                    <div>
+                        <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Ranking Aprobadores de Solicitud (Días Promedio)</h2>
+                        <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Creación Solicitud → Aprobación Solicitud · Ordenado de más ágil a más lento</p>
+                    </div>
+                    <span id="badgeAprobSolAvg" class="text-[10px] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">
+                        Prom: 0.0 d
+                    </span>
+                </div>
+                <div id="chartAprobadoresSol" class="w-full h-80"></div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
+                <div class="mb-3 flex items-start justify-between gap-2">
+                    <div>
+                        <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Ranking Aprobadores de OC Odoo (Días Promedio)</h2>
+                        <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Creación OC Odoo → Aprobación OC Odoo · Ordenado de más ágil a más lento</p>
+                    </div>
+                    <span id="badgeAprobOcAvg" class="text-[10px] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">
+                        Prom: 0.0 d
+                    </span>
+                </div>
+                <div id="chartAprobadoresOc" class="w-full h-80"></div>
+            </div>
+        </section>
+
+        <!-- Fila 4: Evolución Temporal de Días de Gestión del Comprador -->
         <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
             <div class="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
@@ -569,14 +598,12 @@ function calcKpiStats(records) {
     const avgDiasComp = diasCompArr.length ? avg(diasCompArr) : null;
     const medDiasComp = diasCompArr.length ? median(diasCompArr) : null;
 
-    // 1) SLA Comprador <= 14d: maduras >= 14d; si es mes en curso sin maduras, fallback a avance parcial sobre cerradas en Odoo
     const matureComp = aprobadas.filter(r => r.edad_dias >= 14);
     const isCompPartial = (matureComp.length === 0 && conOcOdoo.length > 0);
     const compEvaluables = matureComp.length > 0 ? matureComp : conOcOdoo;
     const comp14 = compEvaluables.filter(r => r.tiene_oc_odoo && r.d_comprador !== null && r.d_comprador <= 14);
     const pctComp14 = compEvaluables.length ? Math.round((comp14.length / compEvaluables.length) * 100) : null;
 
-    // 2) En SAP <= 14d: maduras >= 14d; si es mes en curso sin maduras, fallback a avance parcial sobre cerradas en SAP
     const conOcSap = aprobadas.filter(r => r.tiene_oc_sap && r.d_to_sap !== null);
     const matureSap = aprobadas.filter(r => r.edad_dias >= 14);
     const isSapPartial = (matureSap.length === 0 && conOcSap.length > 0);
@@ -611,11 +638,9 @@ function renderDashboard() {
     const prevYm = idxYm > 0 ? allMeses[idxYm - 1] : null;
     const prevStats = prevYm ? calcKpiStats(filterByPeriod(entityRecords, prevYm, 'month')) : null;
 
-    // KPI 1: Solicitudes Válidas
     document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
     document.getElementById('kpi1Badge').textContent = periodMode === 'ytd' ? `YTD ${selectedYm.split('-')[0]}` : formatYm(selectedYm);
 
-    // KPI 2: Tiempo Gestión Comprador
     document.getElementById('kpiTimeValue').textContent = currentStats.avgDiasComp !== null ? currentStats.avgDiasComp.toFixed(1) : 'N/D';
     document.getElementById('kpiTimeSub').textContent = currentStats.medDiasComp !== null
         ? `Mediana: ${currentStats.medDiasComp.toFixed(1)} d · ${currentStats.conOcOdooList.length} OC`
@@ -634,7 +659,6 @@ function renderDashboard() {
         bTime.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
     }
 
-    // KPI 3: SLA Comprador <= 14d
     document.getElementById('kpi2Value').textContent = currentStats.pctComp14 !== null ? `${currentStats.pctComp14}%` : 'N/D';
     const b2 = document.getElementById('kpi2Badge');
     const sub2 = document.getElementById('kpi2Sub');
@@ -655,7 +679,6 @@ function renderDashboard() {
         sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
     }
 
-    // KPI 4: En SAP <= 14d
     document.getElementById('kpi3Value').textContent = currentStats.pctSap14 !== null ? `${currentStats.pctSap14}%` : 'N/D';
     const b3 = document.getElementById('kpi3Badge');
     const sub3 = document.getElementById('kpi3Sub');
@@ -694,6 +717,8 @@ function renderDashboard() {
     renderChartCiclo(entityRecords, selectedYm);
     renderChartCompradores(currentRecords);
     renderChartRezago(rezagoList);
+    renderChartAprobadoresSol(currentRecords);
+    renderChartAprobadoresOc(selectedYm);
     renderChartCompradorTrend(selectedYm, selectedComp);
     renderMonthlyTable(entityRecords);
 }
@@ -818,7 +843,6 @@ function renderChartCompradores(currentRecords) {
     const summary = Object.entries(mapComp)
         .map(([name, rows]) => {
             const matureRows = rows.filter(r => r.edad_dias >= 14);
-            // Si aún no hay maduras en el mes en curso, evaluar sobre las ya gestionadas con OC en Odoo
             const evalRows = matureRows.length > 0
                 ? matureRows
                 : rows.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
@@ -905,6 +929,111 @@ function renderChartRezago(rezagoRecords) {
     if (charts.rezago) charts.rezago.destroy();
     charts.rezago = new ApexCharts(document.querySelector('#chartRezago'), options);
     charts.rezago.render();
+}
+
+// ==========================================
+// RANKING DE APROBADORES (SOLICITUD Y OC)
+// ==========================================
+function renderChartAprobadoresSol(currentRecords) {
+    const validas = currentRecords.filter(r => !r.excluida && r.aprobada && r.d_aprob_sol !== null && r.autorizador_sol && r.autorizador_sol !== 'Sin asignar');
+    const allDays = validas.map(r => r.d_aprob_sol);
+    const overallAvg = allDays.length ? avg(allDays) : 0;
+    document.getElementById('badgeAprobSolAvg').textContent = `Prom: ${overallAvg.toFixed(1)} d`;
+
+    const mapAprob = {};
+    validas.forEach(r => {
+        if (!mapAprob[r.autorizador_sol]) mapAprob[r.autorizador_sol] = [];
+        mapAprob[r.autorizador_sol].push(r.d_aprob_sol);
+    });
+
+    const summary = Object.entries(mapAprob)
+        .map(([name, days]) => ({
+            name,
+            count: days.length,
+            avgDays: Number(avg(days).toFixed(2))
+        }))
+        .filter(item => item.count >= 2)
+        .sort((a, b) => a.avgDays - b.avgDays);
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: {
+            bar: {
+                horizontal: true,
+                borderRadius: 5,
+                barHeight: '60%',
+                distributed: true
+            }
+        },
+        colors: summary.map(s => s.avgDays <= 2 ? '#15803D' : (s.avgDays <= 5 ? '#1B2A4A' : '#C8102E')),
+        series: [{ name: 'Días promedio aprobación', data: summary.map(s => s.avgDays) }],
+        xaxis: {
+            categories: summary.map(s => `${shortName(s.name)} (${s.count})`),
+            labels: { formatter: v => v.toFixed(1) + ' d', style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, formatter: v => v.toFixed(1) + ' d', style: { fontSize: '10px' } },
+        legend: { show: false },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.aprobSol) charts.aprobSol.destroy();
+    charts.aprobSol = new ApexCharts(document.querySelector('#chartAprobadoresSol'), options);
+    charts.aprobSol.render();
+}
+
+function renderChartAprobadoresOc(selectedYm) {
+    const ocList = filterByPeriod(filterByEntity(RAW_DATA.oc_records || []), selectedYm, periodMode)
+        .filter(r => r.d_aprob_oc !== null && r.aprobador_oc && r.aprobador_oc !== 'Sin asignar');
+
+    const allDays = ocList.map(r => r.d_aprob_oc);
+    const overallAvg = allDays.length ? avg(allDays) : 0;
+    document.getElementById('badgeAprobOcAvg').textContent = `Prom: ${overallAvg.toFixed(1)} d`;
+
+    const mapAprob = {};
+    ocList.forEach(r => {
+        if (!mapAprob[r.aprobador_oc]) mapAprob[r.aprobador_oc] = [];
+        mapAprob[r.aprobador_oc].push(r.d_aprob_oc);
+    });
+
+    const summary = Object.entries(mapAprob)
+        .map(([name, days]) => ({
+            name,
+            count: days.length,
+            avgDays: Number(avg(days).toFixed(2))
+        }))
+        .filter(item => item.count >= 2)
+        .sort((a, b) => a.avgDays - b.avgDays);
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: {
+            bar: {
+                horizontal: true,
+                borderRadius: 5,
+                barHeight: '60%',
+                distributed: true
+            }
+        },
+        colors: summary.map(s => s.avgDays <= 2 ? '#15803D' : (s.avgDays <= 5 ? '#264073' : '#C8102E')),
+        series: [{ name: 'Días promedio aprobación OC', data: summary.map(s => s.avgDays) }],
+        xaxis: {
+            categories: summary.map(s => `${shortName(s.name)} (${s.count})`),
+            labels: { formatter: v => v.toFixed(1) + ' d', style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, formatter: v => v.toFixed(1) + ' d', style: { fontSize: '10px' } },
+        legend: { show: false },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.aprobOc) charts.aprobOc.destroy();
+    charts.aprobOc = new ApexCharts(document.querySelector('#chartAprobadoresOc'), options);
+    charts.aprobOc.render();
 }
 
 function renderChartCompradorTrend(selectedYm, selectedComp) {

@@ -49,7 +49,7 @@ class DataProcessor
             CURLOPT_TIMEOUT        => 45,
             CURLOPT_CONNECTTIMEOUT => 12,
             CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_COOKIEFILE     => '', // Habilita manejo de cookies en memoria para redirecciones de Microsoft
+            CURLOPT_COOKIEFILE     => '',
             CURLOPT_USERAGENT      => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         ]);
 
@@ -68,7 +68,6 @@ class DataProcessor
             ];
         }
 
-        // Validación segura de ZipArchive en PHP 8.4 (sin acceder a $zip->status si open() falló)
         $zip = new ZipArchive();
         $openResult = $zip->open($tmpFile);
         $isValidXlsx = false;
@@ -83,7 +82,7 @@ class DataProcessor
             return [
                 'synced'  => false,
                 'source'  => 'local_fallback',
-                'message' => 'El enlace de OneDrive no devolvió un archivo Excel válido (verifica permisos públicos de lectura o formato de URL). Usando copia local.'
+                'message' => 'El enlace de OneDrive no devolvió un archivo Excel válido. Usando copia local.'
             ];
         }
 
@@ -103,9 +102,7 @@ class DataProcessor
 
     private function buildDirectDownloadUrl(string $url): string
     {
-        // Caso 1: OneDrive Empresarial / SharePoint (contiene sharepoint.com)
         if (str_contains($url, 'sharepoint.com')) {
-            // Si ya tiene query params, conservarlos y asegurar download=1
             $parts = parse_url($url);
             $query = [];
             if (!empty($parts['query'])) {
@@ -116,7 +113,6 @@ class DataProcessor
             return $base . '?' . http_build_query($query);
         }
 
-        // Caso 2: OneDrive Personal (1drv.ms o onedrive.live.com)
         $base64 = rtrim(strtr(base64_encode($url), '+/', '-_'), '=');
         return "https://api.onedrive.com/v1.0/shares/u!{$base64}/root/content";
     }
@@ -133,7 +129,7 @@ class DataProcessor
 
         if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 3) {
+            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 5) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
@@ -201,6 +197,7 @@ class DataProcessor
                 'estado_sol'         => trim((string)($lastHeaderData['Estado Solicitud'] ?? '')),
                 'solicitado_por'     => trim((string)($lastHeaderData['Solicitado por'] ?? '')),
                 'autorizador_sol'    => trim((string)($lastHeaderData['Autorizador Solicitud'] ?? '')),
+                'autorizador_oc'     => trim((string)($getCol($r, 'Autorizador') ?? '')),
                 'comprador'          => trim((string)($lastHeaderData['Comprador'] ?? 'Sin asignar')),
                 'sociedad'           => trim((string)($lastHeaderData['Sociedad'] ?? 'Sin sociedad')),
                 'no_oc_odoo'         => trim((string)($getCol($r, 'NO. OC Odoo') ?? '')),
@@ -218,6 +215,7 @@ class DataProcessor
 
         $solicitudesMap = [];
         $ocStats = [];
+        $ocRecords = [];
 
         foreach ($normalizedRows as $row) {
             $solId = $row['solicitud'];
@@ -237,6 +235,22 @@ class DataProcessor
                 if ($isOcCancelada) {
                     $ocStats[$ym]['canceladas']++;
                 }
+
+                // Tiempos de aprobación de OC (Creación OC Odoo -> Aprobación OC Odoo) usando la columna exacta 'Autorizador'
+                if (!$isSolRechazada && !$isOcCancelada && $row['ts_creacion_oc'] !== null && $row['ts_aprobacion_oc'] !== null) {
+                    $diasAprobOc = round(max(0, ($row['ts_aprobacion_oc'] - $row['ts_creacion_oc']) / 86400), 2);
+                    $aprobOcName = $row['autorizador_oc'] !== '' ? $row['autorizador_oc'] : 'Sin asignar';
+
+                    $ocRecords[] = [
+                        'oc_odoo'      => $row['no_oc_odoo'],
+                        'solicitud'    => $solId,
+                        'ym'           => date('Y-m', $row['ts_creacion_oc']),
+                        'sociedad'     => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
+                        'comprador'    => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                        'aprobador_oc' => $aprobOcName,
+                        'd_aprob_oc'   => $diasAprobOc,
+                    ];
+                }
             }
 
             if (!isset($solicitudesMap[$solId])) {
@@ -244,6 +258,7 @@ class DataProcessor
                     'solicitud'         => $solId,
                     'estado_sol'        => $row['estado_sol'],
                     'solicitado_por'    => $row['solicitado_por'],
+                    'autorizador_sol'   => $row['autorizador_sol'] !== '' ? $row['autorizador_sol'] : 'Sin asignar',
                     'is_rechazada'      => $isSolRechazada,
                     'comprador'         => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
                     'sociedad'          => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
@@ -344,6 +359,7 @@ class DataProcessor
                 'fecha'           => date('Y-m-d', $tsCreacionSol),
                 'sociedad'        => $sol['sociedad'],
                 'comprador'       => $sol['comprador'],
+                'autorizador_sol' => $sol['autorizador_sol'],
                 'solicitado_por'  => $sol['solicitado_por'],
                 'estado_sol'      => $sol['estado_sol'],
                 'oc_odoo'         => implode(', ', array_unique($ocCodes)),
@@ -369,7 +385,7 @@ class DataProcessor
         sort($listCompradores);
 
         $output = [
-            'schema_v'      => 3,
+            'schema_v'      => 5,
             'excel_mtime'   => $excelMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),
@@ -381,6 +397,7 @@ class DataProcessor
             ],
             'oc_stats'      => $ocStats,
             'records'       => $records,
+            'oc_records'    => $ocRecords,
         ];
 
         file_put_contents($this->cachePath, json_encode($output, JSON_UNESCAPED_UNICODE));

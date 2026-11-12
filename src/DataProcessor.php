@@ -149,7 +149,7 @@ class DataProcessor
 
         if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 6) {
+            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 8) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
@@ -160,7 +160,6 @@ class DataProcessor
             throw new RuntimeException("El archivo Excel no contiene datos suficientes.");
         }
 
-        // Mapeo insensible a mayúsculas/minúsculas y espacios dobles
         $headers = array_map(fn($h) => trim((string)$h), $rawRows[0]);
         $colMap = [];
         foreach ($headers as $idx => $hName) {
@@ -174,15 +173,6 @@ class DataProcessor
             }
             return $row[$colMap[$key]] ?? null;
         };
-
-        // Buscar columna exacta 'Autorizador' (o variantes de OC)
-        $ocApproverColName = null;
-        foreach (['Autorizador', 'Autorizador OC', 'Aprobador OC', 'Autorizador OC Odoo'] as $candidate) {
-            if (isset($colMap[mb_strtolower($candidate)])) {
-                $ocApproverColName = $candidate;
-                break;
-            }
-        }
 
         $lastHeaderData = [
             'Solicitud'             => null,
@@ -225,16 +215,12 @@ class DataProcessor
                 $maxDateTs = $fCreacionSolTs;
             }
 
-            $autorizadorOc = $ocApproverColName
-                ? trim((string)($getCol($r, $ocApproverColName) ?? ''))
-                : '';
-
             $normalizedRows[] = [
                 'solicitud'          => trim((string)$lastHeaderData['Solicitud']),
                 'estado_sol'         => trim((string)($lastHeaderData['Estado Solicitud'] ?? '')),
                 'solicitado_por'     => trim((string)($lastHeaderData['Solicitado por'] ?? '')),
                 'autorizador_sol'    => trim((string)($lastHeaderData['Autorizador Solicitud'] ?? '')),
-                'autorizador_oc'     => $autorizadorOc,
+                'autorizador_oc_1'   => trim((string)($getCol($r, 'Autorizador 1') ?? '')),
                 'comprador'          => trim((string)($lastHeaderData['Comprador'] ?? 'Sin asignar')),
                 'sociedad'           => trim((string)($lastHeaderData['Sociedad'] ?? 'Sin sociedad')),
                 'no_oc_odoo'         => trim((string)($getCol($r, 'NO. OC Odoo') ?? '')),
@@ -273,10 +259,10 @@ class DataProcessor
                     $ocStats[$ym]['canceladas']++;
                 }
 
-                // Tiempos de aprobación de OC (Creación OC Odoo -> Aprobación OC Odoo)
+                // Tiempos de aprobación de OC para pasar a SAP usando exclusivamente 'Autorizador 1'
                 if (!$isSolRechazada && !$isOcCancelada && $row['ts_creacion_oc'] !== null && $row['ts_aprobacion_oc'] !== null) {
                     $diasAprobOc = round(max(0, ($row['ts_aprobacion_oc'] - $row['ts_creacion_oc']) / 86400), 2);
-                    $aprobOcName = $row['autorizador_oc'] !== '' ? $row['autorizador_oc'] : 'Sin asignar';
+                    $aprobOcName = $row['autorizador_oc_1'] !== '' ? $row['autorizador_oc_1'] : 'Sin asignar';
 
                     $ocRecords[] = [
                         'oc_odoo'           => $row['no_oc_odoo'],
@@ -426,12 +412,11 @@ class DataProcessor
         sort($listCompradores);
 
         $output = [
-            'schema_v'      => 6,
+            'schema_v'      => 8,
             'excel_mtime'   => $excelMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),
             'sync_info'     => $syncStatus,
-            'headers_found' => $headers,
             'filters'       => [
                 'meses'       => array_keys($meses),
                 'sociedades'  => $listSociedades,

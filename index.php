@@ -57,7 +57,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
     <!-- Header Ejecutivo -->
     <header class="border-b border-slate-200 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 sticky top-0 z-30 backdrop-blur shadow-sm">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
             <div>
                 <div class="flex flex-wrap items-center gap-2.5">
                     <span class="px-2.5 py-0.5 text-[11px] font-bold rounded-md text-white bg-cresta-navy dark:bg-cresta-red tracking-wide">
@@ -77,23 +77,37 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 </h1>
             </div>
 
-            <!-- Barra de Filtros + Sincronizar + Toggle Modo Oscuro -->
+            <!-- Barra de Filtros Multi-Año / Trimestre + Sincronizar + Toggle Modo Oscuro -->
             <div class="flex flex-wrap items-center gap-2 text-xs">
-                <!-- Modo Periodo -->
+                <!-- Selector de Año -->
+                <select id="filterYear" onchange="onYearChange()" title="Seleccionar Año"
+                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-cresta-navy dark:text-white rounded-lg px-3 py-2 font-bold shadow-xs">
+                </select>
+
+                <!-- Modo Periodo: Mes | Trimestre (Q) | YTD -->
                 <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-1 border border-slate-200 dark:border-gray-700">
                     <button id="btnModeMonth" type="button" onclick="setPeriodMode('month')"
-                        class="px-3 py-1.5 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition">
+                        class="px-2.5 py-1.5 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition">
                         Mes
                     </button>
+                    <button id="btnModeQuarter" type="button" onclick="setPeriodMode('quarter')"
+                        class="px-2.5 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
+                        Trimestre (Q)
+                    </button>
                     <button id="btnModeYTD" type="button" onclick="setPeriodMode('ytd')"
-                        class="px-3 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
-                        YTD (Acumulado)
+                        class="px-2.5 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
+                        YTD
                     </button>
                 </div>
 
-                <!-- Selector de Mes -->
+                <!-- Selector de Mes (visible en modo Mes y YTD) -->
                 <select id="filterMes" onchange="renderDashboard()"
                     class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-3 py-2 font-medium shadow-xs">
+                </select>
+
+                <!-- Selector de Trimestre Q1-Q4 (visible en modo Trimestre) -->
+                <select id="filterQuarter" onchange="renderDashboard()"
+                    class="hidden bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-3 py-2 font-medium shadow-xs">
                 </select>
 
                 <!-- Selector de Sociedad -->
@@ -244,7 +258,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                         <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Gestión pura del comprador (Aprobación Solicitud → Creación OC Odoo) · Meta 70%</p>
                     </div>
                     <span id="badgeCompradoresPartial" class="hidden text-[10px] px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 font-bold shrink-0">
-                        Avance parcial (mes en curso)
+                        Avance parcial (periodo en curso)
                     </span>
                 </div>
                 <div id="chartCompradores" class="w-full h-80"></div>
@@ -284,7 +298,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <div class="mb-3 flex items-start justify-between gap-2">
                     <div>
                         <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Ranking Aprobadores de OC Odoo (Días Promedio)</h2>
-                        <p id="subAprobOc" class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Creación OC → Aprobación OC · Activos con ≥5 aprobaciones (más ágil arriba)</p>
+                        <p id="subAprobOc" class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Creación OC → Aprobación OC (Autorizador 1) · Ordenado de más ágil a más lento</p>
                     </div>
                     <span id="badgeAprobOcAvg" class="text-[10px] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">
                         Prom: 0.0 d
@@ -312,11 +326,11 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             <div id="chartCompradorTrend" class="w-full h-80"></div>
         </section>
 
-        <!-- Tabla Ejecutiva Mensual -->
+        <!-- Tabla Ejecutiva Mensual (filtrada por el Año seleccionado) -->
         <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm overflow-x-auto">
             <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
-                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Indicadores Mensuales Consolidados</h2>
+                    <h2 id="monthlyTableTitle" class="text-sm font-bold text-cresta-navy dark:text-white">Indicadores Mensuales Consolidados</h2>
                     <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Porcentajes calculados exclusivamente sobre solicitudes maduras (sin sesgo de corte reciente)</p>
                 </div>
                 <span class="text-[11px] text-slate-500 dark:text-gray-400">* Celda resaltada indica mejor desempeño mensual</span>
@@ -379,7 +393,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
 <script>
 const RAW_DATA = <?= $jsonPayload ?>;
-let periodMode = 'month';
+let periodMode = 'month'; // 'month' | 'quarter' | 'ytd'
 let charts = {};
 let isDark = false;
 
@@ -464,6 +478,19 @@ const MONTH_NAMES = {
     '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dic'
 };
 
+const QUARTER_DEFS = [
+    { id: 'Q1', label: 'Q1 (Ene–Mar)', months: ['01', '02', '03'] },
+    { id: 'Q2', label: 'Q2 (Abr–Jun)', months: ['04', '05', '06'] },
+    { id: 'Q3', label: 'Q3 (Jul–Sep)', months: ['07', '08', '09'] },
+    { id: 'Q4', label: 'Q4 (Oct–Dic)', months: ['10', '11', '12'] }
+];
+
+function getQuarterFromYm(ym) {
+    const m = ym.split('-')[1];
+    const found = QUARTER_DEFS.find(q => q.months.includes(m));
+    return found ? found.id : 'Q1';
+}
+
 function initTheme() {
     const saved = localStorage.getItem('cresta_dashboard_theme');
     isDark = (saved === 'dark');
@@ -496,22 +523,35 @@ function applyThemeUI() {
 
 function updatePeriodButtons() {
     const btnM = document.getElementById('btnModeMonth');
+    const btnQ = document.getElementById('btnModeQuarter');
     const btnY = document.getElementById('btnModeYTD');
-    const activeCls = 'px-3 py-1.5 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition';
-    const inactiveCls = 'px-3 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition';
+    const selMes = document.getElementById('filterMes');
+    const selQ = document.getElementById('filterQuarter');
 
-    if (periodMode === 'month') {
-        btnM.className = activeCls;
-        btnY.className = inactiveCls;
+    const activeCls = 'px-2.5 py-1.5 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition';
+    const inactiveCls = 'px-2.5 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition';
+
+    btnM.className = periodMode === 'month' ? activeCls : inactiveCls;
+    btnQ.className = periodMode === 'quarter' ? activeCls : inactiveCls;
+    btnY.className = periodMode === 'ytd' ? activeCls : inactiveCls;
+
+    if (periodMode === 'quarter') {
+        selMes.classList.add('hidden');
+        selQ.classList.remove('hidden');
     } else {
-        btnY.className = activeCls;
-        btnM.className = inactiveCls;
+        selQ.classList.add('hidden');
+        selMes.classList.remove('hidden');
     }
 }
 
 function formatYm(ym) {
     const [y, m] = ym.split('-');
     return `${MONTH_NAMES[m] || m} ${y}`;
+}
+
+function formatMonthOnly(ym) {
+    const m = ym.split('-')[1];
+    return MONTH_NAMES[m] || m;
 }
 
 function shortName(fullName) {
@@ -530,20 +570,55 @@ function avg(arr) {
     return arr.reduce((a, b) => a + b, 0) / arr.length;
 }
 
-function initFilters() {
+function populateYearPeriodOptions(year) {
     const selMes = document.getElementById('filterMes');
-    const selSoc = document.getElementById('filterSociedad');
-    const selComp = document.getElementById('filterComprador');
+    const selQ = document.getElementById('filterQuarter');
 
-    RAW_DATA.filters.meses.forEach(ym => {
+    const yearMeses = RAW_DATA.filters.meses.filter(ym => ym.startsWith(`${year}-`));
+
+    selMes.innerHTML = '';
+    yearMeses.forEach(ym => {
         const opt = document.createElement('option');
         opt.value = ym;
         opt.textContent = formatYm(ym);
         selMes.appendChild(opt);
     });
-    if (RAW_DATA.filters.meses.length > 0) {
-        selMes.value = RAW_DATA.filters.meses[RAW_DATA.filters.meses.length - 1];
+    if (yearMeses.length > 0) {
+        selMes.value = yearMeses[yearMeses.length - 1];
     }
+
+    // Poblar trimestres disponibles en ese año
+    const availableQs = new Set(yearMeses.map(getQuarterFromYm));
+    selQ.innerHTML = '';
+    QUARTER_DEFS.forEach(q => {
+        if (availableQs.has(q.id)) {
+            const opt = document.createElement('option');
+            opt.value = q.id;
+            opt.textContent = `${q.label} ${year}`;
+            selQ.appendChild(opt);
+        }
+    });
+    if (selQ.options.length > 0) {
+        selQ.value = selQ.options[selQ.options.length - 1].value;
+    }
+}
+
+function initFilters() {
+    const selYear = document.getElementById('filterYear');
+    const selSoc = document.getElementById('filterSociedad');
+    const selComp = document.getElementById('filterComprador');
+
+    const years = [...new Set(RAW_DATA.filters.meses.map(ym => ym.split('-')[0]))].sort();
+    years.forEach(y => {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = `Año ${y}`;
+        selYear.appendChild(opt);
+    });
+    const latestYear = years.length > 0 ? years[years.length - 1] : String(new Date().getFullYear());
+    selYear.value = latestYear;
+
+    populateYearPeriodOptions(latestYear);
 
     RAW_DATA.filters.sociedades.forEach(s => {
         const opt = document.createElement('option');
@@ -558,6 +633,12 @@ function initFilters() {
         opt.textContent = c;
         selComp.appendChild(opt);
     });
+}
+
+function onYearChange() {
+    const year = document.getElementById('filterYear').value;
+    populateYearPeriodOptions(year);
+    renderDashboard();
 }
 
 function setPeriodMode(mode) {
@@ -581,12 +662,57 @@ function filterBySociedadOnly(records) {
     return records.filter(r => soc === 'ALL' || r.sociedad === soc);
 }
 
-function filterByPeriod(records, targetYm, mode) {
-    const targetYear = targetYm.split('-')[0];
-    return records.filter(r => {
-        if (mode === 'month') return r.ym === targetYm;
-        return r.ym.startsWith(targetYear) && r.ym <= targetYm;
-    });
+// Determina el mes límite superior (YYYY-MM) del filtro activo para gráficas de tendencia y rezago acumulado
+function getMaxYmForCurrentSelection() {
+    const year = document.getElementById('filterYear').value;
+    const yearMeses = RAW_DATA.filters.meses.filter(ym => ym.startsWith(`${year}-`));
+
+    if (periodMode === 'quarter') {
+        const qId = document.getElementById('filterQuarter').value;
+        const qDef = QUARTER_DEFS.find(q => q.id === qId) || QUARTER_DEFS[0];
+        const qMeses = yearMeses.filter(ym => qDef.months.includes(ym.split('-')[1]));
+        return qMeses.length ? qMeses[qMeses.length - 1] : `${year}-${qDef.months[2]}`;
+    }
+    return document.getElementById('filterMes').value;
+}
+
+function filterByActivePeriod(records) {
+    const year = document.getElementById('filterYear').value;
+    if (periodMode === 'month') {
+        const targetYm = document.getElementById('filterMes').value;
+        return records.filter(r => r.ym === targetYm);
+    }
+    if (periodMode === 'quarter') {
+        const qId = document.getElementById('filterQuarter').value;
+        const qDef = QUARTER_DEFS.find(q => q.id === qId) || QUARTER_DEFS[0];
+        return records.filter(r => r.ym.startsWith(`${year}-`) && qDef.months.includes(r.ym.split('-')[1]));
+    }
+    // YTD
+    const targetYm = document.getElementById('filterMes').value;
+    return records.filter(r => r.ym.startsWith(`${year}-`) && r.ym <= targetYm);
+}
+
+function getPreviousQuarterRecords(entityRecords, year, qId) {
+    const order = ['Q1', 'Q2', 'Q3', 'Q4'];
+    const idx = order.indexOf(qId);
+    let prevYear = year;
+    let prevQId = null;
+
+    if (idx > 0) {
+        prevQId = order[idx - 1];
+    } else {
+        prevYear = String(Number(year) - 1);
+        prevQId = 'Q4';
+    }
+
+    const qDef = QUARTER_DEFS.find(q => q.id === prevQId);
+    const prevRows = entityRecords.filter(r => r.ym.startsWith(`${prevYear}-`) && qDef.months.includes(r.ym.split('-')[1]));
+    if (!prevRows.length) return null;
+
+    return {
+        label: `${prevQId} ${prevYear !== year ? prevYear : ''}`.trim(),
+        stats: calcKpiStats(prevRows)
+    };
 }
 
 function calcKpiStats(records) {
@@ -627,80 +753,106 @@ function calcKpiStats(records) {
 }
 
 function renderDashboard() {
+    const selectedYear = document.getElementById('filterYear').value;
     const selectedYm = document.getElementById('filterMes').value;
+    const selectedQ = document.getElementById('filterQuarter').value;
     const selectedComp = document.getElementById('filterComprador').value;
+
     const entityRecords = filterByEntity(RAW_DATA.records);
-    const currentRecords = filterByPeriod(entityRecords, selectedYm, periodMode);
+    const currentRecords = filterByActivePeriod(entityRecords);
     const currentStats = calcKpiStats(currentRecords);
+    const maxYm = getMaxYmForCurrentSelection();
 
-    const allMeses = RAW_DATA.filters.meses;
-    const idxYm = allMeses.indexOf(selectedYm);
-    const prevYm = idxYm > 0 ? allMeses[idxYm - 1] : null;
-    const prevStats = prevYm ? calcKpiStats(filterByPeriod(entityRecords, prevYm, 'month')) : null;
+    // Calcular periodo comparativo anterior (Mes anterior o Trimestre anterior)
+    let prevCompData = null;
+    if (periodMode === 'month') {
+        const allMeses = RAW_DATA.filters.meses;
+        const idxYm = allMeses.indexOf(selectedYm);
+        if (idxYm > 0) {
+            const prevYm = allMeses[idxYm - 1];
+            prevCompData = {
+                label: MONTH_NAMES[prevYm.split('-')[1]],
+                stats: calcKpiStats(entityRecords.filter(r => r.ym === prevYm))
+            };
+        }
+    } else if (periodMode === 'quarter') {
+        prevCompData = getPreviousQuarterRecords(entityRecords, selectedYear, selectedQ);
+    }
 
+    // Badge KPI 1
     document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
-    document.getElementById('kpi1Badge').textContent = periodMode === 'ytd' ? `YTD ${selectedYm.split('-')[0]}` : formatYm(selectedYm);
+    if (periodMode === 'ytd') {
+        document.getElementById('kpi1Badge').textContent = `YTD ${selectedYear}`;
+    } else if (periodMode === 'quarter') {
+        document.getElementById('kpi1Badge').textContent = `${selectedQ} ${selectedYear}`;
+    } else {
+        document.getElementById('kpi1Badge').textContent = formatYm(selectedYm);
+    }
 
+    // KPI 2: Tiempo Gestión Comprador
     document.getElementById('kpiTimeValue').textContent = currentStats.avgDiasComp !== null ? currentStats.avgDiasComp.toFixed(1) : 'N/D';
     document.getElementById('kpiTimeSub').textContent = currentStats.medDiasComp !== null
         ? `Mediana: ${currentStats.medDiasComp.toFixed(1)} d · ${currentStats.conOcOdooList.length} OC`
         : 'Sin OC generadas aún';
 
     const bTime = document.getElementById('kpiTimeBadge');
-    if (periodMode === 'month' && prevStats && currentStats.avgDiasComp !== null && prevStats.avgDiasComp !== null) {
-        const diffDays = Number((currentStats.avgDiasComp - prevStats.avgDiasComp).toFixed(1));
+    if (prevCompData && currentStats.avgDiasComp !== null && prevCompData.stats.avgDiasComp !== null) {
+        const diffDays = Number((currentStats.avgDiasComp - prevCompData.stats.avgDiasComp).toFixed(1));
         const improved = diffDays <= 0;
-        bTime.textContent = `${diffDays > 0 ? '+' : ''}${diffDays.toFixed(1)}d vs ${MONTH_NAMES[prevYm.split('-')[1]]}`;
+        bTime.textContent = `${diffDays > 0 ? '+' : ''}${diffDays.toFixed(1)}d vs ${prevCompData.label}`;
         bTime.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${improved
             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
             : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
     } else {
-        bTime.textContent = periodMode === 'ytd' ? 'YTD' : 'Base';
+        bTime.textContent = periodMode === 'ytd' ? `YTD ${selectedYear}` : 'Base';
         bTime.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
     }
 
+    // KPI 3: SLA Comprador <= 14d
     document.getElementById('kpi2Value').textContent = currentStats.pctComp14 !== null ? `${currentStats.pctComp14}%` : 'N/D';
     const b2 = document.getElementById('kpi2Badge');
     const sub2 = document.getElementById('kpi2Sub');
     if (currentStats.isCompPartial) {
         b2.textContent = 'Avance parcial';
         b2.className = 'text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800';
-        sub2.textContent = `Sobre ${currentStats.compEvaluablesList.length} OC generadas (mes abierto)`;
-    } else if (periodMode === 'month' && prevStats && currentStats.pctComp14 !== null && prevStats.pctComp14 !== null && !prevStats.isCompPartial) {
-        const diff2 = currentStats.pctComp14 - prevStats.pctComp14;
-        b2.textContent = `${diff2 >= 0 ? '+' : ''}${diff2} pts`;
+        sub2.textContent = `Sobre ${currentStats.compEvaluablesList.length} OC generadas (en curso)`;
+    } else if (prevCompData && currentStats.pctComp14 !== null && prevCompData.stats.pctComp14 !== null && !prevCompData.stats.isCompPartial) {
+        const diff2 = currentStats.pctComp14 - prevCompData.stats.pctComp14;
+        b2.textContent = `${diff2 >= 0 ? '+' : ''}${diff2} pts vs ${prevCompData.label}`;
         b2.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${diff2 >= 0
             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
             : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
         sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
     } else {
-        b2.textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
+        b2.textContent = periodMode === 'ytd' ? `YTD ${selectedYear}` : 'Madurez';
         b2.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
         sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
     }
 
+    // KPI 4: En SAP <= 14d
     document.getElementById('kpi3Value').textContent = currentStats.pctSap14 !== null ? `${currentStats.pctSap14}%` : 'N/D';
     const b3 = document.getElementById('kpi3Badge');
     const sub3 = document.getElementById('kpi3Sub');
     if (currentStats.isSapPartial) {
         b3.textContent = 'Avance parcial';
         b3.className = 'text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800';
-        sub3.textContent = `Sobre ${currentStats.sapEvaluablesList.length} cerradas en SAP (mes abierto)`;
-    } else if (periodMode === 'month' && prevStats && currentStats.pctSap14 !== null && prevStats.pctSap14 !== null && !prevStats.isSapPartial) {
-        const diff3 = currentStats.pctSap14 - prevStats.pctSap14;
-        b3.textContent = `${diff3 >= 0 ? '+' : ''}${diff3} pts`;
+        sub3.textContent = `Sobre ${currentStats.sapEvaluablesList.length} cerradas en SAP (en curso)`;
+    } else if (prevCompData && currentStats.pctSap14 !== null && prevCompData.stats.pctSap14 !== null && !prevCompData.stats.isSapPartial) {
+        const diff3 = currentStats.pctSap14 - prevCompData.stats.pctSap14;
+        b3.textContent = `${diff3 >= 0 ? '+' : ''}${diff3} pts vs ${prevCompData.label}`;
         b3.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${diff3 >= 0
             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
             : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
         sub3.textContent = 'Ciclo desde aprobación (≥14d)';
     } else {
-        b3.textContent = periodMode === 'ytd' ? 'YTD' : 'Madurez';
+        b3.textContent = periodMode === 'ytd' ? `YTD ${selectedYear}` : 'Madurez';
         b3.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
         sub3.textContent = 'Ciclo desde aprobación (≥14d)';
     }
 
+    // Rezago acumulado hasta el corte máximo del periodo seleccionado
     const rezagoList = entityRecords
-        .filter(r => r.ym <= selectedYm && !r.excluida && r.aprobada && !r.tiene_oc_sap)
+        .filter(r => r.ym <= maxYm && !r.excluida && r.aprobada && !r.tiene_oc_sap)
         .sort((a, b) => (b.d_to_sap || 0) - (a.d_to_sap || 0));
 
     cachedUniverses.VALIDAS = [...currentStats.validasList].sort((a, b) => b.fecha.localeCompare(a.fecha));
@@ -713,14 +865,14 @@ function renderDashboard() {
     document.getElementById('kpi4Value').textContent = rezagoList.length.toLocaleString();
     document.getElementById('kpi4Badge').textContent = `${upToSelected30.length} > 30d`;
 
-    renderChartQuincenas(entityRecords, selectedYm);
-    renderChartCiclo(entityRecords, selectedYm);
+    renderChartQuincenas(entityRecords, maxYm);
+    renderChartCiclo(entityRecords, maxYm);
     renderChartCompradores(currentRecords);
     renderChartRezago(rezagoList);
     renderChartAprobadoresSol(currentRecords);
-    renderChartAprobadoresOc(selectedYm);
-    renderChartCompradorTrend(selectedYm, selectedComp);
-    renderMonthlyTable(entityRecords);
+    renderChartAprobadoresOc();
+    renderChartCompradorTrend(maxYm, selectedComp, selectedYear);
+    renderMonthlyTable(entityRecords, selectedYear);
 }
 
 function getChartThemeConfig() {
@@ -731,8 +883,8 @@ function getChartThemeConfig() {
     };
 }
 
-function renderChartQuincenas(entityRecords, selectedYm) {
-    const validas = entityRecords.filter(r => !r.excluida && r.aprobada && r.ym <= selectedYm);
+function renderChartQuincenas(entityRecords, maxYm) {
+    const validas = entityRecords.filter(r => !r.excluida && r.aprobada && r.ym <= maxYm);
     const quincenasSet = [...new Set(validas.map(r => r.quincena))].sort();
     const recentQ = quincenasSet.slice(-8);
 
@@ -784,8 +936,8 @@ function renderChartQuincenas(entityRecords, selectedYm) {
     charts.quincenas.render();
 }
 
-function renderChartCiclo(entityRecords, selectedYm) {
-    const meses = RAW_DATA.filters.meses.filter(m => m <= selectedYm).slice(-6);
+function renderChartCiclo(entityRecords, maxYm) {
+    const meses = RAW_DATA.filters.meses.filter(m => m <= maxYm).slice(-6);
     const labels = meses.map(formatYm);
     const dAprobSol = [], dComprador = [], dAprobSap = [];
 
@@ -935,7 +1087,6 @@ function renderChartRezago(rezagoRecords) {
 // RANKING DE APROBADORES (SOLICITUD Y OC)
 // ==========================================
 function renderChartAprobadoresSol(currentRecords) {
-    // Excluir aprobadores retirados (ej. María Isabel) y muestras menores a 5 aprobaciones
     const validas = currentRecords.filter(r =>
         !r.excluida &&
         r.aprobada &&
@@ -949,13 +1100,14 @@ function renderChartAprobadoresSol(currentRecords) {
         mapAprob[r.autorizador_sol].push(r.d_aprob_sol);
     });
 
+    const minSample = periodMode === 'month' ? 3 : 5;
     const summary = Object.entries(mapAprob)
         .map(([name, days]) => ({
             name,
             count: days.length,
             avgDays: Number(avg(days).toFixed(2))
         }))
-        .filter(item => item.count >= 5)
+        .filter(item => item.count >= minSample)
         .sort((a, b) => a.avgDays - b.avgDays);
 
     const activeDays = summary.flatMap(s => mapAprob[s.name]);
@@ -991,8 +1143,8 @@ function renderChartAprobadoresSol(currentRecords) {
     charts.aprobSol.render();
 }
 
-function renderChartAprobadoresOc(selectedYm) {
-    const ocList = filterByPeriod(filterByEntity(RAW_DATA.oc_records || []), selectedYm, periodMode)
+function renderChartAprobadoresOc() {
+    const ocList = filterByActivePeriod(filterByEntity(RAW_DATA.oc_records || []))
         .filter(r => r.d_aprob_oc !== null && !r.aprob_oc_excluido);
 
     const mapAprob = {};
@@ -1001,8 +1153,7 @@ function renderChartAprobadoresOc(selectedYm) {
         mapAprob[r.aprobador_oc].push(r.d_aprob_oc);
     });
 
-    // Si en el periodo seleccionado hay al menos 2 aprobaciones por persona, mostrar (umbral >= 2 en mes, >= 5 en YTD)
-    const minSample = periodMode === 'ytd' ? 5 : 2;
+    const minSample = periodMode === 'month' ? 2 : 5;
     const summary = Object.entries(mapAprob)
         .map(([name, days]) => ({
             name,
@@ -1018,9 +1169,9 @@ function renderChartAprobadoresOc(selectedYm) {
 
     const subEl = document.getElementById('subAprobOc');
     if (summary.length === 0) {
-        subEl.textContent = 'Sin OCs con Autorizador/Aprobación registrada en este periodo';
+        subEl.textContent = 'Sin OCs con Autorizador 1 registrado en este periodo';
     } else {
-        subEl.textContent = 'Creación OC → Aprobación OC · Ordenado de más ágil a más lento';
+        subEl.textContent = 'Creación OC → Aprobación OC (Autorizador 1) · Ordenado de más ágil a más lento';
     }
 
     const themeCfg = getChartThemeConfig();
@@ -1028,7 +1179,7 @@ function renderChartAprobadoresOc(selectedYm) {
         chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
         theme: { mode: themeCfg.mode },
         noData: {
-            text: 'Sin datos de Autorizador de OC en este filtro',
+            text: 'Sin datos de Autorizador 1 en este filtro',
             style: { color: themeCfg.labelColor, fontSize: '12px', fontFamily: 'Verdana' }
         },
         plotOptions: {
@@ -1056,13 +1207,13 @@ function renderChartAprobadoresOc(selectedYm) {
     charts.aprobOc.render();
 }
 
-function renderChartCompradorTrend(selectedYm, selectedComp) {
+function renderChartCompradorTrend(maxYm, selectedComp, selectedYear) {
     const socRecords = filterBySociedadOnly(RAW_DATA.records)
         .filter(r => !r.excluida && r.aprobada && r.tiene_oc_odoo && r.d_comprador !== null);
 
-    const allMesesUpTo = RAW_DATA.filters.meses.filter(m => m <= selectedYm);
-    const meses = periodMode === 'ytd'
-        ? allMesesUpTo.filter(m => m.startsWith(selectedYm.split('-')[0]))
+    const allMesesUpTo = RAW_DATA.filters.meses.filter(m => m <= maxYm);
+    const meses = (periodMode === 'ytd' || periodMode === 'quarter')
+        ? allMesesUpTo.filter(m => m.startsWith(`${selectedYear}-`))
         : allMesesUpTo.slice(-6);
 
     const labels = meses.map(formatYm);
@@ -1186,14 +1337,15 @@ function renderChartCompradorTrend(selectedYm, selectedComp) {
     }
 }
 
-function renderMonthlyTable(entityRecords) {
-    const meses = RAW_DATA.filters.meses;
+function renderMonthlyTable(entityRecords, selectedYear) {
+    const meses = RAW_DATA.filters.meses.filter(m => m.startsWith(`${selectedYear}-`));
     const thead = document.getElementById('monthlyTableHead');
     const tbody = document.getElementById('monthlyTableBody');
+    document.getElementById('monthlyTableTitle').textContent = `Indicadores Mensuales Consolidados · Año ${selectedYear}`;
 
     thead.innerHTML = `<tr>
         <th class="py-3 px-4 font-bold rounded-tl-lg">Indicador</th>
-        ${meses.map((m, idx) => `<th class="py-3 px-3 text-right font-bold ${idx === meses.length - 1 ? 'rounded-tr-lg' : ''}">${formatYm(m)}</th>`).join('')}
+        ${meses.map((m, idx) => `<th class="py-3 px-3 text-right font-bold ${idx === meses.length - 1 ? 'rounded-tr-lg' : ''}">${formatMonthOnly(m)} ${selectedYear}</th>`).join('')}
     </tr>`;
 
     const metricsByMonth = meses.map(m => {

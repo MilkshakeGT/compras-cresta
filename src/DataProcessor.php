@@ -9,6 +9,12 @@ class DataProcessor
     private string $cachePath;
     private string $configPath;
 
+    // Aprobadores retirados / inactivos que distorsionan el ranking operativo
+    private array $excludedApprovers = [
+        'maria isabel',
+        'maría isabel',
+    ];
+
     public function __construct(string $excelPath, string $cachePath, ?string $configPath = null)
     {
         $this->excelPath  = $excelPath;
@@ -117,6 +123,20 @@ class DataProcessor
         return "https://api.onedrive.com/v1.0/shares/u!{$base64}/root/content";
     }
 
+    private function isExcludedApprover(string $name): bool
+    {
+        $norm = mb_strtolower(trim($name));
+        if ($norm === '' || $norm === 'sin asignar') {
+            return true;
+        }
+        foreach ($this->excludedApprovers as $ex) {
+            if (str_contains($norm, $ex)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public function getProcessedData(bool $forceSync = false): array
     {
         $syncStatus = $this->syncFromOneDrive($forceSync);
@@ -129,7 +149,7 @@ class DataProcessor
 
         if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 5) {
+            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 6) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
@@ -140,16 +160,29 @@ class DataProcessor
             throw new RuntimeException("El archivo Excel no contiene datos suficientes.");
         }
 
+        // Mapeo insensible a mayúsculas/minúsculas y espacios dobles
         $headers = array_map(fn($h) => trim((string)$h), $rawRows[0]);
-        $colMap = array_flip($headers);
+        $colMap = [];
+        foreach ($headers as $idx => $hName) {
+            $colMap[mb_strtolower($hName)] = $idx;
+        }
 
         $getCol = function (array $row, string $name) use ($colMap) {
-            if (!isset($colMap[$name])) {
+            $key = mb_strtolower(trim($name));
+            if (!isset($colMap[$key])) {
                 return null;
             }
-            $idx = $colMap[$name];
-            return $row[$idx] ?? null;
+            return $row[$colMap[$key]] ?? null;
         };
+
+        // Buscar columna exacta 'Autorizador' (o variantes de OC)
+        $ocApproverColName = null;
+        foreach (['Autorizador', 'Autorizador OC', 'Aprobador OC', 'Autorizador OC Odoo'] as $candidate) {
+            if (isset($colMap[mb_strtolower($candidate)])) {
+                $ocApproverColName = $candidate;
+                break;
+            }
+        }
 
         $lastHeaderData = [
             'Solicitud'             => null,
@@ -192,12 +225,16 @@ class DataProcessor
                 $maxDateTs = $fCreacionSolTs;
             }
 
+            $autorizadorOc = $ocApproverColName
+                ? trim((string)($getCol($r, $ocApproverColName) ?? ''))
+                : '';
+
             $normalizedRows[] = [
                 'solicitud'          => trim((string)$lastHeaderData['Solicitud']),
                 'estado_sol'         => trim((string)($lastHeaderData['Estado Solicitud'] ?? '')),
                 'solicitado_por'     => trim((string)($lastHeaderData['Solicitado por'] ?? '')),
                 'autorizador_sol'    => trim((string)($lastHeaderData['Autorizador Solicitud'] ?? '')),
-                'autorizador_oc'     => trim((string)($getCol($r, 'Autorizador') ?? '')),
+                'autorizador_oc'     => $autorizadorOc,
                 'comprador'          => trim((string)($lastHeaderData['Comprador'] ?? 'Sin asignar')),
                 'sociedad'           => trim((string)($lastHeaderData['Sociedad'] ?? 'Sin sociedad')),
                 'no_oc_odoo'         => trim((string)($getCol($r, 'NO. OC Odoo') ?? '')),
@@ -236,37 +273,40 @@ class DataProcessor
                     $ocStats[$ym]['canceladas']++;
                 }
 
-                // Tiempos de aprobación de OC (Creación OC Odoo -> Aprobación OC Odoo) usando la columna exacta 'Autorizador'
+                // Tiempos de aprobación de OC (Creación OC Odoo -> Aprobación OC Odoo)
                 if (!$isSolRechazada && !$isOcCancelada && $row['ts_creacion_oc'] !== null && $row['ts_aprobacion_oc'] !== null) {
                     $diasAprobOc = round(max(0, ($row['ts_aprobacion_oc'] - $row['ts_creacion_oc']) / 86400), 2);
                     $aprobOcName = $row['autorizador_oc'] !== '' ? $row['autorizador_oc'] : 'Sin asignar';
 
                     $ocRecords[] = [
-                        'oc_odoo'      => $row['no_oc_odoo'],
-                        'solicitud'    => $solId,
-                        'ym'           => date('Y-m', $row['ts_creacion_oc']),
-                        'sociedad'     => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
-                        'comprador'    => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
-                        'aprobador_oc' => $aprobOcName,
-                        'd_aprob_oc'   => $diasAprobOc,
+                        'oc_odoo'           => $row['no_oc_odoo'],
+                        'solicitud'         => $solId,
+                        'ym'                => date('Y-m', $row['ts_creacion_oc']),
+                        'sociedad'          => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
+                        'comprador'         => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                        'aprobador_oc'      => $aprobOcName,
+                        'aprob_oc_excluido' => $this->isExcludedApprover($aprobOcName),
+                        'd_aprob_oc'        => $diasAprobOc,
                     ];
                 }
             }
 
             if (!isset($solicitudesMap[$solId])) {
+                $aprobSolName = $row['autorizador_sol'] !== '' ? $row['autorizador_sol'] : 'Sin asignar';
                 $solicitudesMap[$solId] = [
-                    'solicitud'         => $solId,
-                    'estado_sol'        => $row['estado_sol'],
-                    'solicitado_por'    => $row['solicitado_por'],
-                    'autorizador_sol'   => $row['autorizador_sol'] !== '' ? $row['autorizador_sol'] : 'Sin asignar',
-                    'is_rechazada'      => $isSolRechazada,
-                    'comprador'         => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
-                    'sociedad'          => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
-                    'ts_creacion_sol'   => $row['ts_creacion_sol'],
-                    'ts_aprobacion_sol' => $row['ts_aprobacion_sol'],
-                    'valid_ocs'         => [],
-                    'all_ocs_canceled'  => true,
-                    'has_any_oc'        => false,
+                    'solicitud'          => $solId,
+                    'estado_sol'         => $row['estado_sol'],
+                    'solicitado_por'     => $row['solicitado_por'],
+                    'autorizador_sol'    => $aprobSolName,
+                    'aprob_sol_excluido' => $this->isExcludedApprover($aprobSolName),
+                    'is_rechazada'       => $isSolRechazada,
+                    'comprador'          => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                    'sociedad'           => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
+                    'ts_creacion_sol'    => $row['ts_creacion_sol'],
+                    'ts_aprobacion_sol'  => $row['ts_aprobacion_sol'],
+                    'valid_ocs'          => [],
+                    'all_ocs_canceled'   => true,
+                    'has_any_oc'         => false,
                 ];
             }
 
@@ -353,28 +393,29 @@ class DataProcessor
             $edadDias = round(($cutoffTs - $tsCreacionSol) / 86400, 1);
 
             $records[] = [
-                'id'              => $sol['solicitud'],
-                'ym'              => $ym,
-                'quincena'        => $quincena,
-                'fecha'           => date('Y-m-d', $tsCreacionSol),
-                'sociedad'        => $sol['sociedad'],
-                'comprador'       => $sol['comprador'],
-                'autorizador_sol' => $sol['autorizador_sol'],
-                'solicitado_por'  => $sol['solicitado_por'],
-                'estado_sol'      => $sol['estado_sol'],
-                'oc_odoo'         => implode(', ', array_unique($ocCodes)),
-                'estado_oc'       => implode(', ', array_unique($ocStates)),
-                'is_rechazada'    => $sol['is_rechazada'],
-                'excluida'        => $excluida,
-                'aprobada'        => ($tsAprobacionSol !== null),
-                'tiene_oc_odoo'   => $tieneOcOdoo,
-                'tiene_oc_sap'    => $tieneOcSap,
-                'd_aprob_sol'     => $diasAprobSol,
-                'd_comprador'     => $diasGestionComprador,
-                'd_aprob_sap'     => $diasAprobSap,
-                'd_to_sap'        => $diasAprobToSap,
-                'd_ciclo_total'   => $diasCicloTotal,
-                'edad_dias'       => $edadDias,
+                'id'                 => $sol['solicitud'],
+                'ym'                 => $ym,
+                'quincena'           => $quincena,
+                'fecha'              => date('Y-m-d', $tsCreacionSol),
+                'sociedad'           => $sol['sociedad'],
+                'comprador'          => $sol['comprador'],
+                'autorizador_sol'    => $sol['autorizador_sol'],
+                'aprob_sol_excluido' => $sol['aprob_sol_excluido'],
+                'solicitado_por'     => $sol['solicitado_por'],
+                'estado_sol'         => $sol['estado_sol'],
+                'oc_odoo'            => implode(', ', array_unique($ocCodes)),
+                'estado_oc'          => implode(', ', array_unique($ocStates)),
+                'is_rechazada'       => $sol['is_rechazada'],
+                'excluida'           => $excluida,
+                'aprobada'           => ($tsAprobacionSol !== null),
+                'tiene_oc_odoo'      => $tieneOcOdoo,
+                'tiene_oc_sap'       => $tieneOcSap,
+                'd_aprob_sol'        => $diasAprobSol,
+                'd_comprador'        => $diasGestionComprador,
+                'd_aprob_sap'        => $diasAprobSap,
+                'd_to_sap'           => $diasAprobToSap,
+                'd_ciclo_total'      => $diasCicloTotal,
+                'edad_dias'          => $edadDias,
             ];
         }
 
@@ -385,11 +426,12 @@ class DataProcessor
         sort($listCompradores);
 
         $output = [
-            'schema_v'      => 5,
+            'schema_v'      => 6,
             'excel_mtime'   => $excelMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),
             'sync_info'     => $syncStatus,
+            'headers_found' => $headers,
             'filters'       => [
                 'meses'       => array_keys($meses),
                 'sociedades'  => $listSociedades,

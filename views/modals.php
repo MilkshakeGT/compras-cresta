@@ -12,7 +12,7 @@
             <div class="flex items-center gap-2">
                 <button type="button" onclick="exportAuditCSV()"
                     class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
-                    Descargar CSV
+                    Descargar Excel
                 </button>
                 <button type="button" onclick="closeAuditModal()"
                     class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-300 text-xs font-bold">
@@ -53,7 +53,7 @@
             <div class="flex items-center gap-2">
                 <button id="btnExportDocCSV" type="button" onclick="exportDocumentDetailCSV()"
                     class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
-                    Descargar CSV
+                    Descargar a Excel
                 </button>
                 <button type="button" onclick="closeDocDetailModal()"
                     class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-800 dark:text-gray-200 text-xs font-bold">

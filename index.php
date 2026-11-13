@@ -42,7 +42,7 @@ try {
 
 $syncInfo    = $payload['sync_info'] ?? [];
 $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
-$assetVer    = '1.05.' . (file_exists(__DIR__ . '/assets/js/app.js') ? filemtime(__DIR__ . '/assets/js/app.js') : time());
+$assetVer    = '1.06.' . (file_exists(__DIR__ . '/assets/js/app.js') ? filemtime(__DIR__ . '/assets/js/app.js') : time());
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -69,6 +69,9 @@ $assetVer    = '1.05.' . (file_exists(__DIR__ . '/assets/js/app.js') ? filemtime
         };
     </script>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <!-- Librerías para exportación nativa a Excel (.xlsx) y PDF gráfico -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <link rel="stylesheet" href="assets/css/app.css?v=<?= $assetVer ?>">
 </head>
 <body class="min-h-screen flex flex-col bg-slate-50 text-slate-900 dark:bg-gray-950 dark:text-gray-100">
@@ -93,6 +96,7 @@ $assetVer    = '1.05.' . (file_exists(__DIR__ . '/assets/js/app.js') ? filemtime
         const RAW_DATA = <?= $jsonPayload ?>;
     </script>
     <script src="assets/js/app.js?v=<?= $assetVer ?>"></script>
+    <script src="assets/js/export.js?v=<?= $assetVer ?>"></script>
     <script src="assets/js/modals.js?v=<?= $assetVer ?>"></script>
     <script src="assets/js/module_cycle.js?v=<?= $assetVer ?>"></script>
     <script src="assets/js/module_spend.js?v=<?= $assetVer ?>"></script>

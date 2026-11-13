@@ -51,8 +51,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['access_password'])) {
     }
 }
 
-// Endpoint AJAX protegido por sesión para consultar detalle de Solicitud u OC
-if (isset($_GET['action']) && $_GET['action'] === 'detail') {
+// Endpoints AJAX protegidos por sesión
+if (isset($_GET['action'])) {
     header('Content-Type: application/json; charset=utf-8');
     if (empty($_SESSION['cresta_auth'])) {
         http_response_code(401);
@@ -62,10 +62,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'detail') {
     $_SESSION['cresta_last_activity'] = time();
     require_once __DIR__ . '/src/DataProcessor.php';
     $processor = new DataProcessor(__DIR__ . '/data/DB.xlsx', __DIR__ . '/data/cache.json');
-    $type = (string)($_GET['type'] ?? '');
-    $id   = (string)($_GET['id'] ?? '');
-    echo json_encode($processor->getDocumentDetail($type, $id), JSON_UNESCAPED_UNICODE);
-    exit;
+
+    if ($_GET['action'] === 'detail') {
+        $type = (string)($_GET['type'] ?? '');
+        $id   = (string)($_GET['id'] ?? '');
+        echo json_encode($processor->getDocumentDetail($type, $id), JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if ($_GET['action'] === 'firm_lines') {
+        echo json_encode($processor->getFirmOcLines(), JSON_UNESCAPED_UNICODE);
+        exit;
+    }
 }
 
 if (empty($_SESSION['cresta_auth'])) {
@@ -201,8 +208,8 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
     <!-- Header Ejecutivo -->
     <header class="border-b border-slate-200 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 sticky top-0 z-30 backdrop-blur shadow-sm">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 space-y-3">
-            <!-- Fila Superior: Marca + Buscador Rápido + Navegación de Módulos + Acciones -->
-            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            <!-- Fila Superior: Marca + Buscador Rápido + Navegación de 3 Módulos + Acciones -->
+            <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
                 <div>
                     <div class="flex flex-wrap items-center gap-2.5">
                         <span class="px-2.5 py-0.5 text-[11px] font-bold rounded-md text-white bg-cresta-navy dark:bg-cresta-red tracking-wide">
@@ -227,14 +234,14 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                     <form onsubmit="handleQuickDocLookup(event)" class="inline-flex items-center">
                         <input id="quickDocInput" type="text" placeholder="Buscar Solicitud / OC..."
                             title="Escribe un código (ej. SV2396 o P17177) y presiona Enter"
-                            class="bg-slate-50 dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-l-lg px-2.5 py-2 w-40 sm:w-44 focus:border-cresta-navy">
+                            class="bg-slate-50 dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-l-lg px-2.5 py-2 w-36 sm:w-40 focus:border-cresta-navy">
                         <button type="submit" title="Ver detalle del documento"
                             class="px-2.5 py-2 rounded-r-lg bg-slate-200 hover:bg-slate-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-cresta-navy dark:text-white font-bold border border-l-0 border-slate-300 dark:border-gray-700">
                             🔍
                         </button>
                     </form>
 
-                    <!-- Selector Principal de Módulo -->
+                    <!-- Selector Principal de 3 Módulos -->
                     <div class="inline-flex rounded-xl bg-slate-100 dark:bg-gray-800 p-1 border border-slate-200 dark:border-gray-700">
                         <button id="btnTabCycle" type="button" onclick="setMainTab('cycle')"
                             class="px-3 py-1.5 rounded-lg font-bold text-white bg-cresta-navy dark:bg-cresta-red transition">
@@ -242,27 +249,31 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                         </button>
                         <button id="btnTabSpend" type="button" onclick="setMainTab('spend')"
                             class="px-3 py-1.5 rounded-lg font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
-                            Gasto y Proveedores
+                            Gasto y Productos
+                        </button>
+                        <button id="btnTabSupplier" type="button" onclick="setMainTab('supplier')"
+                            class="px-3 py-1.5 rounded-lg font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
+                            Portal 360° Proveedor
                         </button>
                     </div>
 
                     <!-- Botón Sincronizar OneDrive -->
                     <a href="?sync=1" title="Forzar actualización desde OneDrive"
-                        class="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
+                        class="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
                         <span>↻</span>
                         <span class="hidden md:inline">Sincronizar</span>
                     </a>
 
                     <!-- Toggle Modo Claro / Oscuro -->
                     <button id="btnThemeToggle" type="button" onclick="toggleTheme()" title="Alternar modo claro / oscuro"
-                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-200 font-bold transition">
+                        class="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-200 font-bold transition">
                         <span id="themeIcon">🌙</span>
-                        <span id="themeLabel" class="hidden xl:inline">Modo Oscuro</span>
+                        <span id="themeLabel" class="hidden xl:inline">Oscuro</span>
                     </button>
 
                     <!-- Botón Cerrar Sesión -->
                     <a href="?logout=1" title="Cerrar sesión y bloquear dashboard"
-                        class="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 hover:bg-red-100 dark:bg-red-950/60 dark:hover:bg-red-900 text-cresta-red dark:text-red-300 font-bold transition">
+                        class="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 hover:bg-red-100 dark:bg-red-950/60 dark:hover:bg-red-900 text-cresta-red dark:text-red-300 font-bold transition">
                         <span>Salir</span>
                     </a>
                 </div>
@@ -322,10 +333,11 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 </select>
 
                 <select id="filterSolicitante" onchange="renderDashboard()"
-                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs max-w-[210px]">
+                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs max-w-[200px]">
                     <option value="ALL">Todos los Solicitantes</option>
                 </select>
 
+                <!-- Controles compartidos entre Gasto y Portal 360 Proveedor -->
                 <div id="spendOnlyFilters" class="hidden flex flex-wrap items-center gap-2">
                     <select id="filterProveedor" onchange="renderDashboard()"
                         class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs max-w-[210px]">
@@ -590,7 +602,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
     </main>
 
     <!-- ===================================================================== -->
-    <!-- MÓDULO 2: GESTIÓN DE GASTO, COMPRADORES Y PROVEEDORES                 -->
+    <!-- MÓDULO 2: GESTIÓN DE GASTO, COMPRADORES Y PRODUCTOS                   -->
     <!-- ===================================================================== -->
     <main id="viewSpendSection" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6 flex-1 w-full">
 
@@ -753,13 +765,54 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 4 (Gasto): Embudo del Proceso de Compra -->
-        <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
-            <div class="mb-3">
-                <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Embudo de Conversión del Proceso de Compras</h2>
-                <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Trazabilidad desde Solicitud Aprobada hasta Orden Sincronizada en SAP</p>
+        <!-- Fila 4 (Gasto): Inteligencia de Productos / Artículos Más Comprados y Precios Unitarios -->
+        <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm space-y-5">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 border-b border-slate-100 dark:border-gray-800 pb-4">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-navy dark:bg-cresta-red text-white">ANÁLISIS DE INSUMOS · OC.XLSX</span>
+                        <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Productos Más Comprados y Evolución de Precios Unitarios</h2>
+                    </div>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Calculado estrictamente sobre líneas de órdenes de compra en firme</p>
+                </div>
+                <div class="flex items-center gap-2 text-xs">
+                    <label for="selectProductTrack" class="font-bold text-slate-600 dark:text-gray-300 shrink-0">Rastrear Artículo:</label>
+                    <select id="selectProductTrack" onchange="renderProductPriceTrend()"
+                        class="bg-slate-50 dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-3 py-1.5 font-medium max-w-xs sm:max-w-md">
+                    </select>
+                </div>
             </div>
-            <div id="chartProcurementFunnel" class="w-full h-64"></div>
+
+            <!-- 4 Mini-KPIs del Producto Seleccionado -->
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                <div class="p-3 rounded-xl bg-slate-50 dark:bg-gray-800/60 border border-slate-200/70 dark:border-gray-700/70">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 block">Gasto en el Artículo</span>
+                    <span id="prodKpiSpend" class="text-base font-bold text-cresta-navy dark:text-white mt-0.5 block">Q 0.00</span>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-50 dark:bg-gray-800/60 border border-slate-200/70 dark:border-gray-700/70">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 block">Cantidad Comprada</span>
+                    <span id="prodKpiQty" class="text-base font-bold text-cresta-blue dark:text-sky-400 mt-0.5 block">0</span>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-50 dark:bg-gray-800/60 border border-slate-200/70 dark:border-gray-700/70">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 block">Precio Unit. Promedio</span>
+                    <span id="prodKpiAvgPu" class="text-base font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 block">Q 0.00</span>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-50 dark:bg-gray-800/60 border border-slate-200/70 dark:border-gray-700/70">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 block">Rango Precio (Mín – Máx)</span>
+                    <span id="prodKpiRange" class="text-sm font-bold text-cresta-red dark:text-amber-400 mt-1 block">Q 0 - Q 0</span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div class="lg:col-span-6">
+                    <h3 class="text-xs font-bold text-slate-700 dark:text-gray-300 uppercase mb-2">Top 10 Productos por Monto Comprado (Periodo)</h3>
+                    <div id="chartTopProductsMonto" class="w-full h-80"></div>
+                </div>
+                <div class="lg:col-span-6">
+                    <h3 id="prodTrendChartTitle" class="text-xs font-bold text-slate-700 dark:text-gray-300 uppercase mb-2">Variación Mensual del Precio Unitario</h3>
+                    <div id="chartProductPriceTrend" class="w-full h-80"></div>
+                </div>
+            </div>
         </section>
 
         <!-- Tabla Ejecutiva Top 15 Proveedores Detallada -->
@@ -788,6 +841,195 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                     </tr>
                 </thead>
                 <tbody id="topSuppliersTableBody" class="divide-y divide-slate-200 dark:divide-gray-800"></tbody>
+            </table>
+        </section>
+
+    </main>
+
+    <!-- ===================================================================== -->
+    <!-- MÓDULO 3: PORTAL 360° PROVEEDOR (EXCLUSIVO OCs EN FIRME)              -->
+    <!-- ===================================================================== -->
+    <main id="viewSupplierSection" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6 flex-1 w-full">
+
+        <!-- Banner Selector Protagonista del Proveedor -->
+        <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+                <div class="flex items-center gap-2">
+                    <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-navy dark:bg-cresta-red text-white">PORTAL 360° PROVEEDOR · OCs EN FIRME</span>
+                    <span id="sup360PeriodTag" class="text-xs text-slate-500 dark:text-gray-400 font-semibold">--</span>
+                </div>
+                <h2 id="sup360Title" class="text-base sm:text-lg font-bold text-cresta-navy dark:text-white mt-1">
+                    Todos los Proveedores (Consolidado OCs Firmes)
+                </h2>
+                <p id="sup360Sub" class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">
+                    Selecciona un proveedor específico para auditar qué le compramos, cuándo, evolución de precios y órdenes históricas
+                </p>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+                <select id="sup360Selector" onchange="onSupplier360SelectChange()"
+                    class="bg-slate-50 dark:bg-gray-800 border-2 border-cresta-navy dark:border-indigo-500 text-cresta-navy dark:text-white rounded-xl px-3.5 py-2.5 font-bold shadow-xs max-w-xs sm:max-w-md">
+                    <option value="ALL">Todos los Proveedores (Vista Global)</option>
+                </select>
+                <button type="button" onclick="exportSupplier360CSV()"
+                    class="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition shrink-0">
+                    Exportar Reporte CSV
+                </button>
+            </div>
+        </section>
+
+        <!-- 5 Tarjetas KPI del Proveedor (Exclusivo OCs en Firme) -->
+        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase">Compras Firmes</span>
+                        <span id="s360Kpi1Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">--</span>
+                    </div>
+                    <div class="mt-2">
+                        <span id="s360Kpi1Val" class="text-xl xl:text-2xl font-bold text-cresta-navy dark:text-white block truncate">Q 0.00</span>
+                    </div>
+                </div>
+                <p id="s360Kpi1Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Participación del gasto: 0%</p>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase">OCs / Ticket Prom.</span>
+                        <span id="s360Kpi2Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">0 OCs</span>
+                    </div>
+                    <div class="mt-2">
+                        <span id="s360Kpi2Val" class="text-xl xl:text-2xl font-bold text-cresta-blue dark:text-sky-400 block truncate">Q 0.00</span>
+                    </div>
+                </div>
+                <p id="s360Kpi2Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Mediana por orden: Q 0.00</p>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase">Artículos / Líneas</span>
+                        <span id="s360Kpi3Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">0 líneas</span>
+                    </div>
+                    <div class="mt-2">
+                        <span id="s360Kpi3Val" class="text-2xl xl:text-3xl font-bold text-emerald-600 dark:text-emerald-400 block">0</span>
+                    </div>
+                </div>
+                <p class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Productos distintos comprados</p>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase">Última Compra</span>
+                        <span id="s360Kpi4Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">0 Soc.</span>
+                    </div>
+                    <div class="mt-2">
+                        <span id="s360Kpi4Val" class="text-xl xl:text-2xl font-bold text-cresta-navy dark:text-indigo-400 block">—</span>
+                    </div>
+                </div>
+                <p id="s360Kpi4Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Primera compra: —</p>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase">Sincronizado SAP</span>
+                        <span id="s360Kpi5Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold shrink-0">OCs Firmes</span>
+                    </div>
+                    <div class="mt-2">
+                        <span id="s360Kpi5Val" class="text-2xl xl:text-3xl font-bold text-cresta-navy dark:text-white block">0%</span>
+                    </div>
+                </div>
+                <p id="s360Kpi5Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">0 de 0 órdenes en SAP</p>
+            </div>
+        </section>
+
+        <!-- Panel Comparativa Trimestral Q vs Q del Proveedor -->
+        <section id="sup360CompareQSection" class="hidden bg-white dark:bg-gray-900 border-2 border-cresta-navy/20 dark:border-indigo-500/30 rounded-2xl p-5 shadow-sm">
+            <div class="mb-3">
+                <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-navy dark:bg-cresta-red text-white">COMPARATIVA TRIMESTRAL PROVEEDOR</span>
+                <h3 id="sup360CompareQTitle" class="text-sm font-bold text-cresta-navy dark:text-white mt-1">Q1 vs Q2</h3>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs text-left border-collapse">
+                    <thead id="sup360CompareQHead" class="bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-200"></thead>
+                    <tbody id="sup360CompareQBody" class="divide-y divide-slate-200 dark:divide-gray-800"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Gráficas del Proveedor: Tendencia Mensual + Qué le Compramos (Top Productos) -->
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
+                <div class="mb-3">
+                    <h3 class="text-sm font-bold text-cresta-navy dark:text-white">Tendencia Mensual de Compras al Proveedor</h3>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Evolución de monto adjudicado y frecuencia de órdenes por mes</p>
+                </div>
+                <div id="chartSup360Trend" class="w-full h-80"></div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
+                <div class="mb-3">
+                    <h3 class="text-sm font-bold text-cresta-navy dark:text-white">¿Qué le Compramos? · Top 10 Productos / Servicios</h3>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Distribución del gasto por artículo comprado al proveedor</p>
+                </div>
+                <div id="chartSup360Products" class="w-full h-80"></div>
+            </div>
+        </section>
+
+        <!-- Tabla 1 del Proveedor: Catálogo de Productos Comprados y Precios -->
+        <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm overflow-x-auto">
+            <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                    <h3 class="text-sm font-bold text-cresta-navy dark:text-white">Detalle de Productos y Precios Comprados al Proveedor</h3>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Consolidado de cantidades, precios unitarios (mínimo, promedio, máximo y último) y monto total</p>
+                </div>
+                <input id="sup360ProdSearch" type="text" oninput="renderSup360TablesOnly()" placeholder="Filtrar producto..."
+                    class="bg-slate-50 dark:bg-gray-800 border border-slate-300 dark:border-gray-700 rounded-lg px-3 py-1.5 text-xs w-56">
+            </div>
+            <table class="w-full text-xs text-left border-collapse">
+                <thead class="bg-cresta-navy text-white dark:bg-gray-800 dark:text-gray-200">
+                    <tr>
+                        <th class="py-2.5 px-3 font-bold rounded-tl-lg">Producto / Servicio</th>
+                        <th class="py-2.5 px-3 text-right font-bold">OCs</th>
+                        <th class="py-2.5 px-3 text-right font-bold">Cant. Total</th>
+                        <th class="py-2.5 px-3 text-right font-bold">Precio Mín.</th>
+                        <th class="py-2.5 px-3 text-right font-bold">Precio Prom.</th>
+                        <th class="py-2.5 px-3 text-right font-bold">Precio Máx.</th>
+                        <th class="py-2.5 px-3 text-right font-bold">Último Precio</th>
+                        <th class="py-2.5 px-3 text-right font-bold">Monto Total</th>
+                        <th class="py-2.5 px-3 text-right font-bold rounded-tr-lg">%</th>
+                    </tr>
+                </thead>
+                <tbody id="sup360ProductsTableBody" class="divide-y divide-slate-200 dark:divide-gray-800"></tbody>
+            </table>
+        </section>
+
+        <!-- Tabla 2 del Proveedor: Historial Cronológico de Órdenes de Compra Firmes -->
+        <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm overflow-x-auto">
+            <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                    <h3 class="text-sm font-bold text-cresta-navy dark:text-white">Historial Cronológico de Órdenes de Compra Firmes</h3>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Haz clic en cualquier número de OC o Solicitud para abrir su ficha completa de líneas</p>
+                </div>
+                <span id="sup360OcsCountLabel" class="text-xs font-bold text-slate-500">0 órdenes</span>
+            </div>
+            <table class="w-full text-xs text-left border-collapse">
+                <thead class="bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-200">
+                    <tr>
+                        <th class="py-2.5 px-3 font-bold">Fecha OC</th>
+                        <th class="py-2.5 px-3 font-bold">No. OC Odoo</th>
+                        <th class="py-2.5 px-3 font-bold">Solicitud</th>
+                        <th class="py-2.5 px-3 font-bold">Sociedad</th>
+                        <th class="py-2.5 px-3 font-bold">Proveedor</th>
+                        <th class="py-2.5 px-3 font-bold">Comprador</th>
+                        <th class="py-2.5 px-3 font-bold">SAP</th>
+                        <th class="py-2.5 px-3 text-right font-bold">Total OC</th>
+                    </tr>
+                </thead>
+                <tbody id="sup360OcsTableBody" class="divide-y divide-slate-200 dark:divide-gray-800"></tbody>
             </table>
         </section>
 
@@ -879,13 +1121,19 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
 <script>
 const RAW_DATA = <?= $jsonPayload ?>;
-let mainTab = 'cycle';
-let periodMode = 'month';
+let mainTab = 'cycle'; // 'cycle' | 'spend' | 'supplier'
+let periodMode = 'month'; // 'month' | 'quarter' | 'compare_q' | 'ytd'
 let activeCurrency = 'GTQ';
 let charts = {};
 let isDark = false;
 let currentTop5ProvidersSet = new Set();
 let activeDocDetail = null;
+
+// Caché en memoria de líneas de productos de OCs en firme (cargado bajo demanda al abrir Gasto o Portal 360)
+let firmLinesCache = null;
+let firmLinesPromise = null;
+let cachedSup360Products = [];
+let cachedSup360Ocs = [];
 
 if (window.location.search.includes('sync=1')) {
     window.history.replaceState({}, document.title, window.location.pathname);
@@ -1009,6 +1257,23 @@ const QUARTER_DEFS = [
     { id: 'Q3', label: 'Q3 (Jul–Sep)', short: 'Q3', months: ['07', '08', '09'] },
     { id: 'Q4', label: 'Q4 (Oct–Dic)', short: 'Q4', months: ['10', '11', '12'] }
 ];
+
+async function ensureFirmLinesLoaded() {
+    if (firmLinesCache !== null) return firmLinesCache;
+    if (!firmLinesPromise) {
+        firmLinesPromise = fetch('?action=firm_lines')
+            .then(r => r.json())
+            .then(data => {
+                firmLinesCache = data.lines || [];
+                return firmLinesCache;
+            })
+            .catch(() => {
+                firmLinesCache = [];
+                return firmLinesCache;
+            });
+    }
+    return firmLinesPromise;
+}
 
 function escapeHtml(str) {
     return String(str ?? '')
@@ -1284,11 +1549,11 @@ function applyThemeUI() {
     if (isDark) {
         htmlEl.classList.add('dark');
         iconEl.textContent = '☀️';
-        labelEl.textContent = 'Modo Claro';
+        labelEl.textContent = 'Claro';
     } else {
         htmlEl.classList.remove('dark');
         iconEl.textContent = '🌙';
-        labelEl.textContent = 'Modo Oscuro';
+        labelEl.textContent = 'Oscuro';
     }
     updateMainTabButtons();
     updatePeriodButtons();
@@ -1304,28 +1569,41 @@ function setMainTab(tab) {
 function updateMainTabButtons() {
     const btnCycle = document.getElementById('btnTabCycle');
     const btnSpend = document.getElementById('btnTabSpend');
+    const btnSup   = document.getElementById('btnTabSupplier');
+
     const secCycle = document.getElementById('viewCycleSection');
     const secSpend = document.getElementById('viewSpendSection');
+    const secSup   = document.getElementById('viewSupplierSection');
+
     const spendFilters = document.getElementById('spendOnlyFilters');
+    const filterProvEl = document.getElementById('filterProveedor');
     const titleEl = document.getElementById('mainHeaderTitle');
 
     const activeCls = 'px-3 py-1.5 rounded-lg font-bold text-white bg-cresta-navy dark:bg-cresta-red transition';
     const inactiveCls = 'px-3 py-1.5 rounded-lg font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition';
 
+    btnCycle.className = mainTab === 'cycle' ? activeCls : inactiveCls;
+    btnSpend.className = mainTab === 'spend' ? activeCls : inactiveCls;
+    btnSup.className   = mainTab === 'supplier' ? activeCls : inactiveCls;
+
+    secCycle.classList.add('hidden');
+    secSpend.classList.add('hidden');
+    secSup.classList.add('hidden');
+    spendFilters.classList.add('hidden');
+    filterProvEl.classList.remove('hidden');
+
     if (mainTab === 'cycle') {
-        btnCycle.className = activeCls;
-        btnSpend.className = inactiveCls;
         secCycle.classList.remove('hidden');
-        secSpend.classList.add('hidden');
-        spendFilters.classList.add('hidden');
         titleEl.textContent = 'Evolución del Ciclo de Compras · Grupo Cresta';
-    } else {
-        btnSpend.className = activeCls;
-        btnCycle.className = inactiveCls;
+    } else if (mainTab === 'spend') {
         secSpend.classList.remove('hidden');
-        secCycle.classList.add('hidden');
         spendFilters.classList.remove('hidden');
-        titleEl.textContent = 'Gestión de Gasto, Compradores y Proveedores · Grupo Cresta';
+        titleEl.textContent = 'Gestión de Gasto, Productos y Proveedores · Grupo Cresta';
+    } else {
+        secSup.classList.remove('hidden');
+        spendFilters.classList.remove('hidden');
+        filterProvEl.classList.add('hidden'); // En Portal 360 se usa el selector protagonista
+        titleEl.textContent = 'Portal 360° de Proveedores (OCs en Firme) · Grupo Cresta';
     }
 }
 
@@ -1357,6 +1635,7 @@ function updatePeriodButtons() {
     const compQBox = document.getElementById('compareQControls');
     const compQSec = document.getElementById('quarterComparisonSection');
     const spendCompQSec = document.getElementById('spendCompareQSection');
+    const supCompQSec = document.getElementById('sup360CompareQSection');
 
     const activeCls = 'px-2.5 py-1 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition';
     const inactiveCls = 'px-2.5 py-1 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition';
@@ -1372,11 +1651,13 @@ function updatePeriodButtons() {
     compQBox.classList.add('hidden');
     compQSec.classList.add('hidden');
     spendCompQSec.classList.add('hidden');
+    supCompQSec.classList.add('hidden');
 
     if (periodMode === 'compare_q') {
         compQBox.classList.remove('hidden');
         compQSec.classList.remove('hidden');
         spendCompQSec.classList.remove('hidden');
+        supCompQSec.classList.remove('hidden');
     } else if (periodMode === 'quarter') {
         selYear.classList.remove('hidden');
         selQ.classList.remove('hidden');
@@ -1413,6 +1694,10 @@ function shortName(fullName) {
 
 function shortSupplier(name) {
     return name.length > 26 ? name.slice(0, 25) + '…' : name;
+}
+
+function shortProduct(name) {
+    return name.length > 32 ? name.slice(0, 31) + '…' : name;
 }
 
 function median(arr) {
@@ -1504,6 +1789,7 @@ function initFilters() {
     const selComp = document.getElementById('filterComprador');
     const selSol = document.getElementById('filterSolicitante');
     const selProv = document.getElementById('filterProveedor');
+    const selSup360 = document.getElementById('sup360Selector');
 
     const years = [...new Set(RAW_DATA.filters.meses.map(ym => ym.split('-')[0]))].sort();
     years.forEach(y => {
@@ -1544,6 +1830,11 @@ function initFilters() {
         opt.value = p;
         opt.textContent = p;
         selProv.appendChild(opt);
+
+        const opt360 = document.createElement('option');
+        opt360.value = p;
+        opt360.textContent = p;
+        selSup360.appendChild(opt360);
     });
 }
 
@@ -1559,6 +1850,10 @@ function setPeriodMode(mode) {
     renderDashboard();
 }
 
+function onSupplier360SelectChange() {
+    renderSupplier360View();
+}
+
 function filterByEntity(records) {
     const soc = document.getElementById('filterSociedad').value;
     const comp = document.getElementById('filterComprador').value;
@@ -1571,11 +1866,11 @@ function filterByEntity(records) {
     });
 }
 
-function filterSpendRecordsBase(records) {
+function filterSpendRecordsBase(records, overrideProv = null) {
     const soc = document.getElementById('filterSociedad').value;
     const comp = document.getElementById('filterComprador').value;
     const sol = document.getElementById('filterSolicitante').value;
-    const prov = document.getElementById('filterProveedor').value;
+    const prov = overrideProv !== null ? overrideProv : document.getElementById('filterProveedor').value;
     const hidePetty = document.getElementById('chkExcludePettyCash').checked;
 
     return records.filter(r => {
@@ -1637,6 +1932,20 @@ function filterByActivePeriod(records) {
     }
     const targetYm = document.getElementById('filterMes').value;
     return records.filter(r => r.ym.startsWith(`${year}-`) && r.ym <= targetYm);
+}
+
+function getActivePeriodLabel() {
+    const year = document.getElementById('filterYear').value;
+    if (periodMode === 'compare_q') {
+        return `${formatYearQuarterShort(document.getElementById('filterCompareQ1').value)} vs ${formatYearQuarterShort(document.getElementById('filterCompareQ2').value)}`;
+    }
+    if (periodMode === 'quarter') {
+        return `${document.getElementById('filterQuarter').value} ${year}`;
+    }
+    if (periodMode === 'ytd') {
+        return `YTD ${year} (hasta ${formatYm(document.getElementById('filterMes').value)})`;
+    }
+    return formatYm(document.getElementById('filterMes').value);
 }
 
 function getPreviousQuarterRecords(entityRecords, year, qId) {
@@ -1707,8 +2016,10 @@ function calcKpiStats(records) {
 function renderDashboard() {
     if (mainTab === 'cycle') {
         renderCycleView();
-    } else {
+    } else if (mainTab === 'spend') {
         renderSpendView();
+    } else {
+        renderSupplier360View();
     }
 }
 
@@ -2561,7 +2872,7 @@ function renderMonthlyTable(entityRecords, selectedYear) {
 }
 
 // =====================================================================
-// RENDERIZACIÓN MÓDULO 2: GESTIÓN DE GASTO Y PROVEEDORES
+// RENDERIZACIÓN MÓDULO 2: GESTIÓN DE GASTO Y PRODUCTOS
 // =====================================================================
 function calcSpendStats(rows) {
     const firm = rows.filter(r => r.is_firm);
@@ -2611,7 +2922,7 @@ function calcSpendStats(rows) {
     };
 }
 
-function renderSpendView() {
+async function renderSpendView() {
     const selectedYear = document.getElementById('filterYear').value;
     const selectedYm   = document.getElementById('filterMes').value;
     const selectedQ    = document.getElementById('filterQuarter').value;
@@ -2693,8 +3004,131 @@ function renderSpendView() {
     renderChartTopCompradoresMonto(st.firmList);
     renderChartTopSolicitantesMonto(st.firmList);
     renderChartTopProveedoresFreq(st.firmList);
-    renderChartProcurementFunnel();
     renderTopSuppliersTable(st);
+
+    // Cargar líneas detalladas de OC.xlsx para la sección de Productos y Precios Unitarios
+    await ensureFirmLinesLoaded();
+    renderProductsAnalyticsSection();
+}
+
+function renderProductsAnalyticsSection() {
+    const allLines = firmLinesCache || [];
+    const baseLines = filterSpendRecordsBase(allLines);
+    const periodLines = filterByActivePeriod(baseLines);
+
+    const mapProd = {};
+    periodLines.forEach(l => {
+        const p = l.producto || '(Sin descripción)';
+        if (!mapProd[p]) mapProd[p] = { monto: 0, qty: 0, ocs: new Set() };
+        mapProd[p].monto += l.total;
+        mapProd[p].qty += l.cantidad;
+        mapProd[p].ocs.add(l.oc_odoo);
+    });
+
+    const sortedProds = Object.entries(mapProd)
+        .map(([name, info]) => ({ name, monto: info.monto, qty: info.qty, ocs: info.ocs.size }))
+        .sort((a, b) => b.monto - a.monto);
+
+    // Poblar selector de artículos a rastrear
+    const selProd = document.getElementById('selectProductTrack');
+    const prevVal = selProd.value;
+    selProd.innerHTML = '';
+
+    sortedProds.slice(0, 60).forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.name;
+        opt.textContent = `${shortProduct(p.name)} (${formatMoneyCompact(p.monto)})`;
+        selProd.appendChild(opt);
+    });
+
+    if (prevVal && sortedProds.some(p => p.name === prevVal)) {
+        selProd.value = prevVal;
+    } else if (sortedProds.length > 0) {
+        selProd.value = sortedProds[0].name;
+    }
+
+    // Gráfica Top 10 Productos por Monto
+    const top10 = sortedProds.slice(0, 10);
+    const themeCfg = getChartThemeConfig();
+    const optTop = {
+        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: { bar: { horizontal: true, borderRadius: 4, barHeight: '62%' } },
+        colors: isDark ? ['#34D399'] : ['#15803D'],
+        series: [{ name: `Monto (${activeCurrency})`, data: top10.map(p => Number(p.monto.toFixed(2))) }],
+        xaxis: {
+            categories: top10.map(p => shortProduct(p.name)),
+            labels: { formatter: v => formatMoneyCompact(v), style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, formatter: v => formatMoneyCompact(v), style: { fontSize: '9px' } },
+        tooltip: {
+            y: {
+                formatter: (val, { dataPointIndex }) => `${formatMoney(val)} · ${top10[dataPointIndex].qty.toLocaleString()} uds (${top10[dataPointIndex].ocs} OCs)`
+            }
+        },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.topProdsMonto) charts.topProdsMonto.destroy();
+    charts.topProdsMonto = new ApexCharts(document.querySelector('#chartTopProductsMonto'), optTop);
+    charts.topProdsMonto.render();
+
+    renderProductPriceTrend();
+}
+
+function renderProductPriceTrend() {
+    const selectedProd = document.getElementById('selectProductTrack').value;
+    const allLines = firmLinesCache || [];
+    const baseLines = filterSpendRecordsBase(allLines).filter(l => l.producto === selectedProd);
+    const periodLines = filterByActivePeriod(baseLines);
+
+    const spendSum = periodLines.reduce((s, l) => s + l.total, 0);
+    const qtySum   = periodLines.reduce((s, l) => s + l.cantidad, 0);
+    const pus      = periodLines.map(l => l.pu).filter(v => v > 0);
+    const avgPu    = qtySum > 0 ? (spendSum / qtySum) : (pus.length ? avg(pus) : 0);
+    const minPu    = pus.length ? Math.min(...pus) : 0;
+    const maxPu    = pus.length ? Math.max(...pus) : 0;
+
+    document.getElementById('prodKpiSpend').textContent = formatMoney(spendSum);
+    document.getElementById('prodKpiQty').textContent   = qtySum.toLocaleString('en-US', { maximumFractionDigits: 2 });
+    document.getElementById('prodKpiAvgPu').textContent = formatMoney(avgPu);
+    document.getElementById('prodKpiRange').textContent = `${formatMoneyCompact(minPu)} – ${formatMoneyCompact(maxPu)}`;
+
+    const selectedYear = periodMode === 'compare_q'
+        ? document.getElementById('filterCompareQ1').value.split('-')[0]
+        : document.getElementById('filterYear').value;
+
+    const meses = RAW_DATA.filters.meses.filter(m => m.startsWith(`${selectedYear}-`));
+    document.getElementById('prodTrendChartTitle').textContent = `Precio Unitario Mensual (${activeCurrency}) · ${shortProduct(selectedProd || 'Sin selección')}`;
+
+    const monthlyAvgPu = meses.map(m => {
+        const mRows = baseLines.filter(l => l.ym === m && l.pu > 0);
+        if (!mRows.length) return null;
+        const mTot = mRows.reduce((s, l) => s + l.total, 0);
+        const mQty = mRows.reduce((s, l) => s + l.cantidad, 0);
+        return mQty > 0 ? Number((mTot / mQty).toFixed(2)) : Number(avg(mRows.map(l => l.pu)).toFixed(2));
+    });
+
+    const themeCfg = getChartThemeConfig();
+    const optTrend = {
+        chart: { type: 'line', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        stroke: { width: 3, curve: 'smooth' },
+        colors: isDark ? ['#FBBF24'] : ['#C8102E'],
+        series: [{ name: `Precio Unitario (${activeCurrency})`, data: monthlyAvgPu }],
+        xaxis: { categories: meses.map(formatMonthOnly), labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
+        yaxis: {
+            labels: { formatter: v => v !== null ? formatMoney(v) : '', style: { colors: themeCfg.labelColor } }
+        },
+        markers: { size: 5 },
+        dataLabels: { enabled: true, formatter: v => v !== null ? formatMoneyCompact(v) : '', style: { fontSize: '9px' } },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.prodPriceTrend) charts.prodPriceTrend.destroy();
+    charts.prodPriceTrend = new ApexCharts(document.querySelector('#chartProductPriceTrend'), optTrend);
+    charts.prodPriceTrend.render();
 }
 
 function renderSpendCompareQPanel(yq1, yq2, st1, st2) {
@@ -2975,53 +3409,6 @@ function renderChartTopProveedoresFreq(firmList) {
     charts.topProvFreq.render();
 }
 
-function renderChartProcurementFunnel() {
-    const entityReqs = filterByActivePeriod(filterByEntity(RAW_DATA.records));
-    const validReqs = entityReqs.filter(r => !r.excluida && r.aprobada);
-
-    const baseSpend = filterSpendRecordsBase(RAW_DATA.spend_records || []);
-    const periodSpend = filterByActivePeriod(baseSpend);
-    const totalOcsOdoo = periodSpend.filter(r => !r.is_cancelada).length;
-    const firmOcs = periodSpend.filter(r => r.is_firm).length;
-    const sapOcs = periodSpend.filter(r => r.is_firm && r.en_sap).length;
-
-    const themeCfg = getChartThemeConfig();
-    const options = {
-        chart: { type: 'bar', height: 250, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-        theme: { mode: themeCfg.mode },
-        plotOptions: {
-            bar: {
-                horizontal: true,
-                borderRadius: 5,
-                barHeight: '55%',
-                distributed: true
-            }
-        },
-        colors: ['#64748B', '#264073', '#1B2A4A', '#15803D'],
-        series: [{
-            name: 'Documentos',
-            data: [validReqs.length, totalOcsOdoo, firmOcs, sapOcs]
-        }],
-        xaxis: {
-            categories: [
-                '1. Solicitudes Aprobadas',
-                `2. Cotizaciones + OCs (${activeCurrency})`,
-                `3. OCs Firmes (${activeCurrency})`,
-                `4. Sincronizadas en SAP (${activeCurrency})`
-            ],
-            labels: { style: { colors: themeCfg.labelColor } }
-        },
-        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
-        dataLabels: { enabled: true, style: { fontSize: '10px' } },
-        legend: { show: false },
-        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
-    };
-
-    if (charts.funnel) charts.funnel.destroy();
-    charts.funnel = new ApexCharts(document.querySelector('#chartProcurementFunnel'), options);
-    charts.funnel.render();
-}
-
 function renderTopSuppliersTable(st) {
     const tbody = document.getElementById('topSuppliersTableBody');
     const top15 = st.provSorted.slice(0, 15);
@@ -3039,7 +3426,12 @@ function renderTopSuppliersTable(st) {
 
         return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40">
             <td class="py-2.5 px-3 font-bold text-slate-400">${idx + 1}</td>
-            <td class="py-2.5 px-3 font-bold text-cresta-navy dark:text-white">${escapeHtml(p.name)}</td>
+            <td class="py-2.5 px-3">
+                <button type="button" onclick="jumpToSupplier360('${escapeHtml(p.name)}')" title="Abrir Portal 360° de este proveedor"
+                    class="font-bold text-cresta-navy dark:text-white underline decoration-dotted hover:text-cresta-red text-left">
+                    ${escapeHtml(p.name)}
+                </button>
+            </td>
             <td class="py-2.5 px-3 text-right text-slate-700 dark:text-gray-300">${p.ocs}</td>
             <td class="py-2.5 px-3 text-right text-slate-600 dark:text-gray-400">${p.socCount}</td>
             <td class="py-2.5 px-3 text-right text-slate-600 dark:text-gray-300">${formatMoney(ticket)}</td>
@@ -3048,6 +3440,343 @@ function renderTopSuppliersTable(st) {
             <td class="py-2.5 px-3 text-right font-bold text-cresta-red dark:text-emerald-400">${accumPct.toFixed(1)}%</td>
         </tr>`;
     }).join('');
+}
+
+function jumpToSupplier360(provName) {
+    const sel = document.getElementById('sup360Selector');
+    sel.value = provName;
+    setMainTab('supplier');
+}
+
+// =====================================================================
+// RENDERIZACIÓN MÓDULO 3: PORTAL 360° PROVEEDOR (EXCLUSIVO OCs EN FIRME)
+// =====================================================================
+async function renderSupplier360View() {
+    await ensureFirmLinesLoaded();
+
+    const selectedProv = document.getElementById('sup360Selector').value;
+    const selectedYear = document.getElementById('filterYear').value;
+    const selectedYm   = document.getElementById('filterMes').value;
+    const selectedQ    = document.getElementById('filterQuarter').value;
+
+    document.getElementById('sup360PeriodTag').textContent = `${getActivePeriodLabel()} · Divisa ${activeCurrency}`;
+    document.getElementById('sup360Title').textContent = selectedProv === 'ALL'
+        ? 'Todos los Proveedores (Consolidado OCs en Firme)'
+        : selectedProv;
+
+    // Universo global de OCs firmes (sin filtrar por proveedor) para calcular % de participación del proveedor
+    const allDivSpendFirm = filterSpendRecordsBase(RAW_DATA.spend_records || [], 'ALL').filter(r => r.is_firm);
+    const periodAllProvFirm = filterByActivePeriod(allDivSpendFirm);
+    const grandTotalPeriod = periodAllProvFirm.reduce((s, r) => s + r.monto, 0);
+
+    // Universo filtrado por el proveedor seleccionado
+    const baseProvSpend = filterSpendRecordsBase(RAW_DATA.spend_records || [], selectedProv).filter(r => r.is_firm);
+    const periodProvOcs = filterByActivePeriod(baseProvSpend).sort((a, b) => b.fecha.localeCompare(a.fecha));
+    cachedSup360Ocs = periodProvOcs;
+
+    const totalMonto = periodProvOcs.reduce((s, r) => s + r.monto, 0);
+    const ocsCount   = periodProvOcs.length;
+    const avgTicket  = ocsCount ? totalMonto / ocsCount : 0;
+    const medTicket  = ocsCount ? median(periodProvOcs.map(r => r.monto)) : 0;
+    const sharePct   = grandTotalPeriod > 0 ? ((totalMonto / grandTotalPeriod) * 100).toFixed(1) : '0.0';
+
+    const sapCount = periodProvOcs.filter(r => r.en_sap).length;
+    const sapPct   = ocsCount ? Math.round((sapCount / ocsCount) * 100) : 0;
+
+    const socSet = new Set(periodProvOcs.map(r => r.sociedad));
+    const fechasSorted = periodProvOcs.map(r => r.fecha).sort();
+    const firstDate = fechasSorted.length ? fechasSorted[0] : '—';
+    const lastDate  = fechasSorted.length ? fechasSorted[fechasSorted.length - 1] : '—';
+
+    // Líneas de producto del proveedor en el periodo (solo OCs en firme)
+    const baseLines = filterSpendRecordsBase(firmLinesCache || [], selectedProv);
+    const periodLines = filterByActivePeriod(baseLines);
+
+    // Agrupar productos comprados al proveedor
+    const prodMap = {};
+    // Ordenar líneas cronológicamente para capturar el último precio real
+    const chronoLines = [...periodLines].sort((a, b) => a.fecha.localeCompare(b.fecha));
+    chronoLines.forEach(l => {
+        const pName = l.producto || '(Sin descripción)';
+        if (!prodMap[pName]) {
+            prodMap[pName] = {
+                producto: pName,
+                ocs: new Set(),
+                qty: 0,
+                monto: 0,
+                minPu: l.pu > 0 ? l.pu : Infinity,
+                maxPu: l.pu > 0 ? l.pu : 0,
+                lastPu: l.pu,
+                lastDate: l.fecha
+            };
+        }
+        prodMap[pName].ocs.add(l.oc_odoo);
+        prodMap[pName].qty += l.cantidad;
+        prodMap[pName].monto += l.total;
+        if (l.pu > 0) {
+            if (l.pu < prodMap[pName].minPu) prodMap[pName].minPu = l.pu;
+            if (l.pu > prodMap[pName].maxPu) prodMap[pName].maxPu = l.pu;
+            prodMap[pName].lastPu = l.pu;
+            prodMap[pName].lastDate = l.fecha;
+        }
+    });
+
+    cachedSup360Products = Object.values(prodMap)
+        .map(p => ({
+            producto: p.producto,
+            ocsCount: p.ocs.size,
+            qty: p.qty,
+            monto: p.monto,
+            minPu: p.minPu === Infinity ? 0 : p.minPu,
+            maxPu: p.maxPu,
+            avgPu: p.qty > 0 ? p.monto / p.qty : 0,
+            lastPu: p.lastPu,
+            pct: totalMonto > 0 ? (p.monto / totalMonto) * 100 : 0
+        }))
+        .sort((a, b) => b.monto - a.monto);
+
+    // Comparativa con periodo anterior / Comparar Q
+    let prevOcs = null;
+    let prevLabel = '';
+    if (periodMode === 'compare_q') {
+        const yq1 = document.getElementById('filterCompareQ1').value;
+        const yq2 = document.getElementById('filterCompareQ2').value;
+        prevOcs = filterRecordsByYearQuarter(baseProvSpend, yq2);
+        prevLabel = formatYearQuarterShort(yq2);
+        renderSup360CompareQ(yq1, yq2, periodProvOcs, prevOcs);
+    } else if (periodMode === 'month') {
+        const allMeses = RAW_DATA.filters.meses;
+        const idx = allMeses.indexOf(selectedYm);
+        if (idx > 0) {
+            prevOcs = baseProvSpend.filter(r => r.ym === allMeses[idx - 1]);
+            prevLabel = MONTH_NAMES[allMeses[idx - 1].split('-')[1]];
+        }
+    } else if (periodMode === 'quarter') {
+        const order = ['Q1', 'Q2', 'Q3', 'Q4'];
+        const idx = order.indexOf(selectedQ);
+        const prevY = idx > 0 ? selectedYear : String(Number(selectedYear) - 1);
+        const prevQ = idx > 0 ? order[idx - 1] : 'Q4';
+        prevOcs = filterRecordsByYearQuarter(baseProvSpend, `${prevY}-${prevQ}`);
+        prevLabel = `${prevQ} ${prevY !== selectedYear ? prevY : ''}`.trim();
+    }
+
+    // Actualizar 5 KPIs
+    document.getElementById('s360Kpi1Val').textContent = formatMoney(totalMonto);
+    document.getElementById('s360Kpi1Sub').textContent = selectedProv === 'ALL'
+        ? `100% del gasto firme en ${activeCurrency}`
+        : `Representa el ${sharePct}% del gasto total del periodo`;
+
+    const k1Badge = document.getElementById('s360Kpi1Badge');
+    if (prevOcs && prevOcs.length > 0) {
+        const prevMonto = prevOcs.reduce((s, r) => s + r.monto, 0);
+        const diffPct = prevMonto > 0 ? Math.round(((totalMonto - prevMonto) / prevMonto) * 100) : 0;
+        k1Badge.textContent = `${diffPct >= 0 ? '+' : ''}${diffPct}% vs ${prevLabel}`;
+    } else {
+        k1Badge.textContent = activeCurrency;
+    }
+
+    document.getElementById('s360Kpi2Val').textContent   = formatMoney(avgTicket);
+    document.getElementById('s360Kpi2Badge').textContent = `${ocsCount.toLocaleString()} OCs`;
+    document.getElementById('s360Kpi2Sub').textContent   = `Mediana por orden: ${formatMoney(medTicket)}`;
+
+    document.getElementById('s360Kpi3Val').textContent   = cachedSup360Products.length.toLocaleString();
+    document.getElementById('s360Kpi3Badge').textContent = `${periodLines.length.toLocaleString()} líneas`;
+
+    document.getElementById('s360Kpi4Val').textContent   = lastDate;
+    document.getElementById('s360Kpi4Badge').textContent = `${socSet.size} Soc.`;
+    document.getElementById('s360Kpi4Sub').textContent   = `Primera compra: ${firstDate}`;
+
+    document.getElementById('s360Kpi5Val').textContent   = `${sapPct}%`;
+    document.getElementById('s360Kpi5Sub').textContent   = `${sapCount} de ${ocsCount} órdenes en SAP`;
+
+    // Gráfica 1: Tendencia Mensual de Compras al Proveedor
+    const chartYear = periodMode === 'compare_q'
+        ? document.getElementById('filterCompareQ1').value.split('-')[0]
+        : selectedYear;
+    const meses = RAW_DATA.filters.meses.filter(m => m.startsWith(`${chartYear}-`));
+
+    const mMontos = meses.map(m => Number(baseProvSpend.filter(r => r.ym === m).reduce((s, r) => s + r.monto, 0).toFixed(2)));
+    const mOcs    = meses.map(m => baseProvSpend.filter(r => r.ym === m).length);
+
+    const themeCfg = getChartThemeConfig();
+    const optTrend = {
+        chart: { type: 'line', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        stroke: { width: [0, 3], curve: 'smooth' },
+        colors: isDark ? ['#6366F1', '#34D399'] : ['#1B2A4A', '#C8102E'],
+        plotOptions: { bar: { borderRadius: 5, columnWidth: '48%' } },
+        series: [
+            { name: `Monto (${activeCurrency})`, type: 'column', data: mMontos },
+            { name: 'Órdenes (OCs)', type: 'line', data: mOcs }
+        ],
+        xaxis: { categories: meses.map(formatMonthOnly), labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
+        yaxis: [
+            {
+                title: { text: `Monto (${activeCurrency})`, style: { fontSize: '10px', color: themeCfg.labelColor } },
+                labels: { formatter: v => formatMoneyCompact(v), style: { colors: themeCfg.labelColor } }
+            },
+            {
+                opposite: true,
+                title: { text: 'OCs', style: { fontSize: '10px', color: themeCfg.labelColor } },
+                labels: { formatter: v => Math.round(v), style: { colors: themeCfg.labelColor } }
+            }
+        ],
+        markers: { size: 4 },
+        tooltip: {
+            y: { formatter: (val, { seriesIndex }) => seriesIndex === 0 ? formatMoney(val) : `${val} OCs` }
+        },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
+        legend: { position: 'top', fontSize: '11px' }
+    };
+
+    if (charts.sup360Trend) charts.sup360Trend.destroy();
+    charts.sup360Trend = new ApexCharts(document.querySelector('#chartSup360Trend'), optTrend);
+    charts.sup360Trend.render();
+
+    // Gráfica 2: Top 10 Productos que le Compramos al Proveedor
+    const top10Prods = cachedSup360Products.slice(0, 10);
+    const optProds = {
+        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        noData: { text: 'Sin líneas de producto en este filtro', style: { color: themeCfg.labelColor, fontSize: '12px' } },
+        plotOptions: { bar: { horizontal: true, borderRadius: 4, barHeight: '62%' } },
+        colors: isDark ? ['#38BDF8'] : ['#264073'],
+        series: [{ name: `Monto (${activeCurrency})`, data: top10Prods.map(p => Number(p.monto.toFixed(2))) }],
+        xaxis: {
+            categories: top10Prods.map(p => shortProduct(p.producto)),
+            labels: { formatter: v => formatMoneyCompact(v), style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, formatter: v => formatMoneyCompact(v), style: { fontSize: '9px' } },
+        tooltip: {
+            y: { formatter: (val, { dataPointIndex }) => `${formatMoney(val)} · ${top10Prods[dataPointIndex].qty.toLocaleString()} uds` }
+        },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.sup360Products) charts.sup360Products.destroy();
+    charts.sup360Products = new ApexCharts(document.querySelector('#chartSup360Products'), optProds);
+    charts.sup360Products.render();
+
+    renderSup360TablesOnly();
+}
+
+function renderSup360CompareQ(yq1, yq2, ocs1, ocs2) {
+    const lbl1 = formatYearQuarterShort(yq1);
+    const lbl2 = formatYearQuarterShort(yq2);
+    document.getElementById('sup360CompareQTitle').textContent = `${lbl1} vs ${lbl2} (${activeCurrency})`;
+
+    const m1 = ocs1.reduce((s, r) => s + r.monto, 0);
+    const m2 = ocs2.reduce((s, r) => s + r.monto, 0);
+    const t1 = ocs1.length ? m1 / ocs1.length : 0;
+    const t2 = ocs2.length ? m2 / ocs2.length : 0;
+
+    document.getElementById('sup360CompareQHead').innerHTML = `<tr>
+        <th class="py-2 px-3 font-bold">Métrica del Proveedor</th>
+        <th class="py-2 px-3 text-right font-bold">${lbl1}</th>
+        <th class="py-2 px-3 text-right font-bold">${lbl2}</th>
+        <th class="py-2 px-3 text-right font-bold">Diferencia</th>
+    </tr>`;
+
+    const diffMonto = m1 - m2;
+    const diffPct = m2 > 0 ? ((diffMonto / m2) * 100).toFixed(1) + '%' : 'N/D';
+
+    document.getElementById('sup360CompareQBody').innerHTML = `
+        <tr>
+            <td class="py-2 px-3 font-medium">Monto Comprado (OCs Firmes)</td>
+            <td class="py-2 px-3 text-right font-bold text-cresta-navy dark:text-white">${formatMoney(m1)}</td>
+            <td class="py-2 px-3 text-right">${formatMoney(m2)}</td>
+            <td class="py-2 px-3 text-right font-bold ${diffMonto <= 0 ? 'text-emerald-600' : 'text-amber-600'}">${diffMonto >= 0 ? '+' : ''}${formatMoney(diffMonto)} (${diffPct})</td>
+        </tr>
+        <tr>
+            <td class="py-2 px-3 font-medium">Cantidad de OCs Firmes</td>
+            <td class="py-2 px-3 text-right font-bold">${ocs1.length}</td>
+            <td class="py-2 px-3 text-right">${ocs2.length}</td>
+            <td class="py-2 px-3 text-right font-bold">${ocs1.length - ocs2.length >= 0 ? '+' : ''}${ocs1.length - ocs2.length} OCs</td>
+        </tr>
+        <tr>
+            <td class="py-2 px-3 font-medium">Ticket Promedio por OC</td>
+            <td class="py-2 px-3 text-right font-bold">${formatMoney(t1)}</td>
+            <td class="py-2 px-3 text-right">${formatMoney(t2)}</td>
+            <td class="py-2 px-3 text-right font-bold">${formatMoney(t1 - t2)}</td>
+        </tr>
+    `;
+}
+
+function renderSup360TablesOnly() {
+    const q = (document.getElementById('sup360ProdSearch').value || '').trim().toLowerCase();
+    const filteredProds = q
+        ? cachedSup360Products.filter(p => p.producto.toLowerCase().includes(q))
+        : cachedSup360Products;
+
+    const prodTbody = document.getElementById('sup360ProductsTableBody');
+    if (!filteredProds.length) {
+        prodTbody.innerHTML = `<tr><td colspan="9" class="py-6 text-center text-slate-400">No hay productos registrados en este filtro.</td></tr>`;
+    } else {
+        prodTbody.innerHTML = filteredProds.slice(0, 150).map(p => `
+            <tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40">
+                <td class="py-2 px-3 font-medium text-slate-800 dark:text-gray-200">${escapeHtml(p.producto)}</td>
+                <td class="py-2 px-3 text-right text-slate-600 dark:text-gray-300">${p.ocsCount}</td>
+                <td class="py-2 px-3 text-right font-semibold text-slate-700 dark:text-gray-200">${p.qty.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                <td class="py-2 px-3 text-right text-slate-500 dark:text-gray-400">${formatMoney(p.minPu)}</td>
+                <td class="py-2 px-3 text-right font-semibold text-cresta-blue dark:text-sky-400">${formatMoney(p.avgPu)}</td>
+                <td class="py-2 px-3 text-right text-slate-500 dark:text-gray-400">${formatMoney(p.maxPu)}</td>
+                <td class="py-2 px-3 text-right font-bold text-emerald-700 dark:text-emerald-400">${formatMoney(p.lastPu)}</td>
+                <td class="py-2 px-3 text-right font-bold text-cresta-navy dark:text-white">${formatMoney(p.monto)}</td>
+                <td class="py-2 px-3 text-right font-semibold text-cresta-red dark:text-amber-400">${p.pct.toFixed(1)}%</td>
+            </tr>
+        `).join('');
+    }
+
+    const ocsTbody = document.getElementById('sup360OcsTableBody');
+    document.getElementById('sup360OcsCountLabel').textContent = `${cachedSup360Ocs.length.toLocaleString()} órdenes firmes`;
+
+    if (!cachedSup360Ocs.length) {
+        ocsTbody.innerHTML = `<tr><td colspan="8" class="py-6 text-center text-slate-400">No hay órdenes firmes en este filtro.</td></tr>`;
+    } else {
+        ocsTbody.innerHTML = cachedSup360Ocs.slice(0, 200).map(r => {
+            const sapTag = r.en_sap
+                ? `<span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800">SAP ${escapeHtml(r.oc_sap)}</span>`
+                : `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">${escapeHtml(r.estado_oc)}</span>`;
+
+            return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40">
+                <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(r.fecha)}</td>
+                <td class="py-2 px-3">${renderOcLinks(r.oc_odoo)}</td>
+                <td class="py-2 px-3">${renderSolLink(r.solicitud)}</td>
+                <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(r.sociedad)}</td>
+                <td class="py-2 px-3 font-medium text-slate-800 dark:text-gray-200">${escapeHtml(r.proveedor)}</td>
+                <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(shortName(r.comprador))}</td>
+                <td class="py-2 px-3">${sapTag}</td>
+                <td class="py-2 px-3 text-right font-bold text-cresta-navy dark:text-sky-400">${formatMoney(r.monto, r.divisa)}</td>
+            </tr>`;
+        }).join('');
+    }
+}
+
+function exportSupplier360CSV() {
+    const selectedProv = document.getElementById('sup360Selector').value;
+    const provLabel = selectedProv === 'ALL' ? 'todos_proveedores' : selectedProv.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+
+    const headers = ['Proveedor', 'Producto / Servicio', 'OCs', 'Cantidad Total', 'Divisa', 'Precio Minimo', 'Precio Promedio', 'Precio Maximo', 'Ultimo Precio', 'Monto Total', '% Participacion'];
+    const csvLines = [headers.join(',')];
+
+    cachedSup360Products.forEach(p => {
+        csvLines.push([
+            `"${selectedProv.replace(/"/g, '""')}"`,
+            `"${p.producto.replace(/"/g, '""').replace(/\n/g, ' ')}"`,
+            p.ocsCount,
+            p.qty.toFixed(2),
+            `"${activeCurrency}"`,
+            p.minPu.toFixed(4),
+            p.avgPu.toFixed(4),
+            p.maxPu.toFixed(4),
+            p.lastPu.toFixed(4),
+            p.monto.toFixed(2),
+            p.pct.toFixed(2)
+        ].join(','));
+    });
+
+    downloadCsvBlob(csvLines.join('\n'), `portal360_${provLabel}_${activeCurrency}_${RAW_DATA.cutoff_date}.csv`);
 }
 
 // =====================================================================

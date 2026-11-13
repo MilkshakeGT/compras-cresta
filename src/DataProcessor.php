@@ -137,6 +137,16 @@ class DataProcessor
         return false;
     }
 
+    private function normalizeAccents(string $str): string
+    {
+        $map = [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u',
+            'Á' => 'a', 'É' => 'e', 'Í' => 'i', 'Ó' => 'o', 'Ú' => 'u',
+            'ñ' => 'n', 'Ñ' => 'n'
+        ];
+        return mb_strtolower(trim(strtr($str, $map)));
+    }
+
     public function getProcessedData(bool $forceSync = false): array
     {
         $syncStatus = $this->syncFromOneDrive($forceSync);
@@ -149,7 +159,7 @@ class DataProcessor
 
         if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 9) {
+            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 10) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
@@ -187,6 +197,7 @@ class DataProcessor
 
         $normalizedRows = [];
         $maxDateTs = 0;
+        $buyerNamesNorm = [];
 
         for ($i = 1; $i < count($rawRows); $i++) {
             $r = $rawRows[$i];
@@ -215,17 +226,33 @@ class DataProcessor
                 $maxDateTs = $fCreacionSolTs;
             }
 
+            $compName = trim((string)($lastHeaderData['Comprador'] ?? 'Sin asignar'));
+            if ($compName !== '' && $compName !== 'Sin asignar') {
+                $buyerNamesNorm[$this->normalizeAccents($compName)] = true;
+            }
+
+            $rawTotalOc = $getCol($r, 'Total OC');
+            $totalOcFloat = is_numeric($rawTotalOc) ? round((float)$rawTotalOc, 2) : 0.0;
+
+            $divisa = strtoupper(trim((string)($getCol($r, 'Divisa') ?? 'GTQ')));
+            if ($divisa === '') {
+                $divisa = 'GTQ';
+            }
+
             $normalizedRows[] = [
                 'solicitud'          => trim((string)$lastHeaderData['Solicitud']),
                 'estado_sol'         => trim((string)($lastHeaderData['Estado Solicitud'] ?? '')),
                 'solicitado_por'     => trim((string)($lastHeaderData['Solicitado por'] ?? '')),
                 'autorizador_sol'    => trim((string)($lastHeaderData['Autorizador Solicitud'] ?? '')),
                 'autorizador_oc_1'   => trim((string)($getCol($r, 'Autorizador 1') ?? '')),
-                'comprador'          => trim((string)($lastHeaderData['Comprador'] ?? 'Sin asignar')),
+                'comprador'          => $compName !== '' ? $compName : 'Sin asignar',
                 'sociedad'           => trim((string)($lastHeaderData['Sociedad'] ?? 'Sin sociedad')),
                 'no_oc_odoo'         => trim((string)($getCol($r, 'NO. OC Odoo') ?? '')),
                 'no_oc_sap'          => trim((string)($getCol($r, 'NO. OC SAP') ?? '')),
                 'estado_oc'          => trim((string)($getCol($r, 'Estado OC') ?? '')),
+                'proveedor'          => trim((string)($getCol($r, 'Proveedor') ?? 'Sin proveedor')),
+                'divisa'             => $divisa,
+                'total_oc'           => $totalOcFloat,
                 'ts_creacion_sol'    => $fCreacionSolTs,
                 'ts_aprobacion_sol'  => $fAprobacionSolTs,
                 'ts_creacion_oc'     => $fCreacionOcTs,
@@ -239,6 +266,11 @@ class DataProcessor
         $solicitudesMap = [];
         $ocStats = [];
         $ocRecords = [];
+        $firmOcs = [];
+        $proveedoresSet = [];
+
+        // Estados de OC considerados en firme (excluye Solicitud de cotización y Cancelado)
+        $firmStates = ['orden de compra', 'para aprobar 1', 'para aprobar 2'];
 
         foreach ($normalizedRows as $row) {
             $solId = $row['solicitud'];
@@ -249,7 +281,8 @@ class DataProcessor
             $estadoSolLower = mb_strtolower($row['estado_sol']);
             $isSolRechazada = ($estadoSolLower === 'rechazado');
             $isSolBorrador  = ($estadoSolLower === 'borrador' || $estadoSolLower === 'draft');
-            $isOcCancelada  = (mb_strtolower($row['estado_oc']) === 'cancelado');
+            $estadoOcLower  = mb_strtolower($row['estado_oc']);
+            $isOcCancelada  = ($estadoOcLower === 'cancelado');
 
             if ($row['no_oc_odoo'] !== '') {
                 $ym = date('Y-m', $row['ts_creacion_sol']);
@@ -271,10 +304,36 @@ class DataProcessor
                         'solicitud'         => $solId,
                         'ym'                => date('Y-m', $row['ts_creacion_oc']),
                         'sociedad'          => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
-                        'comprador'         => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                        'comprador'         => $row['comprador'],
                         'aprobador_oc'      => $aprobOcName,
                         'aprob_oc_excluido' => $this->isExcludedApprover($aprobOcName),
                         'd_aprob_oc'        => $diasAprobOc,
+                    ];
+                }
+
+                // Registrar OCs en firme para el módulo de Gestión de Gasto y Proveedores
+                if (!$isSolRechazada && !$isSolBorrador && in_array($estadoOcLower, $firmStates, true)) {
+                    $provName = $row['proveedor'] !== '' ? $row['proveedor'] : 'Sin proveedor';
+                    $provNorm = $this->normalizeAccents($provName);
+                    $isCajaChica = isset($buyerNamesNorm[$provNorm]);
+                    $ocDateTs = $row['ts_creacion_oc'] ?? $row['ts_creacion_sol'];
+
+                    $proveedoresSet[$provName] = true;
+
+                    $firmOcs[] = [
+                        'oc_odoo'       => $row['no_oc_odoo'],
+                        'oc_sap'        => $row['no_oc_sap'],
+                        'solicitud'     => $solId,
+                        'ym'            => date('Y-m', $ocDateTs),
+                        'fecha'         => date('Y-m-d', $ocDateTs),
+                        'sociedad'      => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
+                        'comprador'     => $row['comprador'],
+                        'proveedor'     => $provName,
+                        'is_caja_chica' => $isCajaChica,
+                        'divisa'        => $row['divisa'],
+                        'total_oc'      => $row['total_oc'],
+                        'estado_oc'     => $row['estado_oc'],
+                        'en_sap'        => ($row['no_oc_sap'] !== ''),
                     ];
                 }
             }
@@ -289,7 +348,7 @@ class DataProcessor
                     'aprob_sol_excluido' => $this->isExcludedApprover($aprobSolName),
                     'is_rechazada'       => $isSolRechazada,
                     'is_borrador'        => $isSolBorrador,
-                    'comprador'          => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                    'comprador'          => $row['comprador'],
                     'sociedad'           => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
                     'ts_creacion_sol'    => $row['ts_creacion_sol'],
                     'ts_aprobacion_sol'  => $row['ts_aprobacion_sol'],
@@ -324,7 +383,6 @@ class DataProcessor
             $compradores[$sol['comprador']] = true;
             $meses[$ym]                     = true;
 
-            // Excluir rechazadas, borradores (aún no llegan a bandeja del comprador) y solicitudes con todas sus OCs canceladas
             $excluida = $sol['is_rechazada'] || $sol['is_borrador'] || ($sol['has_any_oc'] && $sol['all_ocs_canceled']);
 
             $diasAprobSol = null;
@@ -334,53 +392,50 @@ class DataProcessor
 
             $firstOcOdooTs = null;
             $firstSapTs    = null;
-            $ocCodes       = [];
-            $ocStates      = [];
+            $ocCodes       = [];$ocStates      = [];
 
-            foreach ($sol['valid_ocs'] as $oc) {
+            foreach ($sol['valid_ocs'] as$oc) {
                 if ($oc['no_oc_odoo'] !== '') {
-                    $ocCodes[] = $oc['no_oc_odoo'];
+                    $ocCodes[] =$oc['no_oc_odoo'];
                 }
                 if ($oc['estado_oc'] !== '') {
-                    $ocStates[] = $oc['estado_oc'];
+                    $ocStates[] =$oc['estado_oc'];
                 }
                 if ($oc['ts_creacion_oc'] !== null) {
-                    if ($firstOcOdooTs === null || $oc['ts_creacion_oc'] < $firstOcOdooTs) {
-                        $firstOcOdooTs = $oc['ts_creacion_oc'];
+                    if ($firstOcOdooTs === null || $oc['ts_creacion_oc'] <$firstOcOdooTs) {
+                        $firstOcOdooTs =$oc['ts_creacion_oc'];
                     }
                 }
                 if ($oc['ts_creacion_sap'] !== null) {
-                    if ($firstSapTs === null || $oc['ts_creacion_sap'] < $firstSapTs) {
-                        $firstSapTs = $oc['ts_creacion_sap'];
+                    if ($firstSapTs === null || $oc['ts_creacion_sap'] <$firstSapTs) {
+                        $firstSapTs =$oc['ts_creacion_sap'];
                     }
                 }
             }
 
             $diasGestionComprador = null;
             $tieneOcOdoo = ($firstOcOdooTs !== null);
-            if (!$excluida && $tsAprobacionSol !== null) {
-                $endTs = $tieneOcOdoo ? $firstOcOdooTs : $cutoffTs;
-                $diasGestionComprador = round(max(0, ($endTs - $tsAprobacionSol) / 86400), 2);
+            if (!$excluida &&$tsAprobacionSol !== null) {
+                $endTs =$tieneOcOdoo ? $firstOcOdooTs :$cutoffTs;
+                $diasGestionComprador = round(max(0, ($endTs -$tsAprobacionSol) / 86400), 2);
             }
 
             $diasAprobSap = null;
             $tieneOcSap = ($firstSapTs !== null);
-            if (!$excluida && $tieneOcOdoo && $tieneOcSap) {
-                $diasAprobSap = round(max(0, ($firstSapTs - $firstOcOdooTs) / 86400), 2);
+            if (!$excluida &&$tieneOcOdoo && $tieneOcSap) {$diasAprobSap = round(max(0, ($firstSapTs -$firstOcOdooTs) / 86400), 2);
             }
 
             $diasAprobToSap = null;
-            if (!$excluida && $tsAprobacionSol !== null) {
-                $endSapTs = $tieneOcSap ? $firstSapTs : $cutoffTs;
-                $diasAprobToSap = round(max(0, ($endSapTs - $tsAprobacionSol) / 86400), 2);
+            if (!$excluida &&$tsAprobacionSol !== null) {
+                $endSapTs =$tieneOcSap ? $firstSapTs :$cutoffTs;
+                $diasAprobToSap = round(max(0, ($endSapTs -$tsAprobacionSol) / 86400), 2);
             }
 
             $diasCicloTotal = null;
-            if (!$excluida && $tieneOcSap) {
-                $diasCicloTotal = round(max(0, ($firstSapTs - $tsCreacionSol) / 86400), 2);
+            if (!$excluida && $tieneOcSap) {$diasCicloTotal = round(max(0, ($firstSapTs -$tsCreacionSol) / 86400), 2);
             }
 
-            $edadDias = round(($cutoffTs - $tsCreacionSol) / 86400, 1);
+            $edadDias = round(($cutoffTs -$tsCreacionSol) / 86400, 1);
 
             $records[] = [
                 'id'                 => $sol['solicitud'],
@@ -413,11 +468,13 @@ class DataProcessor
         ksort($meses);
         $listSociedades  = array_keys($sociedades);
         $listCompradores = array_keys($compradores);
+        $listProveedores = array_keys($proveedoresSet);
         sort($listSociedades);
         sort($listCompradores);
+        sort($listProveedores);
 
         $output = [
-            'schema_v'      => 9,
+            'schema_v'      => 10,
             'excel_mtime'   => $excelMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),
@@ -426,10 +483,12 @@ class DataProcessor
                 'meses'       => array_keys($meses),
                 'sociedades'  => $listSociedades,
                 'compradores' => $listCompradores,
+                'proveedores' => $listProveedores,
             ],
             'oc_stats'      => $ocStats,
             'records'       => $records,
             'oc_records'    => $ocRecords,
+            'firm_ocs'      => $firmOcs,
         ];
 
         file_put_contents($this->cachePath, json_encode($output, JSON_UNESCAPED_UNICODE));

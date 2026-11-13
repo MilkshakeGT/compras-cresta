@@ -14,3 +14,6 @@ Thumbs.db
 data/*.xlsx
 data/*.json
 data/onedrive.config.php
+
+#Seguridad
+data/auth.config.php

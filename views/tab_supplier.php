@@ -25,7 +25,7 @@
             </select>
             <button type="button" onclick="exportSupplier360CSV()"
                 class="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition shrink-0">
-                Exportar Reporte CSV
+                Exportar a Excel
             </button>
         </div>
     </section>

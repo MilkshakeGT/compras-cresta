@@ -8,6 +8,9 @@ class DataProcessor
     private string $excelPath;
     private string $cachePath;
     private string $configPath;
+    private string $solExcelPath;
+    private string $ocExcelPath;
+    private string $detailsCachePath;
 
     // Aprobadores retirados / inactivos que distorsionan el ranking operativo
     private array $excludedApprovers = [
@@ -17,34 +20,30 @@ class DataProcessor
 
     public function __construct(string $excelPath, string $cachePath, ?string $configPath = null)
     {
-        $this->excelPath  = $excelPath;
-        $this->cachePath  = $cachePath;
-        $this->configPath = $configPath ?? dirname($excelPath) . '/onedrive.config.php';
+        $dataDir = dirname($excelPath);
+        $this->excelPath        = $excelPath;
+        $this->cachePath        = $cachePath;
+        $this->configPath       = $configPath ?? $dataDir . '/onedrive.config.php';
+        $this->solExcelPath     = $dataDir . '/Solicitudes.xlsx';
+        $this->ocExcelPath      = $dataDir . '/OC.xlsx';
+        $this->detailsCachePath = $dataDir . '/details_cache.json';
     }
 
-    public function syncFromOneDrive(bool $force = false): array
+    private function downloadSingleOneDriveFile(string $rawUrl, string $targetPath, int $ttl, bool $force): array
     {
-        if (!file_exists($this->configPath)) {
-            return ['synced' => false, 'source' => 'local', 'message' => 'Modo local (sin onedrive.config.php)'];
-        }
-
-        $cfg = require $this->configPath;
-        $rawUrl = trim((string)($cfg['onedrive_url'] ?? ''));
-        $ttl    = (int)($cfg['sync_ttl_seconds'] ?? 1800);
-
         if ($rawUrl === '' || str_contains($rawUrl, 'PEGA_AQUI')) {
-            return ['synced' => false, 'source' => 'local', 'message' => 'URL de OneDrive pendiente de configurar'];
+            return ['synced' => false, 'source' => 'local', 'message' => 'URL pendiente'];
         }
 
-        if (!$force && file_exists($this->excelPath)) {
-            $age = time() - filemtime($this->excelPath);
+        if (!$force && file_exists($targetPath)) {
+            $age = time() - filemtime($targetPath);
             if ($age < $ttl) {
                 return ['synced' => false, 'source' => 'onedrive_cached', 'message' => 'Caché reciente'];
             }
         }
 
         $downloadUrl = $this->buildDirectDownloadUrl($rawUrl);
-        $tmpFile = $this->excelPath . '.tmp.' . uniqid();
+        $tmpFile = $targetPath . '.tmp.' . uniqid();
 
         $ch = curl_init($downloadUrl);
         $fp = fopen($tmpFile, 'wb');
@@ -65,12 +64,12 @@ class DataProcessor
         curl_close($ch);
         fclose($fp);
 
-        if (!$ok || $httpCode >= 400 || !file_exists($tmpFile) || filesize($tmpFile) < 2048) {
+        if (!$ok || $httpCode >= 400 || !file_exists($tmpFile) || filesize($tmpFile) < 1024) {
             @unlink($tmpFile);
             return [
                 'synced'  => false,
                 'source'  => 'local_fallback',
-                'message' => "No se pudo descargar desde OneDrive (HTTP {$httpCode} {$curlErr}). Usando copia local."
+                'message' => "Error HTTP {$httpCode} {$curlErr}"
             ];
         }
 
@@ -88,22 +87,54 @@ class DataProcessor
             return [
                 'synced'  => false,
                 'source'  => 'local_fallback',
-                'message' => 'El enlace de OneDrive no devolvió un archivo Excel válido. Usando copia local.'
+                'message' => 'Respuesta no es un .xlsx válido'
             ];
         }
 
         $newHash = md5_file($tmpFile);
-        $oldHash = file_exists($this->excelPath) ? md5_file($this->excelPath) : '';
+        $oldHash = file_exists($targetPath) ? md5_file($targetPath) : '';
 
         if ($newHash !== $oldHash) {
-            rename($tmpFile, $this->excelPath);
-            touch($this->excelPath);
-            return ['synced' => true, 'source' => 'onedrive', 'message' => 'Actualizado desde OneDrive'];
+            rename($tmpFile, $targetPath);
+            touch($targetPath);
+            return ['synced' => true, 'source' => 'onedrive', 'message' => 'Actualizado'];
         }
 
         @unlink($tmpFile);
-        touch($this->excelPath);
-        return ['synced' => true, 'source' => 'onedrive', 'message' => 'Sin cambios nuevos en OneDrive'];
+        touch($targetPath);
+        return ['synced' => true, 'source' => 'onedrive', 'message' => 'Sin cambios'];
+    }
+
+    public function syncFromOneDrive(bool $force = false): array
+    {
+        if (!file_exists($this->configPath)) {
+            return ['synced' => false, 'source' => 'local', 'message' => 'Modo local (sin onedrive.config.php)'];
+        }
+
+        $cfg = require $this->configPath;
+        $ttl = (int)($cfg['sync_ttl_seconds'] ?? 1800);
+
+        $urlDb  = trim((string)($cfg['onedrive_url'] ?? ''));
+        $urlSol = trim((string)($cfg['onedrive_solicitudes_url'] ?? ''));
+        $urlOc  = trim((string)($cfg['onedrive_oc_url'] ?? ''));
+
+        $resDb  = $this->downloadSingleOneDriveFile($urlDb, $this->excelPath, $ttl, $force);
+        $resSol = $this->downloadSingleOneDriveFile($urlSol, $this->solExcelPath, $ttl, $force);
+        $resOc  = $this->downloadSingleOneDriveFile($urlOc, $this->ocExcelPath, $ttl, $force);
+
+        $msgs = ["DB: {$resDb['message']}"];
+        if ($urlSol !== '' && !str_contains($urlSol, 'PEGA_AQUI')) {
+            $msgs[] = "Solicitudes: {$resSol['message']}";
+        }
+        if ($urlOc !== '' && !str_contains($urlOc, 'PEGA_AQUI')) {
+            $msgs[] = "OC: {$resOc['message']}";
+        }
+
+        return [
+            'synced'  => ($resDb['synced'] || $resSol['synced'] || $resOc['synced']),
+            'source'  => $resDb['source'],
+            'message' => implode(' · ', $msgs)
+        ];
     }
 
     private function buildDirectDownloadUrl(string $url): string
@@ -148,9 +179,170 @@ class DataProcessor
         return preg_replace('/\s+/', ' ', $s);
     }
 
+    private function rebuildDetailsCacheIfNeeded(bool $force = false): void
+    {
+        $solMtime = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
+        $ocMtime  = file_exists($this->ocExcelPath) ? filemtime($this->ocExcelPath) : 0;
+
+        if (!$force && file_exists($this->detailsCachePath)) {
+            $existing = json_decode(file_get_contents($this->detailsCachePath), true);
+            if (is_array($existing)
+                && ($existing['schema_v'] ?? 0) === 1
+                && ($existing['sol_mtime'] ?? -1) === $solMtime
+                && ($existing['oc_mtime'] ?? -1) === $ocMtime
+            ) {
+                return;
+            }
+        }
+
+        $solDetails = [];
+        if ($solMtime > 0) {
+            $rows = SimpleXLSX::parse($this->solExcelPath);
+            if (count($rows) > 1) {
+                $headers = array_map(fn($h) => mb_strtolower(trim((string)$h)), $rows[0]);
+                $colMap  = array_flip($headers);
+                $idxId   = $colMap['solicitud'] ?? 0;
+                $idxProd = $colMap['producto solicitado'] ?? 1;
+                $idxQty  = $colMap['cantidad solicitada'] ?? 2;
+
+                for ($i = 1; $i < count($rows); $i++) {
+                    $r = $rows[$i];
+                    $id = trim((string)($r[$idxId] ?? ''));
+                    if ($id === '') {
+                        continue;
+                    }
+                    $prod = trim((string)($r[$idxProd] ?? ''));
+                    $qtyRaw = $r[$idxQty] ?? null;
+                    $qty = is_numeric($qtyRaw) ? round((float)$qtyRaw, 4) : 0.0;
+
+                    if ($prod === '' && $qty === 0.0) {
+                        continue;
+                    }
+                    if (!isset($solDetails[$id])) {
+                        $solDetails[$id] = [];
+                    }
+                    $solDetails[$id][] = [
+                        'producto' => $prod !== '' ? $prod : '(Sin descripción)',
+                        'cantidad' => $qty,
+                    ];
+                }
+            }
+        }
+
+        $ocDetails = [];
+        if ($ocMtime > 0) {
+            $rows = SimpleXLSX::parse($this->ocExcelPath);
+            if (count($rows) > 1) {
+                $headers = array_map(fn($h) => mb_strtolower(trim((string)$h)), $rows[0]);
+                $colMap  = array_flip($headers);
+                $idxId   = $colMap['no. oc'] ?? 0;
+                $idxProv = $colMap['proveedor'] ?? 1;
+                $idxProd = $colMap['producto'] ?? 2;
+                $idxQty  = $colMap['cantidad comprada'] ?? 3;
+                $idxDiv  = $colMap['divisa'] ?? 4;
+                $idxPu   = $colMap['precio unitario'] ?? 5;
+                $idxTot  = $colMap['total oc'] ?? 6;
+
+                for ($i = 1; $i < count($rows); $i++) {
+                    $r = $rows[$i];
+                    $id = trim((string)($r[$idxId] ?? ''));
+                    if ($id === '') {
+                        continue;
+                    }
+                    $prov = trim((string)($r[$idxProv] ?? ''));
+                    $prod = trim((string)($r[$idxProd] ?? ''));
+                    $qty  = is_numeric($r[$idxQty] ?? null) ? round((float)$r[$idxQty], 4) : 0.0;
+                    $div  = strtoupper(trim((string)($r[$idxDiv] ?? 'GTQ')));
+                    if ($div === '') {
+                        $div = 'GTQ';
+                    }
+                    $pu  = is_numeric($r[$idxPu] ?? null) ? round((float)$r[$idxPu], 4) : 0.0;
+                    $tot = is_numeric($r[$idxTot] ?? null) ? round((float)$r[$idxTot], 2) : round($qty * $pu, 2);
+
+                    if (!isset($ocDetails[$id])) {
+                        $ocDetails[$id] = [
+                            'proveedor' => $prov !== '' ? $prov : 'Sin proveedor',
+                            'divisa'    => $div,
+                            'lineas'    => [],
+                        ];
+                    }
+                    $ocDetails[$id]['lineas'][] = [
+                        'producto'        => $prod !== '' ? $prod : '(Sin descripción)',
+                        'cantidad'        => $qty,
+                        'precio_unitario' => $pu,
+                        'total'           => $tot,
+                    ];
+                }
+            }
+        }
+
+        $detailsPayload = [
+            'schema_v'  => 1,
+            'sol_mtime' => $solMtime,
+            'oc_mtime'  => $ocMtime,
+            'sol'       => $solDetails,
+            'oc'        => $ocDetails,
+        ];
+
+        file_put_contents($this->detailsCachePath, json_encode($detailsPayload, JSON_UNESCAPED_UNICODE));
+    }
+
+    public function getDocumentDetail(string $type, string $id): array
+    {
+        $this->rebuildDetailsCacheIfNeeded(false);
+
+        $id = trim($id);
+        $details = file_exists($this->detailsCachePath)
+            ? json_decode(file_get_contents($this->detailsCachePath), true)
+            : [];
+
+        $mainCache = file_exists($this->cachePath)
+            ? json_decode(file_get_contents($this->cachePath), true)
+            : [];
+
+        if ($type === 'sol') {
+            $meta = null;
+            foreach (($mainCache['records'] ?? []) as $rec) {
+                if (($rec['id'] ?? '') === $id) {
+                    $meta = $rec;
+                    break;
+                }
+            }
+            $lines = $details['sol'][$id] ?? [];
+            return [
+                'found'  => ($meta !== null || !empty($lines)),
+                'type'   => 'sol',
+                'id'     => $id,
+                'meta'   => $meta,
+                'lines'  => $lines,
+            ];
+        }
+
+        if ($type === 'oc') {
+            $meta = null;
+            foreach (($mainCache['spend_records'] ?? []) as $srec) {
+                if (($srec['oc_odoo'] ?? '') === $id) {
+                    $meta = $srec;
+                    break;
+                }
+            }
+            $ocInfo = $details['oc'][$id] ?? null;
+            return [
+                'found'  => ($meta !== null || $ocInfo !== null),
+                'type'   => 'oc',
+                'id'     => $id,
+                'meta'   => $meta,
+                'detail' => $ocInfo,
+            ];
+        }
+
+        return ['found' => false, 'error' => 'Tipo de documento inválido'];
+    }
+
     public function getProcessedData(bool $forceSync = false): array
     {
         $syncStatus = $this->syncFromOneDrive($forceSync);
+        $this->rebuildDetailsCacheIfNeeded($forceSync);
 
         if (!file_exists($this->excelPath)) {
             throw new RuntimeException("No se encontró el archivo data/DB.xlsx en el servidor. " . ($syncStatus['message'] ?? ''));
@@ -160,7 +352,7 @@ class DataProcessor
 
         if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 11) {
+            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 12) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
@@ -260,7 +452,6 @@ class DataProcessor
             ];
         }
 
-        // Construir set de nombres normalizados de compradores para detectar reembolsos/caja chica en Proveedor
         $buyerNamesNorm = [];
         foreach ($normalizedRows as $row) {
             if ($row['comprador'] !== '' && $row['comprador'] !== 'Sin asignar') {
@@ -301,7 +492,6 @@ class DataProcessor
                     $ocStats[$ym]['canceladas']++;
                 }
 
-                // Tiempos de aprobación de OC para pasar a SAP usando exclusivamente 'Autorizador 1'
                 if (!$isSolRechazada && !$isSolBorrador && !$isOcCancelada && $row['ts_creacion_oc'] !== null && $row['ts_aprobacion_oc'] !== null) {
                     $diasAprobOc = round(max(0, ($row['ts_aprobacion_oc'] - $row['ts_creacion_oc']) / 86400), 2);
                     $aprobOcName = $row['autorizador_oc_1'] !== '' ? $row['autorizador_oc_1'] : 'Sin asignar';
@@ -319,7 +509,6 @@ class DataProcessor
                     ];
                 }
 
-                // Registro detallado de Gasto, Proveedores y Solicitantes (a nivel de OC individual)
                 $provName = $row['proveedor'] !== '' ? $row['proveedor'] : 'Sin proveedor';
                 $provNorm = $this->normalizeForMatch($provName);
                 $isCajaChica = isset($buyerNamesNorm[$provNorm]);
@@ -498,7 +687,7 @@ class DataProcessor
         sort($listSolicitantes);
 
         $output = [
-            'schema_v'      => 11,
+            'schema_v'      => 12,
             'excel_mtime'   => $excelMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),

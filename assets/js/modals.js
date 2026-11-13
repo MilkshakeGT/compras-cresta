@@ -358,6 +358,125 @@ function exportAuditCSV() {
         return;
     }
 
+    function exportAuditExcel() {
+    const cfg = MODAL_CONFIG[activeModalCategory];
+    const rows = getFilteredModalRows();
+
+    if (cfg.mode === 'spend') {
+        const headers = ['OC Odoo', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Solicitante', 'Proveedor', 'Comprador', 'Estado OC', 'Divisa', 'Total OC'];
+        const dataRows = rows.map(r => [
+            r.oc_odoo,
+            r.oc_sap || '',
+            r.solicitud,
+            r.fecha,
+            r.sociedad,
+            r.solicitado_por || '',
+            r.proveedor,
+            r.comprador,
+            r.estado_oc,
+            r.divisa,
+            Number(r.monto.toFixed(2))
+        ]);
+
+        exportToExcel(
+            headers,
+            dataRows,
+            `auditoria_${activeModalCategory.toLowerCase()}_${activeCurrency}_${RAW_DATA.cutoff_date}.xlsx`,
+            'Ordenes de Compra'
+        );
+        return;
+    }
+
+    const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Estatus', cfg.daysLabel];
+    const dataRows = rows.map(r => {
+        const statusTxt = r.tiene_oc_sap
+            ? 'En SAP'
+            : (r.tiene_oc_odoo ? (r.estado_oc || 'OC Odoo sin SAP') : (!r.aprobada ? (r.estado_sol || 'Sin aprobar') : 'Sin OC en Odoo'));
+        const rawDays = r[cfg.daysField];
+        const daysVal = rawDays !== null && rawDays !== undefined ? Number(rawDays.toFixed(1)) : '';
+
+        return [
+            r.id,
+            r.fecha,
+            r.sociedad,
+            r.solicitado_por || '',
+            r.comprador,
+            r.oc_odoo || '',
+            statusTxt,
+            daysVal
+        ];
+    });
+
+    exportToExcel(
+        headers,
+        dataRows,
+        `auditoria_${activeModalCategory.toLowerCase()}_cresta_${RAW_DATA.cutoff_date}.xlsx`,
+        'Auditoria Solicitudes'
+    );
+}
+
+function exportDocumentDetailExcel() {
+    if (!activeDocDetail) return;
+
+    if (activeDocDetail.type === 'sol') {
+        const m = activeDocDetail.meta || {};
+        const lines = activeDocDetail.lines || [];
+        const headers = ['Solicitud', 'Fecha', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Linea', 'Producto Solicitado', 'Cantidad Solicitada'];
+        const dataRows = lines.map((l, idx) => [
+            activeDocDetail.id,
+            m.fecha || '',
+            m.sociedad || '',
+            m.solicitado_por || '',
+            m.comprador || '',
+            m.oc_odoo || '',
+            idx + 1,
+            String(l.producto).replace(/\n/g, ' '),
+            Number(l.cantidad)
+        ]);
+
+        exportToExcel(
+            headers,
+            dataRows,
+            `detalle_solicitud_${activeDocDetail.id}.xlsx`,
+            `Solicitud ${activeDocDetail.id}`
+        );
+        return;
+    }
+
+    if (activeDocDetail.type === 'oc') {
+        const m = activeDocDetail.meta || {};
+        const d = activeDocDetail.detail || {};
+        const lines = d.lineas || [];
+        const prov = d.proveedor || m.proveedor || '';
+        const divisa = d.divisa || m.divisa || 'GTQ';
+
+        const headers = ['No. OC', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Proveedor', 'Comprador', 'Solicitante', 'Linea', 'Producto', 'Cantidad Comprada', 'Divisa', 'Precio Unitario', 'Total Linea'];
+        const dataRows = lines.map((l, idx) => [
+            activeDocDetail.id,
+            m.oc_sap || '',
+            m.solicitud || '',
+            m.fecha || '',
+            m.sociedad || '',
+            prov,
+            m.comprador || '',
+            m.solicitado_por || '',
+            idx + 1,
+            String(l.producto).replace(/\n/g, ' '),
+            Number(l.cantidad),
+            divisa,
+            Number(l.precio_unitario),
+            Number(l.total)
+        ]);
+
+        exportToExcel(
+            headers,
+            dataRows,
+            `detalle_oc_${activeDocDetail.id}.xlsx`,
+            `OC ${activeDocDetail.id}`
+        );
+    }
+}
+
     const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Estatus', cfg.daysLabel];
     const csvLines = [headers.join(',')];
 

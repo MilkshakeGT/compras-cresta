@@ -160,7 +160,7 @@ class DataProcessor
 
         if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 10) {
+            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 11) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
@@ -233,10 +233,15 @@ class DataProcessor
                 $divisa = 'GTQ';
             }
 
+            $solicitanteName = trim((string)($lastHeaderData['Solicitado por'] ?? ''));
+            if ($solicitanteName === '') {
+                $solicitanteName = 'Sin solicitante';
+            }
+
             $normalizedRows[] = [
                 'solicitud'          => trim((string)$lastHeaderData['Solicitud']),
                 'estado_sol'         => trim((string)($lastHeaderData['Estado Solicitud'] ?? '')),
-                'solicitado_por'     => trim((string)($lastHeaderData['Solicitado por'] ?? '')),
+                'solicitado_por'     => $solicitanteName,
                 'autorizador_sol'    => trim((string)($lastHeaderData['Autorizador Solicitud'] ?? '')),
                 'autorizador_oc_1'   => trim((string)($getCol($r, 'Autorizador 1') ?? '')),
                 'comprador'          => trim((string)($lastHeaderData['Comprador'] ?? 'Sin asignar')),
@@ -265,17 +270,20 @@ class DataProcessor
 
         $cutoffTs = $maxDateTs > 0 ? $maxDateTs : time();
 
-        $solicitudesMap = [];
-        $ocStats = [];
-        $ocRecords = [];
-        $spendRecords = [];
-        $proveedoresSet = [];
+        $solicitudesMap  = [];
+        $ocStats         = [];
+        $ocRecords       = [];
+        $spendRecords    = [];
+        $proveedoresSet  = [];
+        $solicitantesSet = [];
 
         foreach ($normalizedRows as $row) {
             $solId = $row['solicitud'];
             if ($solId === '' || !$row['ts_creacion_sol']) {
                 continue;
             }
+
+            $solicitantesSet[$row['solicitado_por']] = true;
 
             $estadoSolLower = mb_strtolower($row['estado_sol']);
             $isSolRechazada = ($estadoSolLower === 'rechazado');
@@ -304,13 +312,14 @@ class DataProcessor
                         'ym'                => date('Y-m', $row['ts_creacion_oc']),
                         'sociedad'          => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
                         'comprador'         => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                        'solicitado_por'    => $row['solicitado_por'],
                         'aprobador_oc'      => $aprobOcName,
                         'aprob_oc_excluido' => $this->isExcludedApprover($aprobOcName),
                         'd_aprob_oc'        => $diasAprobOc,
                     ];
                 }
 
-                // Registro detallado de Gasto y Proveedores (a nivel de OC individual)
+                // Registro detallado de Gasto, Proveedores y Solicitantes (a nivel de OC individual)
                 $provName = $row['proveedor'] !== '' ? $row['proveedor'] : 'Sin proveedor';
                 $provNorm = $this->normalizeForMatch($provName);
                 $isCajaChica = isset($buyerNamesNorm[$provNorm]);
@@ -328,22 +337,23 @@ class DataProcessor
                 }
 
                 $spendRecords[] = [
-                    'oc_odoo'       => $row['no_oc_odoo'],
-                    'oc_sap'        => $row['no_oc_sap'],
-                    'solicitud'     => $solId,
-                    'ym'            => $ocYm,
-                    'fecha'         => $ocFecha,
-                    'sociedad'      => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
-                    'comprador'     => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
-                    'proveedor'     => $provName,
-                    'is_caja_chica' => $isCajaChica,
-                    'divisa'        => $row['divisa'],
-                    'monto'         => $row['total_oc'],
-                    'estado_oc'     => $row['estado_oc'],
-                    'is_firm'       => $isFirm,
-                    'is_rfq'        => $isRfq,
-                    'is_cancelada'  => $isOcCancelada,
-                    'en_sap'        => ($row['no_oc_sap'] !== ''),
+                    'oc_odoo'        => $row['no_oc_odoo'],
+                    'oc_sap'         => $row['no_oc_sap'],
+                    'solicitud'      => $solId,
+                    'ym'             => $ocYm,
+                    'fecha'          => $ocFecha,
+                    'sociedad'       => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
+                    'comprador'      => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                    'solicitado_por' => $row['solicitado_por'],
+                    'proveedor'      => $provName,
+                    'is_caja_chica'  => $isCajaChica,
+                    'divisa'         => $row['divisa'],
+                    'monto'          => $row['total_oc'],
+                    'estado_oc'      => $row['estado_oc'],
+                    'is_firm'        => $isFirm,
+                    'is_rfq'         => $isRfq,
+                    'is_cancelada'   => $isOcCancelada,
+                    'en_sap'         => ($row['no_oc_sap'] !== ''),
                 ];
             }
 
@@ -478,24 +488,27 @@ class DataProcessor
         }
 
         ksort($meses);
-        $listSociedades  = array_keys($sociedades);
-        $listCompradores = array_keys($compradores);
-        $listProveedores = array_keys($proveedoresSet);
+        $listSociedades   = array_keys($sociedades);
+        $listCompradores  = array_keys($compradores);
+        $listProveedores  = array_keys($proveedoresSet);
+        $listSolicitantes = array_keys($solicitantesSet);
         sort($listSociedades);
         sort($listCompradores);
         sort($listProveedores);
+        sort($listSolicitantes);
 
         $output = [
-            'schema_v'      => 10,
+            'schema_v'      => 11,
             'excel_mtime'   => $excelMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),
             'sync_info'     => $syncStatus,
             'filters'       => [
-                'meses'       => array_keys($meses),
-                'sociedades'  => $listSociedades,
-                'compradores' => $listCompradores,
-                'proveedores' => $listProveedores,
+                'meses'        => array_keys($meses),
+                'sociedades'   => $listSociedades,
+                'compradores'  => $listCompradores,
+                'proveedores'  => $listProveedores,
+                'solicitantes' => $listSolicitantes,
             ],
             'oc_stats'      => $ocStats,
             'records'       => $records,

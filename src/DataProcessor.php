@@ -187,7 +187,7 @@ class DataProcessor
         if (!$force && file_exists($this->detailsCachePath)) {
             $existing = json_decode(file_get_contents($this->detailsCachePath), true);
             if (is_array($existing)
-                && ($existing['schema_v'] ?? 0) === 1
+                && ($existing['schema_v'] ?? 0) === 2
                 && ($existing['sol_mtime'] ?? -1) === $solMtime
                 && ($existing['oc_mtime'] ?? -1) === $ocMtime
             ) {
@@ -277,7 +277,7 @@ class DataProcessor
         }
 
         $detailsPayload = [
-            'schema_v'  => 1,
+            'schema_v'  => 2,
             'sol_mtime' => $solMtime,
             'oc_mtime'  => $ocMtime,
             'sol'       => $solDetails,
@@ -339,6 +339,81 @@ class DataProcessor
         return ['found' => false, 'error' => 'Tipo de documento inválido'];
     }
 
+    // Devuelve todas las líneas de producto de OCs EN FIRME cruzadas con metadatos de DB.xlsx
+    public function getFirmOcLines(): array
+    {
+        $this->rebuildDetailsCacheIfNeeded(false);
+
+        $details = file_exists($this->detailsCachePath)
+            ? json_decode(file_get_contents($this->detailsCachePath), true)
+            : [];
+        $mainCache = file_exists($this->cachePath)
+            ? json_decode(file_get_contents($this->cachePath), true)
+            : [];
+
+        $ocDetailMap = $details['oc'] ?? [];
+        $firmLines = [];
+
+        foreach (($mainCache['spend_records'] ?? []) as $srec) {
+            if (empty($srec['is_firm'])) {
+                continue;
+            }
+            $ocId = $srec['oc_odoo'] ?? '';
+            if ($ocId === '') {
+                continue;
+            }
+
+            $ocInfo = $ocDetailMap[$ocId] ?? null;
+            $lineas = $ocInfo['lineas'] ?? [];
+
+            if (!empty($lineas)) {
+                foreach ($lineas as $l) {
+                    $firmLines[] = [
+                        'oc_odoo'        => $ocId,
+                        'solicitud'      => $srec['solicitud'] ?? '',
+                        'ym'             => $srec['ym'] ?? '',
+                        'fecha'          => $srec['fecha'] ?? '',
+                        'sociedad'       => $srec['sociedad'] ?? '',
+                        'comprador'      => $srec['comprador'] ?? '',
+                        'solicitado_por' => $srec['solicitado_por'] ?? '',
+                        'proveedor'      => $srec['proveedor'] ?? '',
+                        'is_caja_chica'  => !empty($srec['is_caja_chica']),
+                        'divisa'         => $srec['divisa'] ?? 'GTQ',
+                        'en_sap'         => !empty($srec['en_sap']),
+                        'producto'       => $l['producto'] ?? '(Sin descripción)',
+                        'cantidad'       => (float)($l['cantidad'] ?? 0),
+                        'pu'             => (float)($l['precio_unitario'] ?? 0),
+                        'total'          => (float)($l['total'] ?? 0),
+                    ];
+                }
+            } else {
+                // Fallback si la OC firme aún no aparece en OC.xlsx
+                $firmLines[] = [
+                    'oc_odoo'        => $ocId,
+                    'solicitud'      => $srec['solicitud'] ?? '',
+                    'ym'             => $srec['ym'] ?? '',
+                    'fecha'          => $srec['fecha'] ?? '',
+                    'sociedad'       => $srec['sociedad'] ?? '',
+                    'comprador'      => $srec['comprador'] ?? '',
+                    'solicitado_por' => $srec['solicitado_por'] ?? '',
+                    'proveedor'      => $srec['proveedor'] ?? '',
+                    'is_caja_chica'  => !empty($srec['is_caja_chica']),
+                    'divisa'         => $srec['divisa'] ?? 'GTQ',
+                    'en_sap'         => !empty($srec['en_sap']),
+                    'producto'       => '(Sin detalle de línea)',
+                    'cantidad'       => 1.0,
+                    'pu'             => (float)($srec['monto'] ?? 0),
+                    'total'          => (float)($srec['monto'] ?? 0),
+                ];
+            }
+        }
+
+        return [
+            'count' => count($firmLines),
+            'lines' => $firmLines,
+        ];
+    }
+
     public function getProcessedData(bool $forceSync = false): array
     {
         $syncStatus = $this->syncFromOneDrive($forceSync);
@@ -352,7 +427,7 @@ class DataProcessor
 
         if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 12) {
+            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 13) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
@@ -687,7 +762,7 @@ class DataProcessor
         sort($listSolicitantes);
 
         $output = [
-            'schema_v'      => 12,
+            'schema_v'      => 13,
             'excel_mtime'   => $excelMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),

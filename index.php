@@ -1,6 +1,135 @@
 <?php
 declare(strict_types=1);
 
+// =========================================================================
+// CAPA DE SEGURIDAD Y CONTROL DE SESIÓN (ANTES DE CARGAR DATOS FINANCIEROS)
+// =========================================================================
+session_set_cookie_params([
+    'lifetime' => 0,
+    'path'     => '/',
+    'secure'   => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
+    'httponly' => true,
+    'samesite' => 'Strict',
+]);
+session_start();
+
+$authConfigPath = __DIR__ . '/data/auth.config.php';
+$authConfig = file_exists($authConfigPath) ? require $authConfigPath : [];
+$configuredPassword = (string)($authConfig['dashboard_password'] ?? 'CrestaSupply2026!');
+$sessionTimeout     = (int)($authConfig['session_timeout'] ?? 28800);
+
+// Cerrar sesión
+if (isset($_GET['logout']) && $_GET['logout'] === '1') {
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], $params['secure'], $params['httponly']);
+    }
+    session_destroy();
+    header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?'));
+    exit;
+}
+
+// Verificar expiración de sesión por inactividad
+if (!empty($_SESSION['cresta_auth']) && isset($_SESSION['cresta_last_activity'])) {
+    if ((time() - (int)$_SESSION['cresta_last_activity']) > $sessionTimeout) {
+        $_SESSION = [];
+        session_destroy();
+        session_start();
+    }
+}
+
+$loginError = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['access_password'])) {
+    $submitted = (string)$_POST['access_password'];
+    if ($configuredPassword !== '' && hash_equals($configuredPassword, $submitted)) {
+        session_regenerate_id(true);
+        $_SESSION['cresta_auth'] = true;
+        $_SESSION['cresta_last_activity'] = time();
+        header('Location: ' . $_SERVER['REQUEST_URI']);
+        exit;
+    } else {
+        $loginError = 'Contraseña incorrecta. Verifica tus credenciales e intenta de nuevo.';
+    }
+}
+
+// Si NO está autenticado, renderizar únicamente la pantalla de acceso y detener ejecución
+if (empty($_SESSION['cresta_auth'])) {
+    ?>
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Acceso Restringido · Grupo Cresta Supply Chain</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script>
+            tailwind.config = {
+                theme: {
+                    extend: {
+                        colors: {
+                            cresta: {
+                                navy: '#1B2A4A',
+                                blue: '#264073',
+                                red: '#C8102E'
+                            }
+                        }
+                    }
+                }
+            };
+        </script>
+        <style>
+            body { font-family: Verdana, Geneva, sans-serif; }
+        </style>
+    </head>
+    <body class="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-4">
+        <div class="max-w-md w-full bg-white border border-slate-200 rounded-2xl shadow-lg overflow-hidden">
+            <div class="bg-cresta-navy px-6 py-5 text-white">
+                <span class="inline-block px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-red tracking-wider uppercase">
+                    GRUPO CRESTA · SUPPLY CHAIN
+                </span>
+                <h1 class="text-lg font-bold mt-2">Control Ejecutivo de Compras</h1>
+                <p class="text-xs text-slate-300 mt-1">Información financiera y operativa confidencial</p>
+            </div>
+
+            <form method="POST" class="p-6 space-y-4">
+                <?php if ($loginError !== ''): ?>
+                    <div class="p-3 rounded-lg bg-red-50 border border-red-200 text-cresta-red text-xs font-semibold">
+                        <?= htmlspecialchars($loginError) ?>
+                    </div>
+                <?php endif; ?>
+
+                <div>
+                    <label for="access_password" class="block text-xs font-bold text-slate-700 uppercase mb-1.5">
+                        Contraseña de Acceso
+                    </label>
+                    <input id="access_password" name="access_password" type="password" required autofocus
+                        placeholder="Ingresa la contraseña del tablero"
+                        class="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:border-cresta-navy focus:ring-2 focus:ring-cresta-navy/20 outline-none">
+                </div>
+
+                <button type="submit"
+                    class="w-full py-2.5 px-4 rounded-xl bg-cresta-navy hover:bg-cresta-blue text-white text-xs font-bold uppercase tracking-wide transition shadow-sm">
+                    Ingresar al Dashboard →
+                </button>
+            </form>
+        </div>
+
+        <p class="text-[11px] text-slate-400 mt-6 text-center">
+            Dashboard construido por <span class="font-semibold text-slate-500">Elder Velásquez</span> con ayuda de
+            <a href="https://mksbox.com" target="_blank" rel="noopener noreferrer" class="underline hover:text-cresta-navy">mksbox.com</a>
+        </p>
+    </body>
+    </html>
+    <?php
+    exit;
+}
+
+$_SESSION['cresta_last_activity'] = time();
+
+// =========================================================================
+// CARGA DE DATOS (SOLO SE EJECUTA SI LA SESIÓN ESTÁ AUTENTICADA)
+// =========================================================================
 require_once __DIR__ . '/src/DataProcessor.php';
 
 $excelPath = __DIR__ . '/data/DB.xlsx';
@@ -103,8 +232,14 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                     <button id="btnThemeToggle" type="button" onclick="toggleTheme()" title="Alternar modo claro / oscuro"
                         class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-200 font-bold transition">
                         <span id="themeIcon">🌙</span>
-                        <span id="themeLabel" class="hidden sm:inline">Modo Oscuro</span>
+                        <span id="themeLabel" class="hidden md:inline">Modo Oscuro</span>
                     </button>
+
+                    <!-- Botón Cerrar Sesión -->
+                    <a href="?logout=1" title="Cerrar sesión y bloquear dashboard"
+                        class="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 hover:bg-red-100 dark:bg-red-950/60 dark:hover:bg-red-900 text-cresta-red dark:text-red-300 font-bold transition">
+                        <span>Salir</span>
+                    </a>
                 </div>
             </div>
 
@@ -170,13 +305,11 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
                 <!-- Controles exclusivos de la pestaña Gasto y Proveedores -->
                 <div id="spendOnlyFilters" class="hidden flex flex-wrap items-center gap-2">
-                    <!-- Selector de Proveedor -->
                     <select id="filterProveedor" onchange="renderDashboard()"
                         class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs max-w-[230px]">
                         <option value="ALL">Todos los Proveedores</option>
                     </select>
 
-                    <!-- Switch de Divisa GTQ / USD -->
                     <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-0.5 border border-slate-200 dark:border-gray-700">
                         <button id="btnCurrGTQ" type="button" onclick="setCurrency('GTQ')"
                             class="px-2.5 py-1 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition">
@@ -188,7 +321,6 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                         </button>
                     </div>
 
-                    <!-- Checkbox Excluir Caja Chica / Reembolsos -->
                     <label class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 cursor-pointer select-none">
                         <input id="chkExcludePettyCash" type="checkbox" onchange="renderDashboard()" class="rounded text-cresta-navy">
                         <span class="text-[11px] font-medium text-slate-700 dark:text-gray-300">Ocultar Caja Chica</span>
@@ -203,9 +335,8 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
     <!-- ===================================================================== -->
     <main id="viewCycleSection" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6 flex-1 w-full">
 
-        <!-- Tarjetas KPI Principales (5 tarjetas auditables al hacer clic) -->
+        <!-- Tarjetas KPI Principales -->
         <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            <!-- KPI 1 -->
             <div onclick="openAuditModal('VALIDAS', 'ALL')" title="Haz clic para auditar el listado de solicitudes válidas"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-navy dark:hover:border-indigo-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -221,7 +352,6 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <p id="kpi1Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Excluye borrador, rechazadas y OC canceladas</p>
             </div>
 
-            <!-- KPI 2: Tiempo Gestión Comprador -->
             <div onclick="openAuditModal('TIEMPO_COMP', 'ALL')" title="Haz clic para auditar los tiempos de gestión por solicitud"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-blue dark:hover:border-sky-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -240,7 +370,6 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <p id="kpiTimeSub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Mediana: 0.0 d · Promedio a OC</p>
             </div>
 
-            <!-- KPI 3: SLA Comprador <= 14d -->
             <div onclick="openAuditModal('SLA_COMP', 'ALL')" title="Haz clic para auditar tiempos de gestión por comprador"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-emerald-600 dark:hover:border-emerald-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -259,7 +388,6 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <p id="kpi2Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Solicitudes maduras ≥14d (Odoo)</p>
             </div>
 
-            <!-- KPI 4: En SAP <= 14d -->
             <div onclick="openAuditModal('SAP_14', 'ALL')" title="Haz clic para auditar tiempos de ciclo hasta SAP"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-blue dark:hover:border-indigo-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -275,7 +403,6 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <p id="kpi3Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Ciclo desde aprobación (≥14d)</p>
             </div>
 
-            <!-- KPI 5: Rezago Sin Llegar a SAP -->
             <div onclick="openAuditModal('REZAGO', 'ALL')" title="Haz clic para auditar el detalle de solicitudes pendientes"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-red dark:hover:border-amber-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -435,9 +562,8 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
     <!-- ===================================================================== -->
     <main id="viewSpendSection" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6 flex-1 w-full">
 
-        <!-- 5 Tarjetas KPI Ejecutivas de Gasto (Todas auditables al hacer clic) -->
+        <!-- 5 Tarjetas KPI Ejecutivas de Gasto -->
         <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            <!-- Spend KPI 1: Gasto Comprometido Total -->
             <div onclick="openAuditModal('SPEND_FIRM', 'ALL')" title="Haz clic para auditar el detalle de OCs firmes"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-navy dark:hover:border-indigo-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -453,7 +579,6 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <p id="spKpi1Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">OCs firmes en divisa seleccionada</p>
             </div>
 
-            <!-- Spend KPI 2: Órdenes Emitidas y Ticket Promedio -->
             <div onclick="openAuditModal('SPEND_FIRM', 'ALL')" title="Haz clic para auditar tickets de órdenes de compra"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-blue dark:hover:border-sky-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -469,7 +594,6 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <p id="spKpi2Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Ticket promedio · Mediana: Q 0</p>
             </div>
 
-            <!-- Spend KPI 3: Proveedores Activos y Concentración Top 5 -->
             <div onclick="openAuditModal('SPEND_FIRM', 'TOP5_PROV')" title="Haz clic para auditar OCs de los 5 proveedores principales"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-emerald-600 dark:hover:border-emerald-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -485,7 +609,6 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <p id="spKpi3Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Concentración Pareto en Top 5</p>
             </div>
 
-            <!-- Spend KPI 4: Cotizaciones Pendientes (RFQ) -->
             <div onclick="openAuditModal('SPEND_RFQ', 'ALL')" title="Haz clic para auditar solicitudes de cotización sin convertir"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-amber-600 dark:hover:border-amber-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -501,7 +624,6 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <p id="spKpi4Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">En cotización sin orden firme</p>
             </div>
 
-            <!-- Spend KPI 5: Sincronización SAP & Cancelaciones -->
             <div onclick="openAuditModal('SPEND_NO_SAP', 'ALL')" title="Haz clic para auditar OCs firmes pendientes de SAP"
                 class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-red dark:hover:border-red-500/70 transition group flex flex-col justify-between">
                 <div>
@@ -518,7 +640,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Panel Exclusivo de Comparación Trimestral de Gasto (visible en modo Comparar Q) -->
+        <!-- Panel Exclusivo de Comparación Trimestral de Gasto -->
         <section id="spendCompareQSection" class="hidden bg-white dark:bg-gray-900 border-2 border-cresta-navy/20 dark:border-indigo-500/30 rounded-2xl p-5 shadow-sm">
             <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
@@ -556,7 +678,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 2 (Gasto): Top 10 Proveedores por Monto + Top Compradores por Monto y Volumen -->
+        <!-- Fila 2 (Gasto): Top 10 Proveedores por Monto + Top Compradores por Monto -->
         <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
                 <div class="mb-3 flex items-start justify-between gap-2">
@@ -580,7 +702,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 3 (Gasto): Top 10 Proveedores por Frecuencia + Embudo del Proceso de Compra -->
+        <!-- Fila 3 (Gasto): Top 10 Proveedores por Frecuencia + Embudo del Proceso -->
         <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
                 <div class="mb-3">
@@ -1451,7 +1573,6 @@ function renderSpendView() {
     const currentSpendRows = filterByActivePeriod(baseSpend);
     const st = calcSpendStats(currentSpendRows);
 
-    // Calcular periodo comparativo anterior
     let prevLabel = null;
     let prevStats = null;
 
@@ -1482,13 +1603,11 @@ function renderSpendView() {
         }
     }
 
-    // Guardar universos auditables para modal de Gasto
     currentTop5ProvidersSet = new Set(st.provSorted.slice(0, 5).map(p => p.name));
     cachedUniverses.SPEND_FIRM   = [...st.firmList].sort((a, b) => b.monto - a.monto);
     cachedUniverses.SPEND_RFQ    = [...st.rfqList].sort((a, b) => b.monto - a.monto);
     cachedUniverses.SPEND_NO_SAP = [...st.noSapList].sort((a, b) => b.monto - a.monto);
 
-    // Tarjeta 1: Gasto Comprometido Total
     document.getElementById('spKpi1Value').textContent = formatMoney(st.totalMonto);
     document.getElementById('spKpi1Sub').textContent   = `${st.firmCount.toLocaleString()} OCs firmes en ${activeCurrency}`;
     const b1 = document.getElementById('spKpi1Badge');
@@ -1501,22 +1620,18 @@ function renderSpendView() {
         b1.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0';
     }
 
-    // Tarjeta 2: Ticket Promedio y OCs Emitidas
     document.getElementById('spKpi2Value').textContent = formatMoney(st.avgTicket);
     document.getElementById('spKpi2Badge').textContent = `${st.firmCount.toLocaleString()} OCs`;
     document.getElementById('spKpi2Sub').textContent   = `Mediana: ${formatMoney(st.medTicket)}`;
 
-    // Tarjeta 3: Proveedores Activos y Top 5
     document.getElementById('spKpi3Value').textContent = st.provCount.toLocaleString();
     document.getElementById('spKpi3Badge').textContent = `Top 5: ${st.top5Pct}%`;
     document.getElementById('spKpi3Sub').textContent   = `Concentración Pareto en 5 mayores`;
 
-    // Tarjeta 4: Cotizaciones Abiertas (RFQ)
     document.getElementById('spKpi4Value').textContent = formatMoney(st.rfqMonto);
     document.getElementById('spKpi4Badge').textContent = `${st.rfqCount} abiertas`;
     document.getElementById('spKpi4Sub').textContent   = `Cotizaciones sin convertir a OC`;
 
-    // Tarjeta 5: Integración SAP & Cancelaciones
     document.getElementById('spKpi5Value').textContent = `${st.sapPct}%`;
     document.getElementById('spKpi5Badge').textContent = `Canc: ${st.cancPct}%`;
     document.getElementById('spKpi5Sub').textContent   = `${st.noSapList.length} OCs firmes pendientes SAP`;
@@ -1774,7 +1889,6 @@ function renderChartTopProveedoresFreq(firmList) {
 }
 
 function renderChartProcurementFunnel() {
-    // Embudo del proceso de compra sobre el universo filtrado
     const entityReqs = filterByActivePeriod(filterByEntity(RAW_DATA.records));
     const validReqs = entityReqs.filter(r => !r.excluida && r.aprobada);
 

@@ -53,7 +53,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['access_password'])) {
     }
 }
 
-// Si NO está autenticado, renderizar únicamente la pantalla de acceso y detener ejecución
 if (empty($_SESSION['cresta_auth'])) {
     ?>
     <!DOCTYPE html>
@@ -303,10 +302,16 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                     <option value="ALL">Todos los Compradores</option>
                 </select>
 
+                <!-- Selector Global de Solicitante Interno -->
+                <select id="filterSolicitante" onchange="renderDashboard()"
+                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs max-w-[210px]">
+                    <option value="ALL">Todos los Solicitantes</option>
+                </select>
+
                 <!-- Controles exclusivos de la pestaña Gasto y Proveedores -->
                 <div id="spendOnlyFilters" class="hidden flex flex-wrap items-center gap-2">
                     <select id="filterProveedor" onchange="renderDashboard()"
-                        class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs max-w-[230px]">
+                        class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs max-w-[210px]">
                         <option value="ALL">Todos los Proveedores</option>
                     </select>
 
@@ -522,22 +527,32 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 4: Evolución Temporal de Días de Gestión del Comprador -->
-        <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
-            <div class="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div>
-                    <h2 id="chartCompTrendTitle" class="text-sm font-bold text-cresta-navy dark:text-white">
-                        Evolución Mensual: Días Promedio de Gestión por Comprador
-                    </h2>
-                    <p id="chartCompTrendSub" class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">
-                        Comparativa mensual de velocidad de respuesta (Aprobación Solicitud → OC en Odoo) · Menos días = mayor agilidad
-                    </p>
+        <!-- Fila 4: Evolución de Comprador + Top Solicitantes por Volumen de Requisiciones -->
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-7">
+                <div class="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div>
+                        <h2 id="chartCompTrendTitle" class="text-sm font-bold text-cresta-navy dark:text-white">
+                            Evolución Mensual: Días Promedio por Comprador
+                        </h2>
+                        <p id="chartCompTrendSub" class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">
+                            Velocidad de respuesta (Aprobación Solicitud → OC en Odoo)
+                        </p>
+                    </div>
+                    <span id="chartCompTrendBadge" class="text-[10px] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">
+                        Comparativa Equipo
+                    </span>
                 </div>
-                <span id="chartCompTrendBadge" class="text-[11px] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">
-                    Vista Comparativa Equipo
-                </span>
+                <div id="chartCompradorTrend" class="w-full h-80"></div>
             </div>
-            <div id="chartCompradorTrend" class="w-full h-80"></div>
+
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-5">
+                <div class="mb-3">
+                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Top 10 Solicitantes Internos (Requisiciones)</h2>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Usuarios que generan mayor demanda de compra y su % de rechazo</p>
+                </div>
+                <div id="chartTopSolicitantesReqs" class="w-full h-80"></div>
+            </div>
         </section>
 
         <!-- Tabla Ejecutiva Mensual -->
@@ -702,8 +717,16 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 3 (Gasto): Top 10 Proveedores por Frecuencia + Embudo del Proceso -->
+        <!-- Fila 3 (Gasto): Top 10 Solicitantes Internos por Monto + Top 10 Proveedores por Frecuencia -->
         <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
+                <div class="mb-3">
+                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Top 10 Solicitantes Internos por Monto Comprado</h2>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Usuarios/áreas internas que originan el mayor gasto comprometido</p>
+                </div>
+                <div id="chartTopSolicitantesMonto" class="w-full h-80"></div>
+            </div>
+
             <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
                 <div class="mb-3">
                     <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Top 10 Proveedores por Frecuencia (Cantidad de OCs)</h2>
@@ -711,14 +734,15 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 </div>
                 <div id="chartTopProveedoresFreq" class="w-full h-80"></div>
             </div>
+        </section>
 
-            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
-                <div class="mb-3">
-                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Embudo de Conversión del Proceso de Compras</h2>
-                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Trazabilidad desde Solicitud Aprobada hasta Orden Sincronizada en SAP</p>
-                </div>
-                <div id="chartProcurementFunnel" class="w-full h-80"></div>
+        <!-- Fila 4 (Gasto): Embudo del Proceso de Compra -->
+        <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm">
+            <div class="mb-3">
+                <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Embudo de Conversión del Proceso de Compras</h2>
+                <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Trazabilidad desde Solicitud Aprobada hasta Orden Sincronizada en SAP</p>
             </div>
+            <div id="chartProcurementFunnel" class="w-full h-64"></div>
         </section>
 
         <!-- Tabla Ejecutiva Top 15 Proveedores Detallada -->
@@ -786,7 +810,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             <!-- Controles internos dinámicos del modal -->
             <div class="px-5 py-3 bg-slate-50 dark:bg-gray-800/40 border-b border-slate-200 dark:border-gray-800 flex flex-wrap items-center justify-between gap-3 text-xs">
                 <div id="modalTabsContainer" class="flex flex-wrap gap-1.5"></div>
-                <input id="modalSearch" type="text" oninput="renderModalTable()" placeholder="Buscar solicitud, proveedor, comprador, OC..."
+                <input id="modalSearch" type="text" oninput="renderModalTable()" placeholder="Buscar solicitud, solicitante, proveedor, OC..."
                     class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 rounded-lg px-3 py-1.5 text-slate-800 dark:text-gray-100 w-64">
             </div>
 
@@ -1182,6 +1206,7 @@ function initFilters() {
     const selYear = document.getElementById('filterYear');
     const selSoc = document.getElementById('filterSociedad');
     const selComp = document.getElementById('filterComprador');
+    const selSol = document.getElementById('filterSolicitante');
     const selProv = document.getElementById('filterProveedor');
 
     const years = [...new Set(RAW_DATA.filters.meses.map(ym => ym.split('-')[0]))].sort();
@@ -1211,6 +1236,13 @@ function initFilters() {
         selComp.appendChild(opt);
     });
 
+    (RAW_DATA.filters.solicitantes || []).forEach(sol => {
+        const opt = document.createElement('option');
+        opt.value = sol;
+        opt.textContent = sol;
+        selSol.appendChild(opt);
+    });
+
     (RAW_DATA.filters.proveedores || []).forEach(p => {
         const opt = document.createElement('option');
         opt.value = p;
@@ -1234,9 +1266,11 @@ function setPeriodMode(mode) {
 function filterByEntity(records) {
     const soc = document.getElementById('filterSociedad').value;
     const comp = document.getElementById('filterComprador').value;
+    const sol = document.getElementById('filterSolicitante').value;
     return records.filter(r => {
         if (soc !== 'ALL' && r.sociedad !== soc) return false;
         if (comp !== 'ALL' && r.comprador !== comp) return false;
+        if (sol !== 'ALL' && r.solicitado_por !== sol) return false;
         return true;
     });
 }
@@ -1244,6 +1278,7 @@ function filterByEntity(records) {
 function filterSpendRecordsBase(records) {
     const soc = document.getElementById('filterSociedad').value;
     const comp = document.getElementById('filterComprador').value;
+    const sol = document.getElementById('filterSolicitante').value;
     const prov = document.getElementById('filterProveedor').value;
     const hidePetty = document.getElementById('chkExcludePettyCash').checked;
 
@@ -1251,6 +1286,7 @@ function filterSpendRecordsBase(records) {
         if (r.divisa !== activeCurrency) return false;
         if (soc !== 'ALL' && r.sociedad !== soc) return false;
         if (comp !== 'ALL' && r.comprador !== comp) return false;
+        if (sol !== 'ALL' && r.solicitado_por !== sol) return false;
         if (prov !== 'ALL' && r.proveedor !== prov) return false;
         if (hidePetty && r.is_caja_chica) return false;
         return true;
@@ -1259,7 +1295,12 @@ function filterSpendRecordsBase(records) {
 
 function filterBySociedadOnly(records) {
     const soc = document.getElementById('filterSociedad').value;
-    return records.filter(r => soc === 'ALL' || r.sociedad === soc);
+    const sol = document.getElementById('filterSolicitante').value;
+    return records.filter(r => {
+        if (soc !== 'ALL' && r.sociedad !== soc) return false;
+        if (sol !== 'ALL' && r.solicitado_por !== sol) return false;
+        return true;
+    });
 }
 
 function filterRecordsByYearQuarter(records, yq) {
@@ -1510,6 +1551,7 @@ function renderCycleView() {
     renderChartAprobadoresSol(currentRecords);
     renderChartAprobadoresOc();
     renderChartCompradorTrend(maxYm, selectedComp, tableYear);
+    renderChartTopSolicitantesReqs(currentRecords);
     renderMonthlyTable(entityRecords, tableYear);
 }
 
@@ -1644,6 +1686,7 @@ function renderSpendView() {
     renderChartSpendSociedades(st.firmList);
     renderChartTopProveedoresMonto(st);
     renderChartTopCompradoresMonto(st.firmList);
+    renderChartTopSolicitantesMonto(st.firmList);
     renderChartTopProveedoresFreq(st.firmList);
     renderChartProcurementFunnel();
     renderTopSuppliersTable(st);
@@ -1849,6 +1892,45 @@ function renderChartTopCompradoresMonto(firmList) {
     charts.topCompMonto.render();
 }
 
+function renderChartTopSolicitantesMonto(firmList) {
+    const mapSol = {};
+    firmList.forEach(r => {
+        if (!mapSol[r.solicitado_por]) mapSol[r.solicitado_por] = { monto: 0, ocs: 0 };
+        mapSol[r.solicitado_por].monto += r.monto;
+        mapSol[r.solicitado_por].ocs += 1;
+    });
+
+    const top10 = Object.entries(mapSol)
+        .map(([name, info]) => ({ name, monto: info.monto, ocs: info.ocs }))
+        .sort((a, b) => b.monto - a.monto)
+        .slice(0, 10);
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: { bar: { horizontal: true, borderRadius: 4, barHeight: '62%' } },
+        colors: isDark ? ['#A78BFA'] : ['#1B2A4A'],
+        series: [{ name: `Monto (${activeCurrency})`, data: top10.map(s => Number(s.monto.toFixed(2))) }],
+        xaxis: {
+            categories: top10.map(s => `${shortName(s.name)} (${s.ocs})`),
+            labels: { formatter: v => formatMoneyCompact(v), style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, formatter: v => formatMoneyCompact(v), style: { fontSize: '9px' } },
+        tooltip: {
+            y: {
+                formatter: (val, { dataPointIndex }) => `${formatMoney(val)} · ${top10[dataPointIndex].ocs} OCs`
+            }
+        },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.topSolMonto) charts.topSolMonto.destroy();
+    charts.topSolMonto = new ApexCharts(document.querySelector('#chartTopSolicitantesMonto'), options);
+    charts.topSolMonto.render();
+}
+
 function renderChartTopProveedoresFreq(firmList) {
     const mapProv = {};
     firmList.forEach(r => {
@@ -1900,7 +1982,7 @@ function renderChartProcurementFunnel() {
 
     const themeCfg = getChartThemeConfig();
     const options = {
-        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        chart: { type: 'bar', height: 250, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
         theme: { mode: themeCfg.mode },
         plotOptions: {
             bar: {
@@ -2534,6 +2616,54 @@ function renderChartCompradorTrend(maxYm, selectedComp, selectedYear) {
     }
 }
 
+function renderChartTopSolicitantesReqs(currentRecords) {
+    const mapSol = {};
+    currentRecords.forEach(r => {
+        if (r.is_borrador) return;
+        const name = r.solicitado_por || 'Sin solicitante';
+        if (!mapSol[name]) mapSol[name] = { validas: 0, rechazadas: 0, total: 0 };
+        mapSol[name].total += 1;
+        if (r.is_rechazada) mapSol[name].rechazadas += 1;
+        else if (!r.excluida) mapSol[name].validas += 1;
+    });
+
+    const top10 = Object.entries(mapSol)
+        .map(([name, info]) => ({
+            name,
+            validas: info.validas,
+            rechazadas: info.rechazadas,
+            pctRech: info.total > 0 ? ((info.rechazadas / info.total) * 100).toFixed(1) : '0.0'
+        }))
+        .filter(x => x.validas > 0)
+        .sort((a, b) => b.validas - a.validas)
+        .slice(0, 10);
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 320, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: { bar: { horizontal: true, borderRadius: 4, barHeight: '62%' } },
+        colors: isDark ? ['#38BDF8'] : ['#264073'],
+        series: [{ name: 'Solicitudes válidas', data: top10.map(s => s.validas) }],
+        xaxis: {
+            categories: top10.map(s => shortName(s.name)),
+            labels: { style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, style: { fontSize: '9px' } },
+        tooltip: {
+            y: {
+                formatter: (val, { dataPointIndex }) => `${val} válidas · ${top10[dataPointIndex].rechazadas} rechazadas (${top10[dataPointIndex].pctRech}%)`
+            }
+        },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.topSolReqs) charts.topSolReqs.destroy();
+    charts.topSolReqs = new ApexCharts(document.querySelector('#chartTopSolicitantesReqs'), options);
+    charts.topSolReqs.render();
+}
+
 function renderMonthlyTable(entityRecords, selectedYear) {
     const meses = RAW_DATA.filters.meses.filter(m => m.startsWith(`${selectedYear}-`));
     const thead = document.getElementById('monthlyTableHead');
@@ -2636,7 +2766,7 @@ function renderMonthlyTable(entityRecords, selectedYear) {
 }
 
 // =====================================================================
-// MODAL UNIVERSAL DE AUDITORÍA (SOPORTA CICLO Y GASTO)
+// MODAL UNIVERSAL DE AUDITORÍA (SOPORTA CICLO, GASTO Y SOLICITANTE)
 // =====================================================================
 function openAuditModal(category, defaultSubFilter) {
     activeModalCategory = category || 'REZAGO';
@@ -2652,6 +2782,7 @@ function openAuditModal(category, defaultSubFilter) {
             <th class="py-2.5 px-3">OC Odoo</th>
             <th class="py-2.5 px-3">Fecha OC</th>
             <th class="py-2.5 px-3">Sociedad</th>
+            <th class="py-2.5 px-3">Solicitante</th>
             <th class="py-2.5 px-3">Proveedor</th>
             <th class="py-2.5 px-3">Comprador</th>
             <th class="py-2.5 px-3">Estado / SAP</th>
@@ -2662,6 +2793,7 @@ function openAuditModal(category, defaultSubFilter) {
             <th class="py-2.5 px-3">Solicitud</th>
             <th class="py-2.5 px-3">Fecha Creación</th>
             <th class="py-2.5 px-3">Sociedad</th>
+            <th class="py-2.5 px-3">Solicitante</th>
             <th class="py-2.5 px-3">Comprador</th>
             <th class="py-2.5 px-3">OC Odoo</th>
             <th class="py-2.5 px-3">Estatus / Etapas</th>
@@ -2709,7 +2841,7 @@ function getFilteredModalRows() {
                 if (activeModalSubFilter === 'NO_SAP' && r.en_sap) return false;
             }
             if (q) {
-                const hay = `${r.oc_odoo} ${r.oc_sap} ${r.solicitud} ${r.sociedad} ${r.proveedor} ${r.comprador} ${r.estado_oc}`.toLowerCase();
+                const hay = `${r.oc_odoo} ${r.oc_sap} ${r.solicitud} ${r.sociedad} ${r.solicitado_por} ${r.proveedor} ${r.comprador} ${r.estado_oc}`.toLowerCase();
                 if (!hay.includes(q)) return false;
             }
             return true;
@@ -2739,7 +2871,7 @@ function getFilteredModalRows() {
         }
 
         if (q) {
-            const hay = `${r.id} ${r.sociedad} ${r.comprador} ${r.oc_odoo} ${r.estado_oc} ${r.estado_sol}`.toLowerCase();
+            const hay = `${r.id} ${r.sociedad} ${r.solicitado_por} ${r.comprador} ${r.oc_odoo} ${r.estado_oc} ${r.estado_sol}`.toLowerCase();
             if (!hay.includes(q)) return false;
         }
         return true;
@@ -2769,7 +2901,7 @@ function renderModalTable() {
         document.getElementById('modalSubtitle').textContent = `${rows.length.toLocaleString()} OCs · Total: ${formatMoney(sumMonto)}`;
 
         if (!rows.length) {
-            tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-400 dark:text-gray-400">No hay órdenes de compra con este filtro.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-slate-400 dark:text-gray-400">No hay órdenes de compra con este filtro.</td></tr>`;
             return;
         }
 
@@ -2782,6 +2914,7 @@ function renderModalTable() {
                 <td class="py-2 px-3 font-bold text-cresta-navy dark:text-white">${r.oc_odoo} <span class="text-[10px] text-slate-400 font-normal">(${r.solicitud})</span></td>
                 <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${r.fecha}</td>
                 <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${r.sociedad}</td>
+                <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${shortName(r.solicitado_por || '')}</td>
                 <td class="py-2 px-3 font-medium text-slate-800 dark:text-gray-200">${r.proveedor}</td>
                 <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${shortName(r.comprador)}</td>
                 <td class="py-2 px-3">${sapBadge}</td>
@@ -2794,7 +2927,7 @@ function renderModalTable() {
     document.getElementById('modalSubtitle').textContent = `${rows.length.toLocaleString()} solicitudes encontradas`;
 
     if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-400 dark:text-gray-400">No hay solicitudes con este filtro.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-slate-400 dark:text-gray-400">No hay solicitudes con este filtro.</td></tr>`;
         return;
     }
 
@@ -2813,7 +2946,8 @@ function renderModalTable() {
             <td class="py-2 px-3 font-bold text-cresta-navy dark:text-white">${r.id}</td>
             <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${r.fecha}</td>
             <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${r.sociedad}</td>
-            <td class="py-2 px-3 text-slate-700 dark:text-gray-300">${r.comprador}</td>
+            <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${shortName(r.solicitado_por || '')}</td>
+            <td class="py-2 px-3 text-slate-700 dark:text-gray-300">${shortName(r.comprador)}</td>
             <td class="py-2 px-3 text-slate-500 dark:text-gray-400">${r.oc_odoo || '—'}</td>
             <td class="py-2 px-3">${getRowStatusBadge(r)}</td>
             <td class="py-2 px-3 text-right ${diasCls}">${diasTxt}</td>
@@ -2826,7 +2960,7 @@ function exportAuditCSV() {
     const rows = getFilteredModalRows();
 
     if (cfg.mode === 'spend') {
-        const headers = ['OC Odoo', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Proveedor', 'Comprador', 'Estado OC', 'Divisa', 'Total OC'];
+        const headers = ['OC Odoo', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Solicitante', 'Proveedor', 'Comprador', 'Estado OC', 'Divisa', 'Total OC'];
         const csvLines = [headers.join(',')];
 
         rows.forEach(r => {
@@ -2836,6 +2970,7 @@ function exportAuditCSV() {
                 `"${r.solicitud}"`,
                 `"${r.fecha}"`,
                 `"${r.sociedad}"`,
+                `"${(r.solicitado_por || '').replace(/"/g, '""')}"`,
                 `"${r.proveedor.replace(/"/g, '""')}"`,
                 `"${r.comprador}"`,
                 `"${r.estado_oc}"`,
@@ -2855,7 +2990,7 @@ function exportAuditCSV() {
         return;
     }
 
-    const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Comprador', 'OC Odoo', 'Estatus', cfg.daysLabel];
+    const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Estatus', cfg.daysLabel];
     const csvLines = [headers.join(',')];
 
     rows.forEach(r => {
@@ -2869,6 +3004,7 @@ function exportAuditCSV() {
             `"${r.id}"`,
             `"${r.fecha}"`,
             `"${r.sociedad}"`,
+            `"${(r.solicitado_por || '').replace(/"/g, '""')}"`,
             `"${r.comprador}"`,
             `"${r.oc_odoo || ''}"`,
             `"${statusTxt}"`,

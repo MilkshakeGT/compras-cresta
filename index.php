@@ -77,14 +77,14 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 </h1>
             </div>
 
-            <!-- Barra de Filtros Multi-Año / Trimestre + Sincronizar + Toggle Modo Oscuro -->
+            <!-- Barra de Filtros Multi-Año / Trimestre / Comparador Q -->
             <div class="flex flex-wrap items-center gap-2 text-xs">
-                <!-- Selector de Año -->
+                <!-- Selector de Año (oculto en Comparar Q porque permite cruzar años) -->
                 <select id="filterYear" onchange="onYearChange()" title="Seleccionar Año"
                     class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-cresta-navy dark:text-white rounded-lg px-3 py-2 font-bold shadow-xs">
                 </select>
 
-                <!-- Modo Periodo: Mes | Trimestre (Q) | YTD -->
+                <!-- Modo Periodo: Mes | Trimestre (Q) | Comparar Q | YTD -->
                 <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-1 border border-slate-200 dark:border-gray-700">
                     <button id="btnModeMonth" type="button" onclick="setPeriodMode('month')"
                         class="px-2.5 py-1.5 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition">
@@ -93,6 +93,10 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                     <button id="btnModeQuarter" type="button" onclick="setPeriodMode('quarter')"
                         class="px-2.5 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
                         Trimestre (Q)
+                    </button>
+                    <button id="btnModeCompareQ" type="button" onclick="setPeriodMode('compare_q')"
+                        class="px-2.5 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
+                        Comparar Q
                     </button>
                     <button id="btnModeYTD" type="button" onclick="setPeriodMode('ytd')"
                         class="px-2.5 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
@@ -109,6 +113,17 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                 <select id="filterQuarter" onchange="renderDashboard()"
                     class="hidden bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-3 py-2 font-medium shadow-xs">
                 </select>
+
+                <!-- Selectores Duales para Comparar Q (cualquier año contra cualquier año) -->
+                <div id="compareQControls" class="hidden inline-flex items-center gap-1.5">
+                    <select id="filterCompareQ1" onchange="renderDashboard()" title="Trimestre Principal (Base)"
+                        class="bg-white dark:bg-gray-800 border border-cresta-navy dark:border-indigo-500 text-cresta-navy dark:text-white rounded-lg px-2.5 py-2 font-bold shadow-xs">
+                    </select>
+                    <span class="text-slate-400 font-bold">vs</span>
+                    <select id="filterCompareQ2" onchange="renderDashboard()" title="Trimestre de Referencia (Comparar contra)"
+                        class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-2 font-medium shadow-xs">
+                    </select>
+                </div>
 
                 <!-- Selector de Sociedad -->
                 <select id="filterSociedad" onchange="renderDashboard()"
@@ -227,6 +242,33 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                     </div>
                 </div>
                 <p id="kpi4Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Aprobadas abiertas al corte</p>
+            </div>
+        </section>
+
+        <!-- Panel Exclusivo de Comparación Trimestral Cara a Cara (visible solo en modo Comparar Q) -->
+        <section id="quarterComparisonSection" class="hidden bg-white dark:bg-gray-900 border-2 border-cresta-navy/20 dark:border-indigo-500/30 rounded-2xl p-5 shadow-sm">
+            <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-navy dark:bg-cresta-red text-white">COMPARATIVA TRIMESTRAL</span>
+                        <h2 id="compareQTitle" class="text-sm font-bold text-cresta-navy dark:text-white">Comparación Q vs Q</h2>
+                    </div>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Contrastando tiempos promedio (días) y cumplimiento de SLA entre los dos trimestres seleccionados</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                <!-- Gráfica de barras agrupadas -->
+                <div class="lg:col-span-6">
+                    <div id="chartCompareQ" class="w-full h-72"></div>
+                </div>
+                <!-- Tabla de variaciones directa -->
+                <div class="lg:col-span-6 overflow-x-auto">
+                    <table class="w-full text-xs text-left border-collapse">
+                        <thead id="compareQTableHead" class="bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-200"></thead>
+                        <tbody id="compareQTableBody" class="divide-y divide-slate-200 dark:divide-gray-800"></tbody>
+                    </table>
+                </div>
             </div>
         </section>
 
@@ -393,7 +435,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
 <script>
 const RAW_DATA = <?= $jsonPayload ?>;
-let periodMode = 'month';
+let periodMode = 'month'; // 'month' | 'quarter' | 'compare_q' | 'ytd'
 let charts = {};
 let isDark = false;
 
@@ -479,10 +521,10 @@ const MONTH_NAMES = {
 };
 
 const QUARTER_DEFS = [
-    { id: 'Q1', label: 'Q1 (Ene–Mar)', months: ['01', '02', '03'] },
-    { id: 'Q2', label: 'Q2 (Abr–Jun)', months: ['04', '05', '06'] },
-    { id: 'Q3', label: 'Q3 (Jul–Sep)', months: ['07', '08', '09'] },
-    { id: 'Q4', label: 'Q4 (Oct–Dic)', months: ['10', '11', '12'] }
+    { id: 'Q1', label: 'Q1 (Ene–Mar)', short: 'Q1', months: ['01', '02', '03'] },
+    { id: 'Q2', label: 'Q2 (Abr–Jun)', short: 'Q2', months: ['04', '05', '06'] },
+    { id: 'Q3', label: 'Q3 (Jul–Sep)', short: 'Q3', months: ['07', '08', '09'] },
+    { id: 'Q4', label: 'Q4 (Oct–Dic)', short: 'Q4', months: ['10', '11', '12'] }
 ];
 
 function getQuarterFromYm(ym) {
@@ -524,22 +566,37 @@ function applyThemeUI() {
 function updatePeriodButtons() {
     const btnM = document.getElementById('btnModeMonth');
     const btnQ = document.getElementById('btnModeQuarter');
+    const btnCQ = document.getElementById('btnModeCompareQ');
     const btnY = document.getElementById('btnModeYTD');
+
+    const selYear = document.getElementById('filterYear');
     const selMes = document.getElementById('filterMes');
     const selQ = document.getElementById('filterQuarter');
+    const compQBox = document.getElementById('compareQControls');
+    const compQSec = document.getElementById('quarterComparisonSection');
 
     const activeCls = 'px-2.5 py-1.5 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition';
     const inactiveCls = 'px-2.5 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition';
 
     btnM.className = periodMode === 'month' ? activeCls : inactiveCls;
     btnQ.className = periodMode === 'quarter' ? activeCls : inactiveCls;
+    btnCQ.className = periodMode === 'compare_q' ? activeCls : inactiveCls;
     btnY.className = periodMode === 'ytd' ? activeCls : inactiveCls;
 
-    if (periodMode === 'quarter') {
-        selMes.classList.add('hidden');
+    selYear.classList.add('hidden');
+    selMes.classList.add('hidden');
+    selQ.classList.add('hidden');
+    compQBox.classList.add('hidden');
+    compQSec.classList.add('hidden');
+
+    if (periodMode === 'compare_q') {
+        compQBox.classList.remove('hidden');
+        compQSec.classList.remove('hidden');
+    } else if (periodMode === 'quarter') {
+        selYear.classList.remove('hidden');
         selQ.classList.remove('hidden');
     } else {
-        selQ.classList.add('hidden');
+        selYear.classList.remove('hidden');
         selMes.classList.remove('hidden');
     }
 }
@@ -552,6 +609,17 @@ function formatYm(ym) {
 function formatMonthOnly(ym) {
     const m = ym.split('-')[1];
     return MONTH_NAMES[m] || m;
+}
+
+function formatYearQuarter(yq) {
+    const [y, qId] = yq.split('-');
+    const qObj = QUARTER_DEFS.find(q => q.id === qId);
+    return qObj ? `${qObj.short} ${y} (${qObj.label.split(' ')[1]})` : yq;
+}
+
+function formatYearQuarterShort(yq) {
+    const [y, qId] = yq.split('-');
+    return `${qId} ${y}`;
 }
 
 function shortName(fullName) {
@@ -602,6 +670,38 @@ function populateYearPeriodOptions(year) {
     }
 }
 
+function populateAllCompareQuarters() {
+    const selCQ1 = document.getElementById('filterCompareQ1');
+    const selCQ2 = document.getElementById('filterCompareQ2');
+
+    // Obtener todos los pares YYYY-Q# disponibles ordenados cronológicamente
+    const yqSet = new Set(RAW_DATA.filters.meses.map(ym => `${ym.split('-')[0]}-${getQuarterFromYm(ym)}`));
+    const allYQs = [...yqSet].sort();
+
+    selCQ1.innerHTML = '';
+    selCQ2.innerHTML = '';
+
+    allYQs.forEach(yq => {
+        const o1 = document.createElement('option');
+        o1.value = yq;
+        o1.textContent = formatYearQuarter(yq);
+        selCQ1.appendChild(o1);
+
+        const o2 = document.createElement('option');
+        o2.value = yq;
+        o2.textContent = formatYearQuarter(yq);
+        selCQ2.appendChild(o2);
+    });
+
+    if (allYQs.length >= 2) {
+        selCQ1.value = allYQs[allYQs.length - 1]; // Trimestre más reciente como Base
+        selCQ2.value = allYQs[allYQs.length - 2]; // Trimestre anterior como Referencia
+    } else if (allYQs.length === 1) {
+        selCQ1.value = allYQs[0];
+        selCQ2.value = allYQs[0];
+    }
+}
+
 function initFilters() {
     const selYear = document.getElementById('filterYear');
     const selSoc = document.getElementById('filterSociedad');
@@ -618,6 +718,7 @@ function initFilters() {
     selYear.value = latestYear;
 
     populateYearPeriodOptions(latestYear);
+    populateAllCompareQuarters();
 
     RAW_DATA.filters.sociedades.forEach(s => {
         const opt = document.createElement('option');
@@ -661,29 +762,41 @@ function filterBySociedadOnly(records) {
     return records.filter(r => soc === 'ALL' || r.sociedad === soc);
 }
 
+function filterRecordsByYearQuarter(records, yq) {
+    const [year, qId] = yq.split('-');
+    const qDef = QUARTER_DEFS.find(q => q.id === qId) || QUARTER_DEFS[0];
+    return records.filter(r => r.ym.startsWith(`${year}-`) && qDef.months.includes(r.ym.split('-')[1]));
+}
+
+function getMaxYmForYearQuarter(yq) {
+    const [year, qId] = yq.split('-');
+    const qDef = QUARTER_DEFS.find(q => q.id === qId) || QUARTER_DEFS[0];
+    const qMeses = RAW_DATA.filters.meses.filter(ym => ym.startsWith(`${year}-`) && qDef.months.includes(ym.split('-')[1]));
+    return qMeses.length ? qMeses[qMeses.length - 1] : `${year}-${qDef.months[2]}`;
+}
+
 function getMaxYmForCurrentSelection() {
     const year = document.getElementById('filterYear').value;
-    const yearMeses = RAW_DATA.filters.meses.filter(ym => ym.startsWith(`${year}-`));
-
+    if (periodMode === 'compare_q') {
+        return getMaxYmForYearQuarter(document.getElementById('filterCompareQ1').value);
+    }
     if (periodMode === 'quarter') {
-        const qId = document.getElementById('filterQuarter').value;
-        const qDef = QUARTER_DEFS.find(q => q.id === qId) || QUARTER_DEFS[0];
-        const qMeses = yearMeses.filter(ym => qDef.months.includes(ym.split('-')[1]));
-        return qMeses.length ? qMeses[qMeses.length - 1] : `${year}-${qDef.months[2]}`;
+        return getMaxYmForYearQuarter(`${year}-${document.getElementById('filterQuarter').value}`);
     }
     return document.getElementById('filterMes').value;
 }
 
 function filterByActivePeriod(records) {
     const year = document.getElementById('filterYear').value;
+    if (periodMode === 'compare_q') {
+        return filterRecordsByYearQuarter(records, document.getElementById('filterCompareQ1').value);
+    }
     if (periodMode === 'month') {
         const targetYm = document.getElementById('filterMes').value;
         return records.filter(r => r.ym === targetYm);
     }
     if (periodMode === 'quarter') {
-        const qId = document.getElementById('filterQuarter').value;
-        const qDef = QUARTER_DEFS.find(q => q.id === qId) || QUARTER_DEFS[0];
-        return records.filter(r => r.ym.startsWith(`${year}-`) && qDef.months.includes(r.ym.split('-')[1]));
+        return filterRecordsByYearQuarter(records, `${year}-${document.getElementById('filterQuarter').value}`);
     }
     const targetYm = document.getElementById('filterMes').value;
     return records.filter(r => r.ym.startsWith(`${year}-`) && r.ym <= targetYm);
@@ -702,8 +815,8 @@ function getPreviousQuarterRecords(entityRecords, year, qId) {
         prevQId = 'Q4';
     }
 
-    const qDef = QUARTER_DEFS.find(q => q.id === prevQId);
-    const prevRows = entityRecords.filter(r => r.ym.startsWith(`${prevYear}-`) && qDef.months.includes(r.ym.split('-')[1]));
+    const prevYq = `${prevYear}-${prevQId}`;
+    const prevRows = filterRecordsByYearQuarter(entityRecords, prevYq);
     if (!prevRows.length) return null;
 
     return {
@@ -720,6 +833,9 @@ function calcKpiStats(records) {
     const diasCompArr = conOcOdoo.map(r => r.d_comprador);
     const avgDiasComp = diasCompArr.length ? avg(diasCompArr) : null;
     const medDiasComp = diasCompArr.length ? median(diasCompArr) : null;
+
+    const aprobSolArr = validas.map(r => r.d_aprob_sol).filter(v => v !== null);
+    const avgDiasAprobSol = aprobSolArr.length ? avg(aprobSolArr) : null;
 
     const matureComp = aprobadas.filter(r => r.edad_dias >= 14);
     const isCompPartial = (matureComp.length === 0 && conOcOdoo.length > 0);
@@ -744,6 +860,7 @@ function calcKpiStats(records) {
         totalValidas: validas.length,
         avgDiasComp,
         medDiasComp,
+        avgDiasAprobSol,
         pctComp14,
         pctSap14
     };
@@ -761,7 +878,17 @@ function renderDashboard() {
     const maxYm = getMaxYmForCurrentSelection();
 
     let prevCompData = null;
-    if (periodMode === 'month') {
+    if (periodMode === 'compare_q') {
+        const yq1 = document.getElementById('filterCompareQ1').value;
+        const yq2 = document.getElementById('filterCompareQ2').value;
+        const rowsQ2 = filterRecordsByYearQuarter(entityRecords, yq2);
+        const statsQ2 = calcKpiStats(rowsQ2);
+        prevCompData = {
+            label: formatYearQuarterShort(yq2),
+            stats: statsQ2
+        };
+        renderQuarterComparisonPanel(yq1, yq2, currentStats, statsQ2);
+    } else if (periodMode === 'month') {
         const allMeses = RAW_DATA.filters.meses;
         const idxYm = allMeses.indexOf(selectedYm);
         if (idxYm > 0) {
@@ -775,8 +902,13 @@ function renderDashboard() {
         prevCompData = getPreviousQuarterRecords(entityRecords, selectedYear, selectedQ);
     }
 
+    // Badge KPI 1
     document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
-    if (periodMode === 'ytd') {
+    if (periodMode === 'compare_q') {
+        const yq1 = document.getElementById('filterCompareQ1').value;
+        const diffVol = currentStats.totalValidas - prevCompData.stats.totalValidas;
+        document.getElementById('kpi1Badge').textContent = `${formatYearQuarterShort(yq1)} (${diffVol >= 0 ? '+' : ''}${diffVol})`;
+    } else if (periodMode === 'ytd') {
         document.getElementById('kpi1Badge').textContent = `YTD ${selectedYear}`;
     } else if (periodMode === 'quarter') {
         document.getElementById('kpi1Badge').textContent = `${selectedQ} ${selectedYear}`;
@@ -784,6 +916,7 @@ function renderDashboard() {
         document.getElementById('kpi1Badge').textContent = formatYm(selectedYm);
     }
 
+    // KPI 2: Tiempo Gestión Comprador
     document.getElementById('kpiTimeValue').textContent = currentStats.avgDiasComp !== null ? currentStats.avgDiasComp.toFixed(1) : 'N/D';
     document.getElementById('kpiTimeSub').textContent = currentStats.medDiasComp !== null
         ? `Mediana: ${currentStats.medDiasComp.toFixed(1)} d · ${currentStats.conOcOdooList.length} OC`
@@ -802,6 +935,7 @@ function renderDashboard() {
         bTime.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
     }
 
+    // KPI 3: SLA Comprador <= 14d
     document.getElementById('kpi2Value').textContent = currentStats.pctComp14 !== null ? `${currentStats.pctComp14}%` : 'N/D';
     const b2 = document.getElementById('kpi2Badge');
     const sub2 = document.getElementById('kpi2Sub');
@@ -822,6 +956,7 @@ function renderDashboard() {
         sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
     }
 
+    // KPI 4: En SAP <= 14d
     document.getElementById('kpi3Value').textContent = currentStats.pctSap14 !== null ? `${currentStats.pctSap14}%` : 'N/D';
     const b3 = document.getElementById('kpi3Badge');
     const sub3 = document.getElementById('kpi3Sub');
@@ -856,14 +991,131 @@ function renderDashboard() {
     document.getElementById('kpi4Value').textContent = rezagoList.length.toLocaleString();
     document.getElementById('kpi4Badge').textContent = `${upToSelected30.length} > 30d`;
 
+    const tableYear = periodMode === 'compare_q'
+        ? document.getElementById('filterCompareQ1').value.split('-')[0]
+        : selectedYear;
+
     renderChartQuincenas(entityRecords, maxYm);
     renderChartCiclo(entityRecords, maxYm);
     renderChartCompradores(currentRecords);
     renderChartRezago(rezagoList);
     renderChartAprobadoresSol(currentRecords);
     renderChartAprobadoresOc();
-    renderChartCompradorTrend(maxYm, selectedComp, selectedYear);
-    renderMonthlyTable(entityRecords, selectedYear);
+    renderChartCompradorTrend(maxYm, selectedComp, tableYear);
+    renderMonthlyTable(entityRecords, tableYear);
+}
+
+// ==========================================
+// PANEL DE COMPARACIÓN TRIMESTRAL (Q vs Q)
+// ==========================================
+function renderQuarterComparisonPanel(yq1, yq2, stats1, stats2) {
+    const lbl1 = formatYearQuarterShort(yq1);
+    const lbl2 = formatYearQuarterShort(yq2);
+    document.getElementById('compareQTitle').textContent = `${lbl1} vs ${lbl2}`;
+
+    const entityOc = filterByEntity(RAW_DATA.oc_records || []);
+    const oc1 = filterRecordsByYearQuarter(entityOc, yq1).map(r => r.d_aprob_oc);
+    const oc2 = filterRecordsByYearQuarter(entityOc, yq2).map(r => r.d_aprob_oc);
+    const avgOc1 = oc1.length ? Number(avg(oc1).toFixed(1)) : 0;
+    const avgOc2 = oc2.length ? Number(avg(oc2).toFixed(1)) : 0;
+
+    const dSol1 = stats1.avgDiasAprobSol !== null ? Number(stats1.avgDiasAprobSol.toFixed(1)) : 0;
+    const dSol2 = stats2.avgDiasAprobSol !== null ? Number(stats2.avgDiasAprobSol.toFixed(1)) : 0;
+
+    const dComp1 = stats1.avgDiasComp !== null ? Number(stats1.avgDiasComp.toFixed(1)) : 0;
+    const dComp2 = stats2.avgDiasComp !== null ? Number(stats2.avgDiasComp.toFixed(1)) : 0;
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 270, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        colors: isDark ? ['#6366F1', '#9CA3AF'] : ['#1B2A4A', '#94A3B8'],
+        plotOptions: { bar: { horizontal: false, columnWidth: '52%', borderRadius: 4 } },
+        series: [
+            { name: `${lbl1} (Base)`, data: [dSol1, dComp1, avgOc1] },
+            { name: `${lbl2} (Comparar)`, data: [dSol2, dComp2, avgOc2] }
+        ],
+        xaxis: {
+            categories: ['Aprob. Solicitud', 'Gestión Comprador', 'Aprob. OC (Aut. 1)'],
+            labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } }
+        },
+        yaxis: {
+            title: { text: 'Días promedio', style: { fontSize: '10px', color: themeCfg.labelColor } },
+            labels: { formatter: v => v.toFixed(1) + ' d', style: { colors: themeCfg.labelColor } }
+        },
+        dataLabels: { enabled: true, formatter: v => v.toFixed(1) + 'd', style: { fontSize: '9px' } },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
+        legend: { position: 'top', fontSize: '11px' }
+    };
+
+    if (charts.compareQ) charts.compareQ.destroy();
+    charts.compareQ = new ApexCharts(document.querySelector('#chartCompareQ'), options);
+    charts.compareQ.render();
+
+    // Tabla de variaciones cara a cara
+    document.getElementById('compareQTableHead').innerHTML = `<tr>
+        <th class="py-2.5 px-3 font-bold rounded-tl-lg">Métrica</th>
+        <th class="py-2.5 px-3 text-right font-bold">${lbl1}</th>
+        <th class="py-2.5 px-3 text-right font-bold">${lbl2}</th>
+        <th class="py-2.5 px-3 text-right font-bold rounded-tr-lg">Variación</th>
+    </tr>`;
+
+    const fmtDelta = (v1, v2, unit, lowerIsBetter) => {
+        if (v1 === null || v2 === null) return `<span class="text-slate-400">N/D</span>`;
+        const diff = Number((v1 - v2).toFixed(1));
+        if (diff === 0) return `<span class="text-slate-500 font-bold">0${unit}</span>`;
+        const good = lowerIsBetter ? (diff < 0) : (diff > 0);
+        const cls = good ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-cresta-red dark:text-red-400 font-bold';
+        return `<span class="${cls}">${diff > 0 ? '+' : ''}${diff}${unit}</span>`;
+    };
+
+    const rows = [
+        {
+            name: 'Solicitudes válidas',
+            v1: stats1.totalValidas.toLocaleString(),
+            v2: stats2.totalValidas.toLocaleString(),
+            delta: `<span class="font-bold text-slate-600 dark:text-gray-300">${stats1.totalValidas - stats2.totalValidas >= 0 ? '+' : ''}${stats1.totalValidas - stats2.totalValidas}</span>`
+        },
+        {
+            name: 'Días prom. gestión comprador',
+            v1: stats1.avgDiasComp !== null ? `${dComp1.toFixed(1)} d` : 'N/D',
+            v2: stats2.avgDiasComp !== null ? `${dComp2.toFixed(1)} d` : 'N/D',
+            delta: fmtDelta(stats1.avgDiasComp, stats2.avgDiasComp, ' d', true)
+        },
+        {
+            name: 'Mediana gestión comprador',
+            v1: stats1.medDiasComp !== null ? `${stats1.medDiasComp.toFixed(1)} d` : 'N/D',
+            v2: stats2.medDiasComp !== null ? `${stats2.medDiasComp.toFixed(1)} d` : 'N/D',
+            delta: fmtDelta(stats1.medDiasComp, stats2.medDiasComp, ' d', true)
+        },
+        {
+            name: 'SLA Comprador ≤14 días',
+            v1: stats1.pctComp14 !== null ? `${stats1.pctComp14}%` : 'N/D',
+            v2: stats2.pctComp14 !== null ? `${stats2.pctComp14}%` : 'N/D',
+            delta: fmtDelta(stats1.pctComp14, stats2.pctComp14, ' pts', false)
+        },
+        {
+            name: 'Enviadas a SAP ≤14 días',
+            v1: stats1.pctSap14 !== null ? `${stats1.pctSap14}%` : 'N/D',
+            v2: stats2.pctSap14 !== null ? `${stats2.pctSap14}%` : 'N/D',
+            delta: fmtDelta(stats1.pctSap14, stats2.pctSap14, ' pts', false)
+        },
+        {
+            name: 'Días prom. aprobación OC',
+            v1: `${avgOc1.toFixed(1)} d`,
+            v2: `${avgOc2.toFixed(1)} d`,
+            delta: fmtDelta(avgOc1, avgOc2, ' d', true)
+        }
+    ];
+
+    document.getElementById('compareQTableBody').innerHTML = rows.map(r => `
+        <tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40">
+            <td class="py-2 px-3 font-medium text-slate-700 dark:text-gray-200">${r.name}</td>
+            <td class="py-2 px-3 text-right font-bold text-cresta-navy dark:text-white">${r.v1}</td>
+            <td class="py-2 px-3 text-right text-slate-600 dark:text-gray-300">${r.v2}</td>
+            <td class="py-2 px-3 text-right">${r.delta}</td>
+        </tr>
+    `).join('');
 }
 
 function getChartThemeConfig() {
@@ -1200,7 +1452,7 @@ function renderChartCompradorTrend(maxYm, selectedComp, selectedYear) {
         .filter(r => !r.excluida && r.aprobada && r.tiene_oc_odoo && r.d_comprador !== null);
 
     const allMesesUpTo = RAW_DATA.filters.meses.filter(m => m <= maxYm);
-    const meses = (periodMode === 'ytd' || periodMode === 'quarter')
+    const meses = (periodMode === 'ytd' || periodMode === 'quarter' || periodMode === 'compare_q')
         ? allMesesUpTo.filter(m => m.startsWith(`${selectedYear}-`))
         : allMesesUpTo.slice(-6);
 

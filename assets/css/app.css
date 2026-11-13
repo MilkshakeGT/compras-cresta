@@ -1,0 +1,37 @@
+/* Estilos corporativos · Grupo Cresta Supply Chain */
+:root {
+    --cresta-navy: #1B2A4A;
+    --cresta-blue: #264073;
+    --cresta-red: #C8102E;
+    --cresta-light: #F8FAFC;
+}
+
+body {
+    font-family: Verdana, Geneva, sans-serif;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+select,
+button,
+input {
+    outline: none;
+}
+
+/* Scrollbar limpio para tablas ejecutivas y modales */
+::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(100, 116, 139, 0.35);
+    border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 116, 139, 0.55);
+}

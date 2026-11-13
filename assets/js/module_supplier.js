@@ -324,3 +324,30 @@ function exportSupplier360CSV() {
 
     downloadCsvBlob(csvLines.join('\n'), `portal360_${provLabel}_${activeCurrency}_${RAW_DATA.cutoff_date}.csv`);
 }
+
+function exportSupplier360Excel() {
+    const selectedProv = document.getElementById('sup360Selector').value;
+    const provLabel = selectedProv === 'ALL' ? 'todos_proveedores' : selectedProv.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+
+    const headers = ['Proveedor', 'Producto / Servicio', 'OCs', 'Cantidad Total', 'Divisa', 'Precio Minimo', 'Precio Promedio', 'Precio Maximo', 'Ultimo Precio', 'Monto Total', '% Participacion'];
+    const dataRows = cachedSup360Products.map(p => [
+        selectedProv === 'ALL' ? 'Todos los Proveedores' : selectedProv,
+        String(p.producto).replace(/\n/g, ' '),
+        p.ocsCount,
+        Number(p.qty.toFixed(2)),
+        activeCurrency,
+        Number(p.minPu.toFixed(4)),
+        Number(p.avgPu.toFixed(4)),
+        Number(p.maxPu.toFixed(4)),
+        Number(p.lastPu.toFixed(4)),
+        Number(p.monto.toFixed(2)),
+        Number(p.pct.toFixed(2))
+    ]);
+
+    exportToExcel(
+        headers,
+        dataRows,
+        `portal360_${provLabel}_${activeCurrency}_${RAW_DATA.cutoff_date}.xlsx`,
+        'Portal 360 Proveedor'
+    );
+}

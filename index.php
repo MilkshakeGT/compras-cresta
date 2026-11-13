@@ -23,7 +23,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Evolución Ciclo de Compras · Grupo Cresta</title>
+    <title>Control de Compras y Proveedores · Grupo Cresta</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -57,104 +57,151 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
     <!-- Header Ejecutivo -->
     <header class="border-b border-slate-200 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 sticky top-0 z-30 backdrop-blur shadow-sm">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-            <div>
-                <div class="flex flex-wrap items-center gap-2.5">
-                    <span class="px-2.5 py-0.5 text-[11px] font-bold rounded-md text-white bg-cresta-navy dark:bg-cresta-red tracking-wide">
-                        GRUPO CRESTA · SUPPLY CHAIN
-                    </span>
-                    <span class="text-xs text-slate-500 dark:text-gray-400">
-                        Corte de datos: <strong class="text-slate-800 dark:text-gray-200"><?= htmlspecialchars($payload['cutoff_date']) ?></strong>
-                    </span>
-                    <?php if ($forceSync && !empty($syncInfo['message'])): ?>
-                        <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 font-semibold">
-                            <?= htmlspecialchars($syncInfo['message']) ?>
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 space-y-3">
+            <!-- Fila Superior: Marca + Navegación de Módulos + Acciones Globales -->
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2.5">
+                        <span class="px-2.5 py-0.5 text-[11px] font-bold rounded-md text-white bg-cresta-navy dark:bg-cresta-red tracking-wide">
+                            GRUPO CRESTA · SUPPLY CHAIN
                         </span>
-                    <?php endif; ?>
+                        <span class="text-xs text-slate-500 dark:text-gray-400">
+                            Corte: <strong class="text-slate-800 dark:text-gray-200"><?= htmlspecialchars($payload['cutoff_date']) ?></strong>
+                        </span>
+                        <?php if ($forceSync && !empty($syncInfo['message'])): ?>
+                            <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 font-semibold">
+                                <?= htmlspecialchars($syncInfo['message']) ?>
+                            </span>
+                        <?php endif; ?>
+                    </div>
+                    <h1 id="mainHeaderTitle" class="text-lg sm:text-xl font-bold text-cresta-navy dark:text-white mt-1">
+                        Evolución del Ciclo de Compras · Grupo Cresta
+                    </h1>
                 </div>
-                <h1 class="text-lg sm:text-xl font-bold text-cresta-navy dark:text-white mt-1">
-                    Evolución del Ciclo de Compras · Grupo Cresta
-                </h1>
+
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <!-- Selector Principal de Módulo -->
+                    <div class="inline-flex rounded-xl bg-slate-100 dark:bg-gray-800 p-1 border border-slate-200 dark:border-gray-700">
+                        <button id="btnTabCycle" type="button" onclick="setMainTab('cycle')"
+                            class="px-3 py-1.5 rounded-lg font-bold text-white bg-cresta-navy dark:bg-cresta-red transition">
+                            Ciclo Operativo (SLA)
+                        </button>
+                        <button id="btnTabSpend" type="button" onclick="setMainTab('spend')"
+                            class="px-3 py-1.5 rounded-lg font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
+                            Gasto y Proveedores
+                        </button>
+                    </div>
+
+                    <!-- Botón Sincronizar OneDrive -->
+                    <a href="?sync=1" title="Forzar actualización desde OneDrive"
+                        class="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
+                        <span>↻</span>
+                        <span class="hidden sm:inline">Sincronizar</span>
+                    </a>
+
+                    <!-- Toggle Modo Claro / Oscuro -->
+                    <button id="btnThemeToggle" type="button" onclick="toggleTheme()" title="Alternar modo claro / oscuro"
+                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-200 font-bold transition">
+                        <span id="themeIcon">🌙</span>
+                        <span id="themeLabel" class="hidden sm:inline">Modo Oscuro</span>
+                    </button>
+                </div>
             </div>
 
-            <!-- Barra de Filtros Multi-Año / Trimestre / Comparador Q -->
-            <div class="flex flex-wrap items-center gap-2 text-xs">
-                <!-- Selector de Año (oculto en Comparar Q porque permite cruzar años) -->
+            <!-- Fila Inferior del Header: Barra Unificada de Filtros Temporales y Dimensionales -->
+            <div class="pt-2.5 border-t border-slate-100 dark:border-gray-800 flex flex-wrap items-center gap-2 text-xs">
+                <!-- Selector de Año -->
                 <select id="filterYear" onchange="onYearChange()" title="Seleccionar Año"
-                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-cresta-navy dark:text-white rounded-lg px-3 py-2 font-bold shadow-xs">
+                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-cresta-navy dark:text-white rounded-lg px-2.5 py-1.5 font-bold shadow-xs">
                 </select>
 
                 <!-- Modo Periodo: Mes | Trimestre (Q) | Comparar Q | YTD -->
-                <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-1 border border-slate-200 dark:border-gray-700">
+                <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-0.5 border border-slate-200 dark:border-gray-700">
                     <button id="btnModeMonth" type="button" onclick="setPeriodMode('month')"
-                        class="px-2.5 py-1.5 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition">
+                        class="px-2.5 py-1 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition">
                         Mes
                     </button>
                     <button id="btnModeQuarter" type="button" onclick="setPeriodMode('quarter')"
-                        class="px-2.5 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
+                        class="px-2.5 py-1 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
                         Trimestre (Q)
                     </button>
                     <button id="btnModeCompareQ" type="button" onclick="setPeriodMode('compare_q')"
-                        class="px-2.5 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
+                        class="px-2.5 py-1 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
                         Comparar Q
                     </button>
                     <button id="btnModeYTD" type="button" onclick="setPeriodMode('ytd')"
-                        class="px-2.5 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
+                        class="px-2.5 py-1 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
                         YTD
                     </button>
                 </div>
 
-                <!-- Selector de Mes (visible en modo Mes y YTD) -->
+                <!-- Selector de Mes -->
                 <select id="filterMes" onchange="renderDashboard()"
-                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-3 py-2 font-medium shadow-xs">
+                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs">
                 </select>
 
-                <!-- Selector de Trimestre Q1-Q4 (visible en modo Trimestre) -->
+                <!-- Selector de Trimestre -->
                 <select id="filterQuarter" onchange="renderDashboard()"
-                    class="hidden bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-3 py-2 font-medium shadow-xs">
+                    class="hidden bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs">
                 </select>
 
-                <!-- Selectores Duales para Comparar Q (cualquier año contra cualquier año) -->
+                <!-- Selectores Duales para Comparar Q -->
                 <div id="compareQControls" class="hidden inline-flex items-center gap-1.5">
                     <select id="filterCompareQ1" onchange="renderDashboard()" title="Trimestre Principal (Base)"
-                        class="bg-white dark:bg-gray-800 border border-cresta-navy dark:border-indigo-500 text-cresta-navy dark:text-white rounded-lg px-2.5 py-2 font-bold shadow-xs">
+                        class="bg-white dark:bg-gray-800 border border-cresta-navy dark:border-indigo-500 text-cresta-navy dark:text-white rounded-lg px-2.5 py-1.5 font-bold shadow-xs">
                     </select>
                     <span class="text-slate-400 font-bold">vs</span>
-                    <select id="filterCompareQ2" onchange="renderDashboard()" title="Trimestre de Referencia (Comparar contra)"
-                        class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-2 font-medium shadow-xs">
+                    <select id="filterCompareQ2" onchange="renderDashboard()" title="Trimestre de Referencia"
+                        class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs">
                     </select>
                 </div>
 
                 <!-- Selector de Sociedad -->
                 <select id="filterSociedad" onchange="renderDashboard()"
-                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-3 py-2 font-medium shadow-xs">
+                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs">
                     <option value="ALL">Todas las Sociedades</option>
                 </select>
 
                 <!-- Selector de Comprador -->
                 <select id="filterComprador" onchange="renderDashboard()"
-                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-3 py-2 font-medium shadow-xs">
+                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs">
                     <option value="ALL">Todos los Compradores</option>
                 </select>
 
-                <!-- Botón Sincronizar OneDrive -->
-                <a href="?sync=1" title="Forzar actualización desde OneDrive"
-                    class="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
-                    <span>↻</span>
-                    <span class="hidden md:inline">Sincronizar</span>
-                </a>
+                <!-- Controles exclusivos de la pestaña Gasto y Proveedores -->
+                <div id="spendOnlyFilters" class="hidden flex flex-wrap items-center gap-2">
+                    <!-- Selector de Proveedor -->
+                    <select id="filterProveedor" onchange="renderDashboard()"
+                        class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 font-medium shadow-xs max-w-[230px]">
+                        <option value="ALL">Todos los Proveedores</option>
+                    </select>
 
-                <!-- Toggle Modo Claro / Oscuro -->
-                <button id="btnThemeToggle" type="button" onclick="toggleTheme()" title="Alternar modo claro / oscuro"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-200 font-bold transition">
-                    <span id="themeIcon">🌙</span>
-                    <span id="themeLabel" class="hidden sm:inline">Modo Oscuro</span>
-                </button>
+                    <!-- Switch de Divisa GTQ / USD -->
+                    <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-0.5 border border-slate-200 dark:border-gray-700">
+                        <button id="btnCurrGTQ" type="button" onclick="setCurrency('GTQ')"
+                            class="px-2.5 py-1 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition">
+                            GTQ (Q)
+                        </button>
+                        <button id="btnCurrUSD" type="button" onclick="setCurrency('USD')"
+                            class="px-2.5 py-1 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
+                            USD ($)
+                        </button>
+                    </div>
+
+                    <!-- Checkbox Excluir Caja Chica / Reembolsos -->
+                    <label class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 cursor-pointer select-none">
+                        <input id="chkExcludePettyCash" type="checkbox" onchange="renderDashboard()" class="rounded text-cresta-navy">
+                        <span class="text-[11px] font-medium text-slate-700 dark:text-gray-300">Ocultar Caja Chica</span>
+                    </label>
+                </div>
             </div>
         </div>
     </header>
 
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6 flex-1 w-full">
+    <!-- ===================================================================== -->
+    <!-- MÓDULO 1: CICLO OPERATIVO Y SLA                                       -->
+    <!-- ===================================================================== -->
+    <main id="viewCycleSection" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6 flex-1 w-full">
 
         <!-- Tarjetas KPI Principales (5 tarjetas auditables al hacer clic) -->
         <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -245,7 +292,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Panel Exclusivo de Comparación Trimestral Cara a Cara (visible solo en modo Comparar Q) -->
+        <!-- Panel Exclusivo de Comparación Trimestral (Ciclo) -->
         <section id="quarterComparisonSection" class="hidden bg-white dark:bg-gray-900 border-2 border-cresta-navy/20 dark:border-indigo-500/30 rounded-2xl p-5 shadow-sm">
             <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
@@ -258,11 +305,9 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-                <!-- Gráfica de barras agrupadas -->
                 <div class="lg:col-span-6">
                     <div id="chartCompareQ" class="w-full h-72"></div>
                 </div>
-                <!-- Tabla de variaciones directa -->
                 <div class="lg:col-span-6 overflow-x-auto">
                     <table class="w-full text-xs text-left border-collapse">
                         <thead id="compareQTableHead" class="bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-200"></thead>
@@ -272,7 +317,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 1 de Gráficas -->
+        <!-- Fila 1 de Gráficas (Ciclo) -->
         <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-7">
                 <div class="mb-3">
@@ -291,7 +336,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 2 de Gráficas -->
+        <!-- Fila 2 de Gráficas (Ciclo) -->
         <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-7">
                 <div class="mb-3 flex items-start justify-between gap-2">
@@ -321,7 +366,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             </div>
         </section>
 
-        <!-- Fila 3: Ranking de Aprobadores (Solicitudes vs Órdenes de Compra) -->
+        <!-- Fila 3: Ranking de Aprobadores -->
         <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
                 <div class="mb-3 flex items-start justify-between gap-2">
@@ -368,7 +413,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             <div id="chartCompradorTrend" class="w-full h-80"></div>
         </section>
 
-        <!-- Tabla Ejecutiva Mensual (filtrada por el Año seleccionado) -->
+        <!-- Tabla Ejecutiva Mensual -->
         <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm overflow-x-auto">
             <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
@@ -385,6 +430,206 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
     </main>
 
+    <!-- ===================================================================== -->
+    <!-- MÓDULO 2: GESTIÓN DE GASTO, COMPRADORES Y PROVEEDORES                 -->
+    <!-- ===================================================================== -->
+    <main id="viewSpendSection" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6 flex-1 w-full">
+
+        <!-- 5 Tarjetas KPI Ejecutivas de Gasto (Todas auditables al hacer clic) -->
+        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <!-- Spend KPI 1: Gasto Comprometido Total -->
+            <div onclick="openAuditModal('SPEND_FIRM', 'ALL')" title="Haz clic para auditar el detalle de OCs firmes"
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-navy dark:hover:border-indigo-500/70 transition group flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-navy dark:group-hover:text-white transition">Gasto Comprometido</span>
+                        <span id="spKpi1Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">--</span>
+                    </div>
+                    <div class="flex items-baseline justify-between mt-2 gap-1">
+                        <span id="spKpi1Value" class="text-xl xl:text-2xl font-bold text-cresta-navy dark:text-white truncate">Q 0</span>
+                        <span class="text-[10px] text-cresta-navy dark:text-indigo-400 group-hover:underline font-bold shrink-0">Auditar →</span>
+                    </div>
+                </div>
+                <p id="spKpi1Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">OCs firmes en divisa seleccionada</p>
+            </div>
+
+            <!-- Spend KPI 2: Órdenes Emitidas y Ticket Promedio -->
+            <div onclick="openAuditModal('SPEND_FIRM', 'ALL')" title="Haz clic para auditar tickets de órdenes de compra"
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-blue dark:hover:border-sky-500/70 transition group flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-blue dark:group-hover:text-sky-300 transition">OCs Firmes / Ticket</span>
+                        <span id="spKpi2Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0">0 OCs</span>
+                    </div>
+                    <div class="flex items-baseline justify-between mt-2 gap-1">
+                        <span id="spKpi2Value" class="text-xl xl:text-2xl font-bold text-cresta-blue dark:text-sky-400 truncate">Q 0</span>
+                        <span class="text-[10px] text-cresta-blue dark:text-sky-400 group-hover:underline font-bold shrink-0">Auditar →</span>
+                    </div>
+                </div>
+                <p id="spKpi2Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Ticket promedio · Mediana: Q 0</p>
+            </div>
+
+            <!-- Spend KPI 3: Proveedores Activos y Concentración Top 5 -->
+            <div onclick="openAuditModal('SPEND_FIRM', 'TOP5_PROV')" title="Haz clic para auditar OCs de los 5 proveedores principales"
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-emerald-600 dark:hover:border-emerald-500/70 transition group flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition">Proveedores Activos</span>
+                        <span id="spKpi3Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">Top 5: 0%</span>
+                    </div>
+                    <div class="flex items-baseline justify-between mt-2">
+                        <span id="spKpi3Value" class="text-2xl xl:text-3xl font-bold text-emerald-600 dark:text-emerald-400">0</span>
+                        <span class="text-[10px] text-emerald-700 dark:text-emerald-400 group-hover:underline font-bold">Top 5 →</span>
+                    </div>
+                </div>
+                <p id="spKpi3Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">Concentración Pareto en Top 5</p>
+            </div>
+
+            <!-- Spend KPI 4: Cotizaciones Pendientes (RFQ) -->
+            <div onclick="openAuditModal('SPEND_RFQ', 'ALL')" title="Haz clic para auditar solicitudes de cotización sin convertir"
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-amber-600 dark:hover:border-amber-500/70 transition group flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-amber-700 dark:group-hover:text-amber-300 transition">Cotizaciones (RFQ)</span>
+                        <span id="spKpi4Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold shrink-0">0 abiertas</span>
+                    </div>
+                    <div class="flex items-baseline justify-between mt-2 gap-1">
+                        <span id="spKpi4Value" class="text-xl xl:text-2xl font-bold text-amber-600 dark:text-amber-400 truncate">Q 0</span>
+                        <span class="text-[10px] text-amber-700 dark:text-amber-400 group-hover:underline font-bold shrink-0">Auditar →</span>
+                    </div>
+                </div>
+                <p id="spKpi4Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">En cotización sin orden firme</p>
+            </div>
+
+            <!-- Spend KPI 5: Sincronización SAP & Cancelaciones -->
+            <div onclick="openAuditModal('SPEND_NO_SAP', 'ALL')" title="Haz clic para auditar OCs firmes pendientes de SAP"
+                class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer hover:border-cresta-red dark:hover:border-red-500/70 transition group flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="text-[11px] text-slate-500 dark:text-gray-400 font-bold uppercase group-hover:text-cresta-red dark:group-hover:text-red-300 transition">Integración SAP</span>
+                        <span id="spKpi5Badge" class="text-[10px] px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950 text-cresta-red dark:text-red-300 border border-red-200 dark:border-red-800 font-bold shrink-0">Canc: 0%</span>
+                    </div>
+                    <div class="flex items-baseline justify-between mt-2">
+                        <span id="spKpi5Value" class="text-2xl xl:text-3xl font-bold text-cresta-navy dark:text-indigo-400">0%</span>
+                        <span class="text-[10px] text-cresta-red dark:text-red-400 group-hover:underline font-bold">Sin SAP →</span>
+                    </div>
+                </div>
+                <p id="spKpi5Sub" class="text-[11px] text-slate-500 dark:text-gray-400 mt-2">OCs firmes sincronizadas en SAP</p>
+            </div>
+        </section>
+
+        <!-- Panel Exclusivo de Comparación Trimestral de Gasto (visible en modo Comparar Q) -->
+        <section id="spendCompareQSection" class="hidden bg-white dark:bg-gray-900 border-2 border-cresta-navy/20 dark:border-indigo-500/30 rounded-2xl p-5 shadow-sm">
+            <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-navy dark:bg-cresta-red text-white">COMPARATIVA DE GASTO Q vs Q</span>
+                        <h2 id="spendCompareQTitle" class="text-sm font-bold text-cresta-navy dark:text-white">Comparación Trimestral</h2>
+                    </div>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Contraste de monto comprometido, cantidad de OCs, ticket promedio y proveedores entre trimestres</p>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs text-left border-collapse">
+                    <thead id="spendCompareQHead" class="bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-200"></thead>
+                    <tbody id="spendCompareQBody" class="divide-y divide-slate-200 dark:divide-gray-800"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Fila 1 (Gasto): Evolución Mensual del Gasto + Distribución por Sociedad -->
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-8">
+                <div class="mb-3">
+                    <h2 id="spChartTrendTitle" class="text-sm font-bold text-cresta-navy dark:text-white">Evolución Mensual del Gasto Comprometido y OCs</h2>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Barras = Monto total comprometido · Línea = Cantidad de órdenes de compra emitidas</p>
+                </div>
+                <div id="chartSpendTrend" class="w-full h-80"></div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-4">
+                <div class="mb-3">
+                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Participación del Gasto por Sociedad</h2>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Distribución por empresa del grupo en el periodo</p>
+                </div>
+                <div id="chartSpendSociedades" class="w-full h-80"></div>
+            </div>
+        </section>
+
+        <!-- Fila 2 (Gasto): Top 10 Proveedores por Monto + Top Compradores por Monto y Volumen -->
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
+                <div class="mb-3 flex items-start justify-between gap-2">
+                    <div>
+                        <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Top 10 Proveedores por Monto Comprado</h2>
+                        <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Principales socios comerciales por valor económico en el periodo</p>
+                    </div>
+                    <span id="badgeParetoInfo" class="text-[10px] px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0">
+                        Pareto 80%
+                    </span>
+                </div>
+                <div id="chartTopProveedoresMonto" class="w-full h-80"></div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
+                <div class="mb-3">
+                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Top Compradores por Monto Gestionado</h2>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Capital adjudicado en OCs firmes y cantidad de órdenes emitidas</p>
+                </div>
+                <div id="chartTopCompradoresMonto" class="w-full h-80"></div>
+            </div>
+        </section>
+
+        <!-- Fila 3 (Gasto): Top 10 Proveedores por Frecuencia + Embudo del Proceso de Compra -->
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
+                <div class="mb-3">
+                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Top 10 Proveedores por Frecuencia (Cantidad de OCs)</h2>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Proveedores de alta recurrencia operativa (candidatos a contratos marco)</p>
+                </div>
+                <div id="chartTopProveedoresFreq" class="w-full h-80"></div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">
+                <div class="mb-3">
+                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Embudo de Conversión del Proceso de Compras</h2>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Trazabilidad desde Solicitud Aprobada hasta Orden Sincronizada en SAP</p>
+                </div>
+                <div id="chartProcurementFunnel" class="w-full h-80"></div>
+            </div>
+        </section>
+
+        <!-- Tabla Ejecutiva Top 15 Proveedores Detallada -->
+        <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm overflow-x-auto">
+            <div class="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Ranking Detallado de Proveedores (Top 15 del Periodo)</h2>
+                    <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Incluye monto total, participación %, peso Pareto acumulado, ticket promedio y sociedades atendidas</p>
+                </div>
+                <button type="button" onclick="openAuditModal('SPEND_FIRM', 'ALL')"
+                    class="text-xs px-3 py-1.5 rounded-lg bg-cresta-navy dark:bg-cresta-red text-white font-bold hover:opacity-90 transition shrink-0">
+                    Auditar todas las OCs →
+                </button>
+            </div>
+            <table class="w-full text-xs text-left border-collapse">
+                <thead class="bg-cresta-navy text-white dark:bg-gray-800 dark:text-gray-200">
+                    <tr>
+                        <th class="py-3 px-3 font-bold rounded-tl-lg">#</th>
+                        <th class="py-3 px-3 font-bold">Proveedor</th>
+                        <th class="py-3 px-3 text-right font-bold">OCs</th>
+                        <th class="py-3 px-3 text-right font-bold">Sociedades</th>
+                        <th class="py-3 px-3 text-right font-bold">Ticket Prom.</th>
+                        <th class="py-3 px-3 text-right font-bold">Monto Total</th>
+                        <th class="py-3 px-3 text-right font-bold">% Part.</th>
+                        <th class="py-3 px-3 text-right font-bold rounded-tr-lg">% Acum.</th>
+                    </tr>
+                </thead>
+                <tbody id="topSuppliersTableBody" class="divide-y divide-slate-200 dark:divide-gray-800"></tbody>
+            </table>
+        </section>
+
+    </main>
+
     <!-- Footer con créditos -->
     <footer class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-4 w-full text-center">
         <p class="text-[11px] text-slate-400 dark:text-gray-500">
@@ -393,7 +638,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
         </p>
     </footer>
 
-    <!-- Modal Universal de Auditoría de Solicitudes -->
+    <!-- Modal Universal de Auditoría (Ciclo + Gasto) -->
     <div id="auditModal" class="fixed inset-0 z-50 hidden bg-slate-900/60 dark:bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
         <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-700 rounded-2xl max-w-6xl w-full max-h-[88vh] flex flex-col shadow-2xl">
             <div class="p-5 border-b border-slate-200 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -402,7 +647,7 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
                         <span id="modalBadge" class="px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-navy dark:bg-cresta-red text-white">AUDITORÍA</span>
                         <span id="modalSubtitle" class="text-xs text-slate-500 dark:text-gray-400"></span>
                     </div>
-                    <h3 id="modalTitle" class="text-base font-bold text-cresta-navy dark:text-white mt-1">Detalle de Solicitudes</h3>
+                    <h3 id="modalTitle" class="text-base font-bold text-cresta-navy dark:text-white mt-1">Detalle de Registros</h3>
                 </div>
                 <div class="flex items-center gap-2">
                     <button type="button" onclick="exportAuditCSV()"
@@ -419,8 +664,8 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             <!-- Controles internos dinámicos del modal -->
             <div class="px-5 py-3 bg-slate-50 dark:bg-gray-800/40 border-b border-slate-200 dark:border-gray-800 flex flex-wrap items-center justify-between gap-3 text-xs">
                 <div id="modalTabsContainer" class="flex flex-wrap gap-1.5"></div>
-                <input id="modalSearch" type="text" oninput="renderModalTable()" placeholder="Buscar solicitud, comprador, OC..."
-                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 rounded-lg px-3 py-1.5 text-slate-800 dark:text-gray-100 w-60">
+                <input id="modalSearch" type="text" oninput="renderModalTable()" placeholder="Buscar solicitud, proveedor, comprador, OC..."
+                    class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 rounded-lg px-3 py-1.5 text-slate-800 dark:text-gray-100 w-64">
             </div>
 
             <!-- Tabla del modal -->
@@ -435,9 +680,12 @@ $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
 <script>
 const RAW_DATA = <?= $jsonPayload ?>;
+let mainTab = 'cycle'; // 'cycle' | 'spend'
 let periodMode = 'month'; // 'month' | 'quarter' | 'compare_q' | 'ytd'
+let activeCurrency = 'GTQ'; // 'GTQ' | 'USD'
 let charts = {};
 let isDark = false;
+let currentTop5ProvidersSet = new Set();
 
 if (window.location.search.includes('sync=1')) {
     window.history.replaceState({}, document.title, window.location.pathname);
@@ -450,11 +698,15 @@ let cachedUniverses = {
     TIEMPO_COMP: [],
     SLA_COMP: [],
     SAP_14: [],
-    REZAGO: []
+    REZAGO: [],
+    SPEND_FIRM: [],
+    SPEND_RFQ: [],
+    SPEND_NO_SAP: []
 };
 
 const MODAL_CONFIG = {
     VALIDAS: {
+        mode: 'cycle',
         badge: 'AUDITORÍA · SOLICITUDES VÁLIDAS',
         title: 'Solicitudes Válidas del Periodo Seleccionado',
         daysField: 'd_ciclo_total',
@@ -467,6 +719,7 @@ const MODAL_CONFIG = {
         ]
     },
     TIEMPO_COMP: {
+        mode: 'cycle',
         badge: 'AUDITORÍA · GESTIÓN COMPRADOR (DÍAS)',
         title: 'Tiempos de Gestión del Comprador (Aprobación Solicitud → Creación OC Odoo)',
         daysField: 'd_comprador',
@@ -479,6 +732,7 @@ const MODAL_CONFIG = {
         ]
     },
     SLA_COMP: {
+        mode: 'cycle',
         badge: 'AUDITORÍA · SLA COMPRADOR',
         title: 'Evaluación SLA Comprador (Aprobación Solicitud → Creación OC Odoo)',
         daysField: 'd_comprador',
@@ -490,6 +744,7 @@ const MODAL_CONFIG = {
         ]
     },
     SAP_14: {
+        mode: 'cycle',
         badge: 'AUDITORÍA · EN SAP ≤14 DÍAS',
         title: 'Evaluación Ciclo a SAP (Aprobación Solicitud → Creación en SAP)',
         daysField: 'd_to_sap',
@@ -501,6 +756,7 @@ const MODAL_CONFIG = {
         ]
     },
     REZAGO: {
+        mode: 'cycle',
         badge: 'AUDITORÍA · REZAGO SIN SAP',
         title: 'Solicitudes Aprobadas Pendientes de Llegar a SAP',
         daysField: 'd_to_sap',
@@ -510,6 +766,33 @@ const MODAL_CONFIG = {
             { id: 'GT30', label: 'Críticas (> 30 días)' },
             { id: 'NO_OC', label: 'Sin OC en Odoo (Comprador)' },
             { id: 'PEND_SAP', label: 'Con OC Odoo (Falta Aprob/SAP)' }
+        ]
+    },
+    SPEND_FIRM: {
+        mode: 'spend',
+        badge: 'AUDITORÍA · ÓRDENES DE COMPRA FIRMES',
+        title: 'Detalle de Órdenes de Compra Firmes (Monto y Proveedor)',
+        tabs: [
+            { id: 'ALL', label: 'Todas las OCs Firmes' },
+            { id: 'TOP5_PROV', label: 'Solo Top 5 Proveedores' },
+            { id: 'IN_SAP', label: 'Con OC SAP' },
+            { id: 'NO_SAP', label: 'Pendientes de SAP' }
+        ]
+    },
+    SPEND_RFQ: {
+        mode: 'spend',
+        badge: 'AUDITORÍA · COTIZACIONES ABIERTAS (RFQ)',
+        title: 'Solicitudes de Cotización Pendientes de Conversión a OC',
+        tabs: [
+            { id: 'ALL', label: 'Todas las Cotizaciones' }
+        ]
+    },
+    SPEND_NO_SAP: {
+        mode: 'spend',
+        badge: 'AUDITORÍA · OCs FIRMES SIN SINCRONIZAR EN SAP',
+        title: 'Órdenes de Compra Firmes Pendientes de Integración SAP',
+        tabs: [
+            { id: 'ALL', label: 'Todas sin SAP' }
         ]
     }
 };
@@ -531,6 +814,19 @@ function getQuarterFromYm(ym) {
     const m = ym.split('-')[1];
     const found = QUARTER_DEFS.find(q => q.months.includes(m));
     return found ? found.id : 'Q1';
+}
+
+function formatMoney(val, curr = activeCurrency) {
+    if (val === null || val === undefined || isNaN(val)) return curr === 'USD' ? '$ 0.00' : 'Q 0.00';
+    const prefix = curr === 'USD' ? '$ ' : 'Q ';
+    return prefix + Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatMoneyCompact(val, curr = activeCurrency) {
+    const prefix = curr === 'USD' ? '$' : 'Q';
+    if (Math.abs(val) >= 1000000) return `${prefix}${(val / 1000000).toFixed(2)}M`;
+    if (Math.abs(val) >= 1000) return `${prefix}${(val / 1000).toFixed(1)}k`;
+    return `${prefix}${val.toFixed(0)}`;
 }
 
 function initTheme() {
@@ -560,7 +856,59 @@ function applyThemeUI() {
         iconEl.textContent = '🌙';
         labelEl.textContent = 'Modo Oscuro';
     }
+    updateMainTabButtons();
     updatePeriodButtons();
+    updateCurrencyButtons();
+}
+
+function setMainTab(tab) {
+    mainTab = tab;
+    updateMainTabButtons();
+    renderDashboard();
+}
+
+function updateMainTabButtons() {
+    const btnCycle = document.getElementById('btnTabCycle');
+    const btnSpend = document.getElementById('btnTabSpend');
+    const secCycle = document.getElementById('viewCycleSection');
+    const secSpend = document.getElementById('viewSpendSection');
+    const spendFilters = document.getElementById('spendOnlyFilters');
+    const titleEl = document.getElementById('mainHeaderTitle');
+
+    const activeCls = 'px-3 py-1.5 rounded-lg font-bold text-white bg-cresta-navy dark:bg-cresta-red transition';
+    const inactiveCls = 'px-3 py-1.5 rounded-lg font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition';
+
+    if (mainTab === 'cycle') {
+        btnCycle.className = activeCls;
+        btnSpend.className = inactiveCls;
+        secCycle.classList.remove('hidden');
+        secSpend.classList.add('hidden');
+        spendFilters.classList.add('hidden');
+        titleEl.textContent = 'Evolución del Ciclo de Compras · Grupo Cresta';
+    } else {
+        btnSpend.className = activeCls;
+        btnCycle.className = inactiveCls;
+        secSpend.classList.remove('hidden');
+        secCycle.classList.add('hidden');
+        spendFilters.classList.remove('hidden');
+        titleEl.textContent = 'Gestión de Gasto, Compradores y Proveedores · Grupo Cresta';
+    }
+}
+
+function setCurrency(curr) {
+    activeCurrency = curr;
+    updateCurrencyButtons();
+    renderDashboard();
+}
+
+function updateCurrencyButtons() {
+    const btnG = document.getElementById('btnCurrGTQ');
+    const btnU = document.getElementById('btnCurrUSD');
+    const activeCls = 'px-2.5 py-1 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition';
+    const inactiveCls = 'px-2.5 py-1 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition';
+
+    btnG.className = activeCurrency === 'GTQ' ? activeCls : inactiveCls;
+    btnU.className = activeCurrency === 'USD' ? activeCls : inactiveCls;
 }
 
 function updatePeriodButtons() {
@@ -574,9 +922,10 @@ function updatePeriodButtons() {
     const selQ = document.getElementById('filterQuarter');
     const compQBox = document.getElementById('compareQControls');
     const compQSec = document.getElementById('quarterComparisonSection');
+    const spendCompQSec = document.getElementById('spendCompareQSection');
 
-    const activeCls = 'px-2.5 py-1.5 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition';
-    const inactiveCls = 'px-2.5 py-1.5 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition';
+    const activeCls = 'px-2.5 py-1 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition';
+    const inactiveCls = 'px-2.5 py-1 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition';
 
     btnM.className = periodMode === 'month' ? activeCls : inactiveCls;
     btnQ.className = periodMode === 'quarter' ? activeCls : inactiveCls;
@@ -588,10 +937,12 @@ function updatePeriodButtons() {
     selQ.classList.add('hidden');
     compQBox.classList.add('hidden');
     compQSec.classList.add('hidden');
+    spendCompQSec.classList.add('hidden');
 
     if (periodMode === 'compare_q') {
         compQBox.classList.remove('hidden');
         compQSec.classList.remove('hidden');
+        spendCompQSec.classList.remove('hidden');
     } else if (periodMode === 'quarter') {
         selYear.classList.remove('hidden');
         selQ.classList.remove('hidden');
@@ -624,6 +975,10 @@ function formatYearQuarterShort(yq) {
 
 function shortName(fullName) {
     return fullName.split(' ').slice(0, 2).join(' ');
+}
+
+function shortSupplier(name) {
+    return name.length > 26 ? name.slice(0, 25) + '…' : name;
 }
 
 function median(arr) {
@@ -674,7 +1029,6 @@ function populateAllCompareQuarters() {
     const selCQ1 = document.getElementById('filterCompareQ1');
     const selCQ2 = document.getElementById('filterCompareQ2');
 
-    // Obtener todos los pares YYYY-Q# disponibles ordenados cronológicamente
     const yqSet = new Set(RAW_DATA.filters.meses.map(ym => `${ym.split('-')[0]}-${getQuarterFromYm(ym)}`));
     const allYQs = [...yqSet].sort();
 
@@ -694,8 +1048,8 @@ function populateAllCompareQuarters() {
     });
 
     if (allYQs.length >= 2) {
-        selCQ1.value = allYQs[allYQs.length - 1]; // Trimestre más reciente como Base
-        selCQ2.value = allYQs[allYQs.length - 2]; // Trimestre anterior como Referencia
+        selCQ1.value = allYQs[allYQs.length - 1];
+        selCQ2.value = allYQs[allYQs.length - 2];
     } else if (allYQs.length === 1) {
         selCQ1.value = allYQs[0];
         selCQ2.value = allYQs[0];
@@ -706,6 +1060,7 @@ function initFilters() {
     const selYear = document.getElementById('filterYear');
     const selSoc = document.getElementById('filterSociedad');
     const selComp = document.getElementById('filterComprador');
+    const selProv = document.getElementById('filterProveedor');
 
     const years = [...new Set(RAW_DATA.filters.meses.map(ym => ym.split('-')[0]))].sort();
     years.forEach(y => {
@@ -733,6 +1088,13 @@ function initFilters() {
         opt.textContent = c;
         selComp.appendChild(opt);
     });
+
+    (RAW_DATA.filters.proveedores || []).forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = p;
+        selProv.appendChild(opt);
+    });
 }
 
 function onYearChange() {
@@ -753,6 +1115,22 @@ function filterByEntity(records) {
     return records.filter(r => {
         if (soc !== 'ALL' && r.sociedad !== soc) return false;
         if (comp !== 'ALL' && r.comprador !== comp) return false;
+        return true;
+    });
+}
+
+function filterSpendRecordsBase(records) {
+    const soc = document.getElementById('filterSociedad').value;
+    const comp = document.getElementById('filterComprador').value;
+    const prov = document.getElementById('filterProveedor').value;
+    const hidePetty = document.getElementById('chkExcludePettyCash').checked;
+
+    return records.filter(r => {
+        if (r.divisa !== activeCurrency) return false;
+        if (soc !== 'ALL' && r.sociedad !== soc) return false;
+        if (comp !== 'ALL' && r.comprador !== comp) return false;
+        if (prov !== 'ALL' && r.proveedor !== prov) return false;
+        if (hidePetty && r.is_caja_chica) return false;
         return true;
     });
 }
@@ -821,6 +1199,7 @@ function getPreviousQuarterRecords(entityRecords, year, qId) {
 
     return {
         label: `${prevQId} ${prevYear !== year ? prevYear : ''}`.trim(),
+        rows: prevRows,
         stats: calcKpiStats(prevRows)
     };
 }
@@ -867,6 +1246,17 @@ function calcKpiStats(records) {
 }
 
 function renderDashboard() {
+    if (mainTab === 'cycle') {
+        renderCycleView();
+    } else {
+        renderSpendView();
+    }
+}
+
+// =====================================================================
+// RENDERIZACIÓN MÓDULO 1: CICLO OPERATIVO Y SLA
+// =====================================================================
+function renderCycleView() {
     const selectedYear = document.getElementById('filterYear').value;
     const selectedYm = document.getElementById('filterMes').value;
     const selectedQ = document.getElementById('filterQuarter').value;
@@ -902,7 +1292,6 @@ function renderDashboard() {
         prevCompData = getPreviousQuarterRecords(entityRecords, selectedYear, selectedQ);
     }
 
-    // Badge KPI 1
     document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
     if (periodMode === 'compare_q') {
         const yq1 = document.getElementById('filterCompareQ1').value;
@@ -916,7 +1305,6 @@ function renderDashboard() {
         document.getElementById('kpi1Badge').textContent = formatYm(selectedYm);
     }
 
-    // KPI 2: Tiempo Gestión Comprador
     document.getElementById('kpiTimeValue').textContent = currentStats.avgDiasComp !== null ? currentStats.avgDiasComp.toFixed(1) : 'N/D';
     document.getElementById('kpiTimeSub').textContent = currentStats.medDiasComp !== null
         ? `Mediana: ${currentStats.medDiasComp.toFixed(1)} d · ${currentStats.conOcOdooList.length} OC`
@@ -935,7 +1323,6 @@ function renderDashboard() {
         bTime.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
     }
 
-    // KPI 3: SLA Comprador <= 14d
     document.getElementById('kpi2Value').textContent = currentStats.pctComp14 !== null ? `${currentStats.pctComp14}%` : 'N/D';
     const b2 = document.getElementById('kpi2Badge');
     const sub2 = document.getElementById('kpi2Sub');
@@ -956,7 +1343,6 @@ function renderDashboard() {
         sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
     }
 
-    // KPI 4: En SAP <= 14d
     document.getElementById('kpi3Value').textContent = currentStats.pctSap14 !== null ? `${currentStats.pctSap14}%` : 'N/D';
     const b3 = document.getElementById('kpi3Badge');
     const sub3 = document.getElementById('kpi3Sub');
@@ -1005,9 +1391,467 @@ function renderDashboard() {
     renderMonthlyTable(entityRecords, tableYear);
 }
 
-// ==========================================
-// PANEL DE COMPARACIÓN TRIMESTRAL (Q vs Q)
-// ==========================================
+// =====================================================================
+// RENDERIZACIÓN MÓDULO 2: GESTIÓN DE GASTO Y PROVEEDORES
+// =====================================================================
+function calcSpendStats(rows) {
+    const firm = rows.filter(r => r.is_firm);
+    const rfq  = rows.filter(r => r.is_rfq);
+    const canc = rows.filter(r => r.is_cancelada);
+    const noSap = firm.filter(r => !r.en_sap);
+
+    const totalMonto = firm.reduce((s, r) => s + r.monto, 0);
+    const avgTicket  = firm.length ? totalMonto / firm.length : 0;
+    const medTicket  = firm.length ? median(firm.map(r => r.monto)) : 0;
+
+    const provMap = {};
+    firm.forEach(r => {
+        if (!provMap[r.proveedor]) provMap[r.proveedor] = { monto: 0, ocs: 0, socs: new Set() };
+        provMap[r.proveedor].monto += r.monto;
+        provMap[r.proveedor].ocs += 1;
+        provMap[r.proveedor].socs.add(r.sociedad);
+    });
+
+    const provSorted = Object.entries(provMap)
+        .map(([name, info]) => ({ name, monto: info.monto, ocs: info.ocs, socCount: info.socs.size }))
+        .sort((a, b) => b.monto - a.monto);
+
+    const top5Monto = provSorted.slice(0, 5).reduce((s, p) => s + p.monto, 0);
+    const top5Pct = totalMonto > 0 ? Math.round((top5Monto / totalMonto) * 100) : 0;
+
+    const rfqMonto = rfq.reduce((s, r) => s + r.monto, 0);
+    const sapPct = firm.length ? Math.round(((firm.length - noSap.length) / firm.length) * 100) : 0;
+    const totalAllOcs = firm.length + rfq.length + canc.length;
+    const cancPct = totalAllOcs > 0 ? ((canc.length / totalAllOcs) * 100).toFixed(1) : '0.0';
+
+    return {
+        firmList: firm,
+        rfqList: rfq,
+        noSapList: noSap,
+        totalMonto,
+        firmCount: firm.length,
+        avgTicket,
+        medTicket,
+        provCount: provSorted.length,
+        provSorted,
+        top5Pct,
+        rfqCount: rfq.length,
+        rfqMonto,
+        sapPct,
+        cancPct
+    };
+}
+
+function renderSpendView() {
+    const selectedYear = document.getElementById('filterYear').value;
+    const selectedYm   = document.getElementById('filterMes').value;
+    const selectedQ    = document.getElementById('filterQuarter').value;
+
+    const baseSpend = filterSpendRecordsBase(RAW_DATA.spend_records || []);
+    const currentSpendRows = filterByActivePeriod(baseSpend);
+    const st = calcSpendStats(currentSpendRows);
+
+    // Calcular periodo comparativo anterior
+    let prevLabel = null;
+    let prevStats = null;
+
+    if (periodMode === 'compare_q') {
+        const yq1 = document.getElementById('filterCompareQ1').value;
+        const yq2 = document.getElementById('filterCompareQ2').value;
+        const rowsQ2 = filterRecordsByYearQuarter(baseSpend, yq2);
+        prevStats = calcSpendStats(rowsQ2);
+        prevLabel = formatYearQuarterShort(yq2);
+        renderSpendCompareQPanel(yq1, yq2, st, prevStats);
+    } else if (periodMode === 'month') {
+        const allMeses = RAW_DATA.filters.meses;
+        const idxYm = allMeses.indexOf(selectedYm);
+        if (idxYm > 0) {
+            const prevYm = allMeses[idxYm - 1];
+            prevStats = calcSpendStats(baseSpend.filter(r => r.ym === prevYm));
+            prevLabel = MONTH_NAMES[prevYm.split('-')[1]];
+        }
+    } else if (periodMode === 'quarter') {
+        const order = ['Q1', 'Q2', 'Q3', 'Q4'];
+        const idx = order.indexOf(selectedQ);
+        const prevYear = idx > 0 ? selectedYear : String(Number(selectedYear) - 1);
+        const prevQId  = idx > 0 ? order[idx - 1] : 'Q4';
+        const prevRows = filterRecordsByYearQuarter(baseSpend, `${prevYear}-${prevQId}`);
+        if (prevRows.length) {
+            prevStats = calcSpendStats(prevRows);
+            prevLabel = `${prevQId} ${prevYear !== selectedYear ? prevYear : ''}`.trim();
+        }
+    }
+
+    // Guardar universos auditables para modal de Gasto
+    currentTop5ProvidersSet = new Set(st.provSorted.slice(0, 5).map(p => p.name));
+    cachedUniverses.SPEND_FIRM   = [...st.firmList].sort((a, b) => b.monto - a.monto);
+    cachedUniverses.SPEND_RFQ    = [...st.rfqList].sort((a, b) => b.monto - a.monto);
+    cachedUniverses.SPEND_NO_SAP = [...st.noSapList].sort((a, b) => b.monto - a.monto);
+
+    // Tarjeta 1: Gasto Comprometido Total
+    document.getElementById('spKpi1Value').textContent = formatMoney(st.totalMonto);
+    document.getElementById('spKpi1Sub').textContent   = `${st.firmCount.toLocaleString()} OCs firmes en ${activeCurrency}`;
+    const b1 = document.getElementById('spKpi1Badge');
+    if (prevStats && prevStats.totalMonto > 0) {
+        const pctDiff = Math.round(((st.totalMonto - prevStats.totalMonto) / prevStats.totalMonto) * 100);
+        b1.textContent = `${pctDiff >= 0 ? '+' : ''}${pctDiff}% vs ${prevLabel}`;
+        b1.className = 'text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 bg-slate-100 dark:bg-gray-800 text-cresta-navy dark:text-indigo-300';
+    } else {
+        b1.textContent = periodMode === 'ytd' ? `YTD ${selectedYear}` : activeCurrency;
+        b1.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 font-bold shrink-0';
+    }
+
+    // Tarjeta 2: Ticket Promedio y OCs Emitidas
+    document.getElementById('spKpi2Value').textContent = formatMoney(st.avgTicket);
+    document.getElementById('spKpi2Badge').textContent = `${st.firmCount.toLocaleString()} OCs`;
+    document.getElementById('spKpi2Sub').textContent   = `Mediana: ${formatMoney(st.medTicket)}`;
+
+    // Tarjeta 3: Proveedores Activos y Top 5
+    document.getElementById('spKpi3Value').textContent = st.provCount.toLocaleString();
+    document.getElementById('spKpi3Badge').textContent = `Top 5: ${st.top5Pct}%`;
+    document.getElementById('spKpi3Sub').textContent   = `Concentración Pareto en 5 mayores`;
+
+    // Tarjeta 4: Cotizaciones Abiertas (RFQ)
+    document.getElementById('spKpi4Value').textContent = formatMoney(st.rfqMonto);
+    document.getElementById('spKpi4Badge').textContent = `${st.rfqCount} abiertas`;
+    document.getElementById('spKpi4Sub').textContent   = `Cotizaciones sin convertir a OC`;
+
+    // Tarjeta 5: Integración SAP & Cancelaciones
+    document.getElementById('spKpi5Value').textContent = `${st.sapPct}%`;
+    document.getElementById('spKpi5Badge').textContent = `Canc: ${st.cancPct}%`;
+    document.getElementById('spKpi5Sub').textContent   = `${st.noSapList.length} OCs firmes pendientes SAP`;
+
+    const trendYear = periodMode === 'compare_q'
+        ? document.getElementById('filterCompareQ1').value.split('-')[0]
+        : selectedYear;
+
+    renderChartSpendTrend(baseSpend, trendYear);
+    renderChartSpendSociedades(st.firmList);
+    renderChartTopProveedoresMonto(st);
+    renderChartTopCompradoresMonto(st.firmList);
+    renderChartTopProveedoresFreq(st.firmList);
+    renderChartProcurementFunnel();
+    renderTopSuppliersTable(st);
+}
+
+function renderSpendCompareQPanel(yq1, yq2, st1, st2) {
+    const lbl1 = formatYearQuarterShort(yq1);
+    const lbl2 = formatYearQuarterShort(yq2);
+    document.getElementById('spendCompareQTitle').textContent = `${lbl1} vs ${lbl2} (${activeCurrency})`;
+
+    document.getElementById('spendCompareQHead').innerHTML = `<tr>
+        <th class="py-2.5 px-3 font-bold rounded-tl-lg">Indicador de Gasto y Compras</th>
+        <th class="py-2.5 px-3 text-right font-bold">${lbl1}</th>
+        <th class="py-2.5 px-3 text-right font-bold">${lbl2}</th>
+        <th class="py-2.5 px-3 text-right font-bold rounded-tr-lg">Variación</th>
+    </tr>`;
+
+    const pctVar = (v1, v2) => {
+        if (!v2) return `<span class="text-slate-400">N/D</span>`;
+        const d = ((v1 - v2) / v2) * 100;
+        const cls = d <= 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-amber-700 dark:text-amber-300 font-bold';
+        return `<span class="${cls}">${d > 0 ? '+' : ''}${d.toFixed(1)}%</span>`;
+    };
+
+    const rows = [
+        {
+            name: 'Gasto Comprometido Total',
+            v1: formatMoney(st1.totalMonto),
+            v2: formatMoney(st2.totalMonto),
+            delta: pctVar(st1.totalMonto, st2.totalMonto)
+        },
+        {
+            name: 'Órdenes de Compra Firmes',
+            v1: st1.firmCount.toLocaleString(),
+            v2: st2.firmCount.toLocaleString(),
+            delta: `<span class="font-bold text-slate-600 dark:text-gray-300">${st1.firmCount - st2.firmCount >= 0 ? '+' : ''}${st1.firmCount - st2.firmCount} OCs</span>`
+        },
+        {
+            name: 'Ticket Promedio por OC',
+            v1: formatMoney(st1.avgTicket),
+            v2: formatMoney(st2.avgTicket),
+            delta: pctVar(st1.avgTicket, st2.avgTicket)
+        },
+        {
+            name: 'Proveedores Activos',
+            v1: st1.provCount.toLocaleString(),
+            v2: st2.provCount.toLocaleString(),
+            delta: `<span class="font-bold text-slate-600 dark:text-gray-300">${st1.provCount - st2.provCount >= 0 ? '+' : ''}${st1.provCount - st2.provCount}</span>`
+        },
+        {
+            name: 'Concentración Top 5 Proveedores',
+            v1: `${st1.top5Pct}%`,
+            v2: `${st2.top5Pct}%`,
+            delta: `<span class="font-bold text-slate-600 dark:text-gray-300">${st1.top5Pct - st2.top5Pct >= 0 ? '+' : ''}${st1.top5Pct - st2.top5Pct} pts</span>`
+        }
+    ];
+
+    document.getElementById('spendCompareQBody').innerHTML = rows.map(r => `
+        <tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40">
+            <td class="py-2 px-3 font-medium text-slate-700 dark:text-gray-200">${r.name}</td>
+            <td class="py-2 px-3 text-right font-bold text-cresta-navy dark:text-white">${r.v1}</td>
+            <td class="py-2 px-3 text-right text-slate-600 dark:text-gray-300">${r.v2}</td>
+            <td class="py-2 px-3 text-right">${r.delta}</td>
+        </tr>
+    `).join('');
+}
+
+function renderChartSpendTrend(baseSpend, year) {
+    const meses = RAW_DATA.filters.meses.filter(m => m.startsWith(`${year}-`));
+    document.getElementById('spChartTrendTitle').textContent = `Evolución Mensual del Gasto Comprometido (${activeCurrency}) · ${year}`;
+
+    const montos = [];
+    const ocsCount = [];
+
+    meses.forEach(m => {
+        const mFirm = baseSpend.filter(r => r.ym === m && r.is_firm);
+        montos.push(Number(mFirm.reduce((s, r) => s + r.monto, 0).toFixed(2)));
+        ocsCount.push(mFirm.length);
+    });
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'line', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        stroke: { width: [0, 3], curve: 'smooth' },
+        colors: isDark ? ['#6366F1', '#F59E0B'] : ['#1B2A4A', '#C8102E'],
+        plotOptions: { bar: { borderRadius: 5, columnWidth: '50%' } },
+        series: [
+            { name: `Gasto (${activeCurrency})`, type: 'column', data: montos },
+            { name: 'Cantidad de OCs', type: 'line', data: ocsCount }
+        ],
+        xaxis: { categories: meses.map(formatMonthOnly), labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
+        yaxis: [
+            {
+                title: { text: `Monto (${activeCurrency})`, style: { fontSize: '10px', color: themeCfg.labelColor } },
+                labels: { formatter: v => formatMoneyCompact(v), style: { colors: themeCfg.labelColor } }
+            },
+            {
+                opposite: true,
+                title: { text: 'OCs emitidas', style: { fontSize: '10px', color: themeCfg.labelColor } },
+                labels: { formatter: v => Math.round(v), style: { colors: themeCfg.labelColor } }
+            }
+        ],
+        markers: { size: 4 },
+        tooltip: {
+            y: {
+                formatter: (val, { seriesIndex }) => seriesIndex === 0 ? formatMoney(val) : `${val} OCs`
+            }
+        },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
+        legend: { position: 'top', fontSize: '11px' }
+    };
+
+    if (charts.spendTrend) charts.spendTrend.destroy();
+    charts.spendTrend = new ApexCharts(document.querySelector('#chartSpendTrend'), options);
+    charts.spendTrend.render();
+}
+
+function renderChartSpendSociedades(firmList) {
+    const mapSoc = {};
+    firmList.forEach(r => {
+        mapSoc[r.sociedad] = (mapSoc[r.sociedad] || 0) + r.monto;
+    });
+
+    const sorted = Object.entries(mapSoc).sort((a, b) => b[1] - a[1]);
+    const themeCfg = getChartThemeConfig();
+
+    const options = {
+        chart: { type: 'donut', height: 310, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        colors: ['#1B2A4A', '#C8102E', '#2563EB', '#15803D', '#D97706', '#7C3AED', '#0D9488', '#64748B'],
+        series: sorted.map(s => Number(s[1].toFixed(2))),
+        labels: sorted.map(s => s[0]),
+        dataLabels: { enabled: true, formatter: val => val >= 4 ? val.toFixed(1) + '%' : '' },
+        tooltip: { y: { formatter: val => formatMoney(val) } },
+        legend: { position: 'bottom', fontSize: '10px' }
+    };
+
+    if (charts.spendSoc) charts.spendSoc.destroy();
+    charts.spendSoc = new ApexCharts(document.querySelector('#chartSpendSociedades'), options);
+    charts.spendSoc.render();
+}
+
+function renderChartTopProveedoresMonto(st) {
+    const top10 = st.provSorted.slice(0, 10);
+    const top10Monto = top10.reduce((s, p) => s + p.monto, 0);
+    const pctTop10 = st.totalMonto > 0 ? Math.round((top10Monto / st.totalMonto) * 100) : 0;
+    document.getElementById('badgeParetoInfo').textContent = `Top 10 = ${pctTop10}% del gasto`;
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 320, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: { bar: { horizontal: true, borderRadius: 4, barHeight: '65%' } },
+        colors: isDark ? ['#6366F1'] : ['#1B2A4A'],
+        series: [{ name: `Monto (${activeCurrency})`, data: top10.map(p => Number(p.monto.toFixed(2))) }],
+        xaxis: {
+            categories: top10.map(p => `${shortSupplier(p.name)} (${p.ocs})`),
+            labels: { formatter: v => formatMoneyCompact(v), style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, formatter: v => formatMoneyCompact(v), style: { fontSize: '9px' } },
+        tooltip: { y: { formatter: val => formatMoney(val) } },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.topProvMonto) charts.topProvMonto.destroy();
+    charts.topProvMonto = new ApexCharts(document.querySelector('#chartTopProveedoresMonto'), options);
+    charts.topProvMonto.render();
+}
+
+function renderChartTopCompradoresMonto(firmList) {
+    const mapComp = {};
+    firmList.forEach(r => {
+        if (!mapComp[r.comprador]) mapComp[r.comprador] = { monto: 0, ocs: 0 };
+        mapComp[r.comprador].monto += r.monto;
+        mapComp[r.comprador].ocs += 1;
+    });
+
+    const sorted = Object.entries(mapComp)
+        .map(([name, info]) => ({ name, monto: info.monto, ocs: info.ocs }))
+        .sort((a, b) => b.monto - a.monto);
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 320, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: { bar: { horizontal: true, borderRadius: 4, barHeight: '60%' } },
+        colors: isDark ? ['#10B981'] : ['#C8102E'],
+        series: [{ name: `Monto (${activeCurrency})`, data: sorted.map(c => Number(c.monto.toFixed(2))) }],
+        xaxis: {
+            categories: sorted.map(c => `${shortName(c.name)} (${c.ocs} OCs)`),
+            labels: { formatter: v => formatMoneyCompact(v), style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, formatter: v => formatMoneyCompact(v), style: { fontSize: '9px' } },
+        tooltip: { y: { formatter: val => formatMoney(val) } },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.topCompMonto) charts.topCompMonto.destroy();
+    charts.topCompMonto = new ApexCharts(document.querySelector('#chartTopCompradoresMonto'), options);
+    charts.topCompMonto.render();
+}
+
+function renderChartTopProveedoresFreq(firmList) {
+    const mapProv = {};
+    firmList.forEach(r => {
+        if (!mapProv[r.proveedor]) mapProv[r.proveedor] = { ocs: 0, monto: 0 };
+        mapProv[r.proveedor].ocs += 1;
+        mapProv[r.proveedor].monto += r.monto;
+    });
+
+    const top10 = Object.entries(mapProv)
+        .map(([name, info]) => ({ name, ocs: info.ocs, monto: info.monto }))
+        .sort((a, b) => b.ocs - a.ocs)
+        .slice(0, 10);
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: { bar: { horizontal: true, borderRadius: 4, barHeight: '62%' } },
+        colors: isDark ? ['#38BDF8'] : ['#264073'],
+        series: [{ name: 'OCs Emitidas', data: top10.map(p => p.ocs) }],
+        xaxis: {
+            categories: top10.map(p => shortSupplier(p.name)),
+            labels: { style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, formatter: v => `${v} OCs`, style: { fontSize: '9px' } },
+        tooltip: {
+            y: {
+                formatter: (val, { dataPointIndex }) => `${val} OCs · ${formatMoney(top10[dataPointIndex].monto)}`
+            }
+        },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.topProvFreq) charts.topProvFreq.destroy();
+    charts.topProvFreq = new ApexCharts(document.querySelector('#chartTopProveedoresFreq'), options);
+    charts.topProvFreq.render();
+}
+
+function renderChartProcurementFunnel() {
+    // Embudo del proceso de compra sobre el universo filtrado
+    const entityReqs = filterByActivePeriod(filterByEntity(RAW_DATA.records));
+    const validReqs = entityReqs.filter(r => !r.excluida && r.aprobada);
+
+    const baseSpend = filterSpendRecordsBase(RAW_DATA.spend_records || []);
+    const periodSpend = filterByActivePeriod(baseSpend);
+    const totalOcsOdoo = periodSpend.filter(r => !r.is_cancelada).length;
+    const firmOcs = periodSpend.filter(r => r.is_firm).length;
+    const sapOcs = periodSpend.filter(r => r.is_firm && r.en_sap).length;
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: {
+            bar: {
+                horizontal: true,
+                borderRadius: 5,
+                barHeight: '55%',
+                distributed: true
+            }
+        },
+        colors: ['#64748B', '#264073', '#1B2A4A', '#15803D'],
+        series: [{
+            name: 'Documentos',
+            data: [validReqs.length, totalOcsOdoo, firmOcs, sapOcs]
+        }],
+        xaxis: {
+            categories: [
+                '1. Solicitudes Aprobadas',
+                `2. Cotizaciones + OCs (${activeCurrency})`,
+                `3. OCs Firmes (${activeCurrency})`,
+                `4. Sincronizadas en SAP (${activeCurrency})`
+            ],
+            labels: { style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: { enabled: true, style: { fontSize: '10px' } },
+        legend: { show: false },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
+    };
+
+    if (charts.funnel) charts.funnel.destroy();
+    charts.funnel = new ApexCharts(document.querySelector('#chartProcurementFunnel'), options);
+    charts.funnel.render();
+}
+
+function renderTopSuppliersTable(st) {
+    const tbody = document.getElementById('topSuppliersTableBody');
+    const top15 = st.provSorted.slice(0, 15);
+
+    if (!top15.length) {
+        tbody.innerHTML = `<tr><td colspan="8" class="py-6 text-center text-slate-400">No hay órdenes firmes en esta divisa/periodo.</td></tr>`;
+        return;
+    }
+
+    let accumPct = 0;
+    tbody.innerHTML = top15.map((p, idx) => {
+        const pct = st.totalMonto > 0 ? (p.monto / st.totalMonto) * 100 : 0;
+        accumPct += pct;
+        const ticket = p.ocs > 0 ? p.monto / p.ocs : 0;
+
+        return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40">
+            <td class="py-2.5 px-3 font-bold text-slate-400">${idx + 1}</td>
+            <td class="py-2.5 px-3 font-bold text-cresta-navy dark:text-white">${p.name}</td>
+            <td class="py-2.5 px-3 text-right text-slate-700 dark:text-gray-300">${p.ocs}</td>
+            <td class="py-2.5 px-3 text-right text-slate-600 dark:text-gray-400">${p.socCount}</td>
+            <td class="py-2.5 px-3 text-right text-slate-600 dark:text-gray-300">${formatMoney(ticket)}</td>
+            <td class="py-2.5 px-3 text-right font-bold text-cresta-navy dark:text-sky-400">${formatMoney(p.monto)}</td>
+            <td class="py-2.5 px-3 text-right font-semibold text-slate-700 dark:text-gray-300">${pct.toFixed(1)}%</td>
+            <td class="py-2.5 px-3 text-right font-bold text-cresta-red dark:text-emerald-400">${accumPct.toFixed(1)}%</td>
+        </tr>`;
+    }).join('');
+}
+
+// =====================================================================
+// GRÁFICAS DEL MÓDULO 1 (CICLO OPERATIVO)
+// =====================================================================
 function renderQuarterComparisonPanel(yq1, yq2, stats1, stats2) {
     const lbl1 = formatYearQuarterShort(yq1);
     const lbl2 = formatYearQuarterShort(yq2);
@@ -1052,7 +1896,6 @@ function renderQuarterComparisonPanel(yq1, yq2, stats1, stats2) {
     charts.compareQ = new ApexCharts(document.querySelector('#chartCompareQ'), options);
     charts.compareQ.render();
 
-    // Tabla de variaciones cara a cara
     document.getElementById('compareQTableHead').innerHTML = `<tr>
         <th class="py-2.5 px-3 font-bold rounded-tl-lg">Métrica</th>
         <th class="py-2.5 px-3 text-right font-bold">${lbl1}</th>
@@ -1678,6 +2521,9 @@ function renderMonthlyTable(entityRecords, selectedYear) {
     tbody.innerHTML = rowsHtml.map(r => `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40"><td class="py-2.5 px-4 text-slate-800 dark:text-gray-200 font-medium">${r.label}</td>${r.vals.join('')}</tr>`).join('');
 }
 
+// =====================================================================
+// MODAL UNIVERSAL DE AUDITORÍA (SOPORTA CICLO Y GASTO)
+// =====================================================================
 function openAuditModal(category, defaultSubFilter) {
     activeModalCategory = category || 'REZAGO';
     activeModalSubFilter = defaultSubFilter || 'ALL';
@@ -1687,15 +2533,27 @@ function openAuditModal(category, defaultSubFilter) {
     document.getElementById('modalBadge').textContent = cfg.badge;
     document.getElementById('modalTitle').textContent = cfg.title;
 
-    document.getElementById('modalTableHead').innerHTML = `<tr>
-        <th class="py-2.5 px-3">Solicitud</th>
-        <th class="py-2.5 px-3">Fecha Creación</th>
-        <th class="py-2.5 px-3">Sociedad</th>
-        <th class="py-2.5 px-3">Comprador</th>
-        <th class="py-2.5 px-3">OC Odoo</th>
-        <th class="py-2.5 px-3">Estatus / Etapas</th>
-        <th class="py-2.5 px-3 text-right">${cfg.daysLabel}</th>
-    </tr>`;
+    if (cfg.mode === 'spend') {
+        document.getElementById('modalTableHead').innerHTML = `<tr>
+            <th class="py-2.5 px-3">OC Odoo</th>
+            <th class="py-2.5 px-3">Fecha OC</th>
+            <th class="py-2.5 px-3">Sociedad</th>
+            <th class="py-2.5 px-3">Proveedor</th>
+            <th class="py-2.5 px-3">Comprador</th>
+            <th class="py-2.5 px-3">Estado / SAP</th>
+            <th class="py-2.5 px-3 text-right">Monto (${activeCurrency})</th>
+        </tr>`;
+    } else {
+        document.getElementById('modalTableHead').innerHTML = `<tr>
+            <th class="py-2.5 px-3">Solicitud</th>
+            <th class="py-2.5 px-3">Fecha Creación</th>
+            <th class="py-2.5 px-3">Sociedad</th>
+            <th class="py-2.5 px-3">Comprador</th>
+            <th class="py-2.5 px-3">OC Odoo</th>
+            <th class="py-2.5 px-3">Estatus / Etapas</th>
+            <th class="py-2.5 px-3 text-right">${cfg.daysLabel}</th>
+        </tr>`;
+    }
 
     renderModalTabs();
     document.getElementById('auditModal').classList.remove('hidden');
@@ -1727,8 +2585,22 @@ function renderModalTabs() {
 function getFilteredModalRows() {
     const baseList = cachedUniverses[activeModalCategory] || [];
     const q = document.getElementById('modalSearch').value.trim().toLowerCase();
+    const cfg = MODAL_CONFIG[activeModalCategory];
 
     return baseList.filter(r => {
+        if (cfg.mode === 'spend') {
+            if (activeModalCategory === 'SPEND_FIRM') {
+                if (activeModalSubFilter === 'TOP5_PROV' && !currentTop5ProvidersSet.has(r.proveedor)) return false;
+                if (activeModalSubFilter === 'IN_SAP' && !r.en_sap) return false;
+                if (activeModalSubFilter === 'NO_SAP' && r.en_sap) return false;
+            }
+            if (q) {
+                const hay = `${r.oc_odoo} ${r.oc_sap} ${r.solicitud} ${r.sociedad} ${r.proveedor} ${r.comprador} ${r.estado_oc}`.toLowerCase();
+                if (!hay.includes(q)) return false;
+            }
+            return true;
+        }
+
         if (activeModalCategory === 'VALIDAS') {
             if (activeModalSubFilter === 'IN_SAP' && !r.tiene_oc_sap) return false;
             if (activeModalSubFilter === 'IN_ODOO' && !(r.tiene_oc_odoo && !r.tiene_oc_sap)) return false;
@@ -1776,8 +2648,36 @@ function getRowStatusBadge(r) {
 function renderModalTable() {
     const cfg = MODAL_CONFIG[activeModalCategory];
     const rows = getFilteredModalRows();
-    document.getElementById('modalSubtitle').textContent = `${rows.length.toLocaleString()} solicitudes encontradas`;
     const tbody = document.getElementById('modalTableBody');
+
+    if (cfg.mode === 'spend') {
+        const sumMonto = rows.reduce((s, r) => s + r.monto, 0);
+        document.getElementById('modalSubtitle').textContent = `${rows.length.toLocaleString()} OCs · Total: ${formatMoney(sumMonto)}`;
+
+        if (!rows.length) {
+            tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-400 dark:text-gray-400">No hay órdenes de compra con este filtro.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = rows.slice(0, 300).map(r => {
+            const sapBadge = r.en_sap
+                ? `<span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800">SAP ${r.oc_sap}</span>`
+                : `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">${r.estado_oc} (Sin SAP)</span>`;
+
+            return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/50">
+                <td class="py-2 px-3 font-bold text-cresta-navy dark:text-white">${r.oc_odoo} <span class="text-[10px] text-slate-400 font-normal">(${r.solicitud})</span></td>
+                <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${r.fecha}</td>
+                <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${r.sociedad}</td>
+                <td class="py-2 px-3 font-medium text-slate-800 dark:text-gray-200">${r.proveedor}</td>
+                <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${shortName(r.comprador)}</td>
+                <td class="py-2 px-3">${sapBadge}</td>
+                <td class="py-2 px-3 text-right font-bold text-cresta-navy dark:text-sky-400">${formatMoney(r.monto, r.divisa)}</td>
+            </tr>`;
+        }).join('');
+        return;
+    }
+
+    document.getElementById('modalSubtitle').textContent = `${rows.length.toLocaleString()} solicitudes encontradas`;
 
     if (!rows.length) {
         tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-400 dark:text-gray-400">No hay solicitudes con este filtro.</td></tr>`;
@@ -1810,6 +2710,37 @@ function renderModalTable() {
 function exportAuditCSV() {
     const cfg = MODAL_CONFIG[activeModalCategory];
     const rows = getFilteredModalRows();
+
+    if (cfg.mode === 'spend') {
+        const headers = ['OC Odoo', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Proveedor', 'Comprador', 'Estado OC', 'Divisa', 'Total OC'];
+        const csvLines = [headers.join(',')];
+
+        rows.forEach(r => {
+            const line = [
+                `"${r.oc_odoo}"`,
+                `"${r.oc_sap || ''}"`,
+                `"${r.solicitud}"`,
+                `"${r.fecha}"`,
+                `"${r.sociedad}"`,
+                `"${r.proveedor.replace(/"/g, '""')}"`,
+                `"${r.comprador}"`,
+                `"${r.estado_oc}"`,
+                `"${r.divisa}"`,
+                r.monto.toFixed(2)
+            ];
+            csvLines.push(line.join(','));
+        });
+
+        const blob = new Blob(["\uFEFF" + csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `auditoria_${activeModalCategory.toLowerCase()}_${activeCurrency}_${RAW_DATA.cutoff_date}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+    }
+
     const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Comprador', 'OC Odoo', 'Estatus', cfg.daysLabel];
     const csvLines = [headers.join(',')];
 

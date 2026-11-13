@@ -50,6 +50,13 @@
                     </button>
                 </div>
 
+                <!-- Botón Descargar PDF Ejecutivo de la Pestaña Activa -->
+                <button id="btnExportTabPDF" type="button" onclick="exportActiveTabPDF()" title="Descargar informe gráfico en PDF con los filtros actuales"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-cresta-red hover:opacity-90 text-white font-bold transition shadow-xs">
+                    <span>📄</span>
+                    <span>Descargar PDF</span>
+                </button>
+
                 <!-- Botón Sincronizar OneDrive -->
                 <a href="?sync=1" title="Forzar actualización desde OneDrive"
                     class="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">

@@ -196,6 +196,7 @@ function renderCycleView() {
     renderChartCiclo(entityRecords, maxYm);
     renderChartCompradores(currentRecords);
     renderChartRezago(rezagoList);
+    renderBuyerWorkloadSection(currentRecords);
     renderChartAprobadoresSol(currentRecords);
     renderChartAprobadoresOc();
     renderChartCompradorTrend(maxYm, selectedComp, tableYear);
@@ -404,6 +405,46 @@ function renderChartCiclo(entityRecords, maxYm) {
     charts.ciclo.render();
 }
 
+function buildBuyerWorkloadSummary(currentRecords) {
+    const validas = currentRecords.filter(r => !r.excluida && r.aprobada);
+    const mapComp = {};
+
+    validas.forEach(r => {
+        if (!mapComp[r.comprador]) {
+            mapComp[r.comprador] = {
+                rows: [],
+                lineas: 0,
+                skusSet: new Set()
+            };
+        }
+        mapComp[r.comprador].rows.push(r);
+        mapComp[r.comprador].lineas += Number(r.lineas_count || 0);
+        (r.skus || []).forEach(sku => mapComp[r.comprador].skusSet.add(sku));
+    });
+
+    return Object.entries(mapComp).map(([name, info]) => {
+        const rows = info.rows;
+        const matureRows = rows.filter(r => r.edad_dias >= 14);
+        const evalRows = matureRows.length > 0
+            ? matureRows
+            : rows.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
+
+        const okRows = evalRows.filter(r => r.tiene_oc_odoo && r.d_comprador <= 14);
+        const pct = evalRows.length ? Math.round((okRows.length / evalRows.length) * 100) : 0;
+
+        return {
+            name,
+            total: rows.length,
+            evalCount: evalRows.length,
+            pct,
+            lineas: info.lineas,
+            skus: info.skusSet.size,
+            skusSet: info.skusSet,
+            linesPerSol: rows.length > 0 ? (info.lineas / rows.length).toFixed(1) : '0.0'
+        };
+    });
+}
+
 function renderChartCompradores(currentRecords) {
     const validas = currentRecords.filter(r => !r.excluida && r.aprobada);
     const hasMatureAny = validas.some(r => r.edad_dias >= 14);
@@ -415,23 +456,7 @@ function renderChartCompradores(currentRecords) {
         badgePartial.classList.add('hidden');
     }
 
-    const mapComp = {};
-    validas.forEach(r => {
-        if (!mapComp[r.comprador]) mapComp[r.comprador] = [];
-        mapComp[r.comprador].push(r);
-    });
-
-    const summary = Object.entries(mapComp)
-        .map(([name, rows]) => {
-            const matureRows = rows.filter(r => r.edad_dias >= 14);
-            const evalRows = matureRows.length > 0
-                ? matureRows
-                : rows.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
-
-            const okRows = evalRows.filter(r => r.tiene_oc_odoo && r.d_comprador <= 14);
-            const pct = evalRows.length ? Math.round((okRows.length / evalRows.length) * 100) : 0;
-            return { name, total: rows.length, evalCount: evalRows.length, pct };
-        })
+    const summary = buildBuyerWorkloadSummary(currentRecords)
         .filter(item => item.total >= 3 && item.evalCount > 0)
         .sort((a, b) => b.pct - a.pct);
 
@@ -450,12 +475,12 @@ function renderChartCompradores(currentRecords) {
         colors: summary.map(s => s.pct >= 70 ? '#15803D' : (s.pct >= 55 ? '#1B2A4A' : '#C8102E')),
         series: [{ name: '% SLA ≤14 días', data: summary.map(s => s.pct) }],
         xaxis: {
-            categories: summary.map(s => `${shortName(s.name)} (${s.total})`),
+            categories: summary.map(s => `${shortName(s.name)} (${s.total} sol · ${s.lineas} lín · ${s.skus} SKUs)`),
             min: 0,
             max: 100,
             labels: { formatter: v => v + '%', style: { colors: themeCfg.labelColor } }
         },
-        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '9.5px' } } },
         annotations: {
             xaxis: [{
                 x: 70,
@@ -465,6 +490,14 @@ function renderChartCompradores(currentRecords) {
             }]
         },
         dataLabels: { enabled: true, formatter: v => v + '%', style: { fontSize: '10px' } },
+        tooltip: {
+            y: {
+                formatter: (val, { dataPointIndex }) => {
+                    const item = summary[dataPointIndex];
+                    return `${val}% SLA · ${item.total} solicitudes · ${item.lineas.toLocaleString()} líneas · ${item.skus.toLocaleString()} SKUs`;
+                }
+            }
+        },
         legend: { show: false },
         grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
     };
@@ -472,6 +505,75 @@ function renderChartCompradores(currentRecords) {
     if (charts.compradores) charts.compradores.destroy();
     charts.compradores = new ApexCharts(document.querySelector('#chartCompradores'), options);
     charts.compradores.render();
+}
+
+function renderBuyerWorkloadSection(currentRecords) {
+    const workload = buildBuyerWorkloadSummary(currentRecords)
+        .filter(item => item.total >= 1)
+        .sort((a, b) => b.lineas - a.lineas);
+
+    const totalLineas = workload.reduce((s, x) => s + x.lineas, 0);
+    const globalSkusSet = new Set();
+    workload.forEach(w => w.skusSet.forEach(sku => globalSkusSet.add(sku)));
+
+    document.getElementById('badgeTotalLineasComp').textContent = `${totalLineas.toLocaleString()} Líneas`;
+    document.getElementById('badgeTotalSkusComp').textContent   = `${globalSkusSet.size.toLocaleString()} SKUs únicos`;
+
+    const themeCfg = getChartThemeConfig();
+    const options = {
+        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+        theme: { mode: themeCfg.mode },
+        plotOptions: {
+            bar: {
+                horizontal: true,
+                borderRadius: 4,
+                barHeight: '68%',
+                dataLabels: { position: 'top' }
+            }
+        },
+        colors: isDark ? ['#6366F1', '#10B981'] : ['#1B2A4A', '#15803D'],
+        series: [
+            { name: 'Líneas Atendidas', data: workload.map(w => w.lineas) },
+            { name: 'SKUs Individuales Atendidos', data: workload.map(w => w.skus) }
+        ],
+        xaxis: {
+            categories: workload.map(w => shortName(w.name)),
+            labels: { style: { colors: themeCfg.labelColor } }
+        },
+        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
+        dataLabels: {
+            enabled: true,
+            offsetX: 16,
+            style: { fontSize: '9px', colors: [themeCfg.labelColor] }
+        },
+        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
+        legend: { position: 'top', fontSize: '10px' }
+    };
+
+    if (charts.buyerWorkload) charts.buyerWorkload.destroy();
+    charts.buyerWorkload = new ApexCharts(document.querySelector('#chartBuyerWorkload'), options);
+    charts.buyerWorkload.render();
+
+    const tbody = document.getElementById('buyerWorkloadTableBody');
+    if (!workload.length) {
+        tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-slate-400">Sin datos en el periodo seleccionado.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = workload.map(w => {
+        const slaCls = w.pct >= 70
+            ? 'text-emerald-700 dark:text-emerald-400 font-bold'
+            : (w.pct >= 55 ? 'text-cresta-navy dark:text-sky-400 font-bold' : 'text-cresta-red dark:text-red-400 font-bold');
+
+        return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40">
+            <td class="py-2 px-3 font-bold text-slate-800 dark:text-gray-200">${escapeHtml(shortName(w.name))}</td>
+            <td class="py-2 px-2.5 text-right text-slate-600 dark:text-gray-300">${w.total.toLocaleString()}</td>
+            <td class="py-2 px-2.5 text-right font-bold text-cresta-navy dark:text-indigo-300">${w.lineas.toLocaleString()}</td>
+            <td class="py-2 px-2.5 text-right font-bold text-emerald-700 dark:text-emerald-400">${w.skus.toLocaleString()}</td>
+            <td class="py-2 px-2.5 text-right text-slate-500 dark:text-gray-400">${w.linesPerSol}</td>
+            <td class="py-2 px-2.5 text-right ${slaCls}">${w.evalCount > 0 ? w.pct + '%' : 'N/D'}</td>
+        </tr>`;
+    }).join('');
 }
 
 function renderChartRezago(rezagoRecords) {

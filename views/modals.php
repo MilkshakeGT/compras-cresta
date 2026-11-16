@@ -10,9 +10,9 @@
                 <h3 id="modalTitle" class="text-base font-bold text-cresta-navy dark:text-white mt-1">Detalle de Registros</h3>
             </div>
             <div class="flex items-center gap-2">
-                <button type="button" onclick="exportAuditCSV()"
+                <button type="button" onclick="exportAuditExcel()"
                     class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
-                    Descargar Excel
+                    Exportar a Excel
                 </button>
                 <button type="button" onclick="closeAuditModal()"
                     class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-300 text-xs font-bold">
@@ -51,9 +51,9 @@
                 <h3 id="docModalTitle" class="text-lg font-bold text-cresta-navy dark:text-white mt-1">Cargando...</h3>
             </div>
             <div class="flex items-center gap-2">
-                <button id="btnExportDocCSV" type="button" onclick="exportDocumentDetailCSV()"
+                <button id="btnExportDocExcel" type="button" onclick="exportDocumentDetailExcel()"
                     class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
-                    Descargar a Excel
+                    Exportar a Excel
                 </button>
                 <button type="button" onclick="closeDocDetailModal()"
                     class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-800 dark:text-gray-200 text-xs font-bold">

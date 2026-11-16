@@ -61,9 +61,6 @@ function getActiveFiltersSummaryList() {
     return items;
 }
 
-// =========================================================================
-// GENERADOR DE PDF EJECUTIVO EN CARTA VERTICAL (jsPDF + ApexCharts dataURI)
-// =========================================================================
 async function exportActiveTabPDF() {
     const JsPDFCtor = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : window.jsPDF;
     if (!JsPDFCtor) {
@@ -79,7 +76,6 @@ async function exportActiveTabPDF() {
     const wasDark = isDark;
 
     try {
-        // Si está en modo oscuro, renderizar brevemente en modo claro para gráficas con fondo limpio
         if (wasDark) {
             isDark = false;
             applyThemeUI();
@@ -87,17 +83,16 @@ async function exportActiveTabPDF() {
             await new Promise(r => setTimeout(r, 450));
         }
 
-        // Configurar documento Carta Vertical (215.9mm x 279.4mm)
         const doc = new JsPDFCtor({
             orientation: 'portrait',
             unit: 'mm',
             format: 'letter'
         });
 
-        const pageW = doc.internal.pageSize.getWidth();   // 215.9 mm
-        const pageH = doc.internal.pageSize.getHeight();  // 279.4 mm
+        const pageW = doc.internal.pageSize.getWidth();
+        const pageH = doc.internal.pageSize.getHeight();
         const margin = 10;
-        const contentW = pageW - margin * 2;              // 195.9 mm
+        const contentW = pageW - margin * 2;
         let y = margin;
 
         const ensureSpace = (neededH) => {
@@ -107,7 +102,6 @@ async function exportActiveTabPDF() {
             }
         };
 
-        // Determinar título y catálogo de tarjetas/gráficas de la pestaña activa
         let reportTitle = 'Informe Ejecutivo · Ciclo Operativo de Compras (SLA)';
         let filePrefix = 'ciclo_operativo';
         let kpiCards = [];
@@ -179,7 +173,14 @@ async function exportActiveTabPDF() {
                 {
                     instance: charts.compradores,
                     title: 'Desempeño por Comprador (% OC en Odoo ≤14 días)',
-                    sub: 'Gestión pura del comprador (Meta 70%)',
+                    sub: 'Incluye solicitudes, líneas atendidas y SKUs individuales (Meta 70%)',
+                    cols: 1,
+                    heightMm: 64
+                },
+                {
+                    instance: charts.buyerWorkload,
+                    title: 'Carga Operativa por Comprador: Líneas y SKUs Atendidos',
+                    sub: `${document.getElementById('badgeTotalLineasComp').textContent} · ${document.getElementById('badgeTotalSkusComp').textContent}`,
                     cols: 1,
                     heightMm: 64
                 },
@@ -374,10 +375,7 @@ async function exportActiveTabPDF() {
             ];
         }
 
-        // -----------------------------------------------------------------
-        // 1. DIBUJAR ENCABEZADO EJECUTIVO CORPORATIVO
-        // -----------------------------------------------------------------
-        doc.setFillColor(27, 42, 74); // #1B2A4A Cresta Navy
+        doc.setFillColor(27, 42, 74);
         doc.roundedRect(margin, y, contentW, 20, 2, 2, 'F');
 
         doc.setTextColor(255, 255, 255);
@@ -395,7 +393,6 @@ async function exportActiveTabPDF() {
 
         y += 23;
 
-        // Barra de filtros aplicados
         const filterText = getActiveFiltersSummaryList().map(f => `${f.label}: ${f.value}`).join('   |   ');
         doc.setFillColor(241, 245, 249);
         doc.setDrawColor(203, 213, 225);
@@ -409,9 +406,6 @@ async function exportActiveTabPDF() {
         doc.text(filterLines, margin + 3, y + 5);
         y += filterBoxH + 5;
 
-        // -----------------------------------------------------------------
-        // 2. DIBUJAR LAS 5 TARJETAS KPI EN FILA PROPORCIONAL
-        // -----------------------------------------------------------------
         const gapKpi = 2.5;
         const cardW = (contentW - gapKpi * 4) / 5;
         const cardH = 22;
@@ -423,7 +417,6 @@ async function exportActiveTabPDF() {
             doc.setDrawColor(203, 213, 225);
             doc.roundedRect(cx, y, cardW, cardH, 1.5, 1.5, 'FD');
 
-            // Barra superior de acento en la tarjeta
             doc.setFillColor(c.color[0], c.color[1], c.color[2]);
             doc.rect(cx, y, cardW, 1.4, 'F');
 
@@ -450,9 +443,6 @@ async function exportActiveTabPDF() {
 
         y += cardH + 6;
 
-        // -----------------------------------------------------------------
-        // 3. EXPORTAR CADA GRÁFICA APEXCHARTS COMO PNG LIMPIO Y MAQUETARLA
-        // -----------------------------------------------------------------
         let i = 0;
         while (i < chartBlocks.length) {
             const b1 = chartBlocks[i];
@@ -478,9 +468,6 @@ async function exportActiveTabPDF() {
             }
         }
 
-        // -----------------------------------------------------------------
-        // 4. DIBUJAR TABLA CONSOLIDADA DE LA PESTAÑA ACTIVA
-        // -----------------------------------------------------------------
         if (mainTab === 'cycle') {
             drawDomTableInPdf(doc, '#monthlyTableHead', '#monthlyTableBody', document.getElementById('monthlyTableTitle').textContent.trim(), margin, contentW, pageH, () => y, (newY) => { y = newY; });
         } else if (mainTab === 'spend') {
@@ -489,7 +476,6 @@ async function exportActiveTabPDF() {
             drawDomTableInPdf(doc, '#viewSupplierSection table:first-of-type thead', '#sup360ProductsTableBody', 'Detalle de Productos y Precios Comprados al Proveedor', margin, contentW, pageH, () => y, (newY) => { y = newY; });
         }
 
-        // Pie de página con numeración en todas las hojas
         const totalPages = doc.internal.getNumberOfPages();
         for (let p = 1; p <= totalPages; p++) {
             doc.setPage(p);

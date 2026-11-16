@@ -23,7 +23,7 @@
                 class="bg-slate-50 dark:bg-gray-800 border-2 border-cresta-navy dark:border-indigo-500 text-cresta-navy dark:text-white rounded-xl px-3.5 py-2.5 font-bold shadow-xs max-w-xs sm:max-w-md">
                 <option value="ALL">Todos los Proveedores (Vista Global)</option>
             </select>
-            <button type="button" onclick="exportSupplier360CSV()"
+            <button type="button" onclick="exportSupplier360Excel()"
                 class="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition shrink-0">
                 Exportar a Excel
             </button>

@@ -44,7 +44,7 @@ $syncInfo    = $payload['sync_info'] ?? [];
 $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 $verExport   = file_exists(__DIR__ . '/assets/js/export.js') ? filemtime(__DIR__ . '/assets/js/export.js') : time();
 $verApp      = file_exists(__DIR__ . '/assets/js/app.js') ? filemtime(__DIR__ . '/assets/js/app.js') : time();
-$assetVer    = "1.07.{$verApp}.{$verExport}";
+$assetVer    = "1.08.{$verApp}.{$verExport}";
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -72,7 +72,7 @@ $assetVer    = "1.07.{$verApp}.{$verExport}";
     </script>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <link rel="stylesheet" href="assets/css/app.css?v=<?= $assetVer ?>">
 </head>
 <body class="min-h-screen flex flex-col bg-slate-50 text-slate-900 dark:bg-gray-950 dark:text-gray-100">

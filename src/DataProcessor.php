@@ -8,37 +8,42 @@ class DataProcessor
     private string $excelPath;
     private string $cachePath;
     private string $configPath;
+    private string $solExcelPath;
+    private string $ocExcelPath;
+    private string $detailsCachePath;
+
+    // Aprobadores retirados / inactivos que distorsionan el ranking operativo
+    private array $excludedApprovers = [
+        'maria isabel',
+        'maría isabel',
+    ];
 
     public function __construct(string $excelPath, string $cachePath, ?string $configPath = null)
     {
-        $this->excelPath  = $excelPath;
-        $this->cachePath  = $cachePath;
-        $this->configPath = $configPath ?? dirname($excelPath) . '/onedrive.config.php';
+        $dataDir = dirname($excelPath);
+        $this->excelPath        = $excelPath;
+        $this->cachePath        = $cachePath;
+        $this->configPath       = $configPath ?? $dataDir . '/onedrive.config.php';
+        $this->solExcelPath     = $dataDir . '/Solicitudes.xlsx';
+        $this->ocExcelPath      = $dataDir . '/OC.xlsx';
+        $this->detailsCachePath = $dataDir . '/details_cache.json';
     }
 
-    public function syncFromOneDrive(bool $force = false): array
+    private function downloadSingleOneDriveFile(string $rawUrl, string $targetPath, int $ttl, bool $force): array
     {
-        if (!file_exists($this->configPath)) {
-            return ['synced' => false, 'source' => 'local', 'message' => 'Modo local (sin onedrive.config.php)'];
-        }
-
-        $cfg = require $this->configPath;
-        $rawUrl = trim((string)($cfg['onedrive_url'] ?? ''));
-        $ttl    = (int)($cfg['sync_ttl_seconds'] ?? 1800);
-
         if ($rawUrl === '' || str_contains($rawUrl, 'PEGA_AQUI')) {
-            return ['synced' => false, 'source' => 'local', 'message' => 'URL de OneDrive pendiente de configurar'];
+            return ['synced' => false, 'source' => 'local', 'message' => 'URL pendiente'];
         }
 
-        if (!$force && file_exists($this->excelPath)) {
-            $age = time() - filemtime($this->excelPath);
+        if (!$force && file_exists($targetPath)) {
+            $age = time() - filemtime($targetPath);
             if ($age < $ttl) {
                 return ['synced' => false, 'source' => 'onedrive_cached', 'message' => 'Caché reciente'];
             }
         }
 
         $downloadUrl = $this->buildDirectDownloadUrl($rawUrl);
-        $tmpFile = $this->excelPath . '.tmp.' . uniqid();
+        $tmpFile = $targetPath . '.tmp.' . uniqid();
 
         $ch = curl_init($downloadUrl);
         $fp = fopen($tmpFile, 'wb');
@@ -59,12 +64,12 @@ class DataProcessor
         curl_close($ch);
         fclose($fp);
 
-        if (!$ok || $httpCode >= 400 || !file_exists($tmpFile) || filesize($tmpFile) < 2048) {
+        if (!$ok || $httpCode >= 400 || !file_exists($tmpFile) || filesize($tmpFile) < 1024) {
             @unlink($tmpFile);
             return [
                 'synced'  => false,
                 'source'  => 'local_fallback',
-                'message' => "No se pudo descargar desde OneDrive (HTTP {$httpCode} {$curlErr}). Usando copia local."
+                'message' => "Error HTTP {$httpCode} {$curlErr}"
             ];
         }
 
@@ -82,22 +87,54 @@ class DataProcessor
             return [
                 'synced'  => false,
                 'source'  => 'local_fallback',
-                'message' => 'El enlace de OneDrive no devolvió un archivo Excel válido. Usando copia local.'
+                'message' => 'Respuesta no es un .xlsx válido'
             ];
         }
 
         $newHash = md5_file($tmpFile);
-        $oldHash = file_exists($this->excelPath) ? md5_file($this->excelPath) : '';
+        $oldHash = file_exists($targetPath) ? md5_file($targetPath) : '';
 
         if ($newHash !== $oldHash) {
-            rename($tmpFile, $this->excelPath);
-            touch($this->excelPath);
-            return ['synced' => true, 'source' => 'onedrive', 'message' => 'Actualizado desde OneDrive'];
+            rename($tmpFile, $targetPath);
+            touch($targetPath);
+            return ['synced' => true, 'source' => 'onedrive', 'message' => 'Actualizado'];
         }
 
         @unlink($tmpFile);
-        touch($this->excelPath);
-        return ['synced' => true, 'source' => 'onedrive', 'message' => 'Sin cambios nuevos en OneDrive'];
+        touch($targetPath);
+        return ['synced' => true, 'source' => 'onedrive', 'message' => 'Sin cambios'];
+    }
+
+    public function syncFromOneDrive(bool $force = false): array
+    {
+        if (!file_exists($this->configPath)) {
+            return ['synced' => false, 'source' => 'local', 'message' => 'Modo local (sin onedrive.config.php)'];
+        }
+
+        $cfg = require $this->configPath;
+        $ttl = (int)($cfg['sync_ttl_seconds'] ?? 1800);
+
+        $urlDb  = trim((string)($cfg['onedrive_url'] ?? ''));
+        $urlSol = trim((string)($cfg['onedrive_solicitudes_url'] ?? ''));
+        $urlOc  = trim((string)($cfg['onedrive_oc_url'] ?? ''));
+
+        $resDb  = $this->downloadSingleOneDriveFile($urlDb, $this->excelPath, $ttl, $force);
+        $resSol = $this->downloadSingleOneDriveFile($urlSol, $this->solExcelPath, $ttl, $force);
+        $resOc  = $this->downloadSingleOneDriveFile($urlOc, $this->ocExcelPath, $ttl, $force);
+
+        $msgs = ["DB: {$resDb['message']}"];
+        if ($urlSol !== '' && !str_contains($urlSol, 'PEGA_AQUI')) {
+            $msgs[] = "Solicitudes: {$resSol['message']}";
+        }
+        if ($urlOc !== '' && !str_contains($urlOc, 'PEGA_AQUI')) {
+            $msgs[] = "OC: {$resOc['message']}";
+        }
+
+        return [
+            'synced'  => ($resDb['synced'] || $resSol['synced'] || $resOc['synced']),
+            'source'  => $resDb['source'],
+            'message' => implode(' · ', $msgs)
+        ];
     }
 
     private function buildDirectDownloadUrl(string $url): string
@@ -117,23 +154,305 @@ class DataProcessor
         return "https://api.onedrive.com/v1.0/shares/u!{$base64}/root/content";
     }
 
+    private function isExcludedApprover(string $name): bool
+    {
+        $norm = mb_strtolower(trim($name));
+        if ($norm === '' || $norm === 'sin asignar') {
+            return true;
+        }
+        foreach ($this->excludedApprovers as $ex) {
+            if (str_contains($norm, $ex)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function normalizeForMatch(string $text): string
+    {
+        $s = mb_strtolower(trim($text));
+        $s = strtr($s, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u',
+            'ä' => 'a', 'ë' => 'e', 'ï' => 'i', 'ö' => 'o', 'ü' => 'u',
+            'ñ' => 'n'
+        ]);
+        return preg_replace('/\s+/', ' ', $s);
+    }
+
+    private function extractSkuCode(string $productText): string
+    {
+        $clean = trim($productText);
+        if ($clean === '') {
+            return '';
+        }
+        if (preg_match('/^\[([^\]]+)\]/', $clean, $m)) {
+            return strtoupper(trim($m[1]));
+        }
+        return mb_strtoupper($clean);
+    }
+
+    private function rebuildDetailsCacheIfNeeded(bool $force = false): void
+    {
+        $solMtime = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
+        $ocMtime  = file_exists($this->ocExcelPath) ? filemtime($this->ocExcelPath) : 0;
+
+        if (!$force && file_exists($this->detailsCachePath)) {
+            $existing = json_decode(file_get_contents($this->detailsCachePath), true);
+            if (is_array($existing)
+                && ($existing['schema_v'] ?? 0) === 2
+                && ($existing['sol_mtime'] ?? -1) === $solMtime
+                && ($existing['oc_mtime'] ?? -1) === $ocMtime
+            ) {
+                return;
+            }
+        }
+
+        $solDetails = [];
+        if ($solMtime > 0) {
+            $rows = SimpleXLSX::parse($this->solExcelPath);
+            if (count($rows) > 1) {
+                $headers = array_map(fn($h) => mb_strtolower(trim((string)$h)), $rows[0]);
+                $colMap  = array_flip($headers);
+                $idxId   = $colMap['solicitud'] ?? 0;
+                $idxProd = $colMap['producto solicitado'] ?? 1;
+                $idxQty  = $colMap['cantidad solicitada'] ?? 2;
+
+                for ($i = 1; $i < count($rows); $i++) {
+                    $r = $rows[$i];
+                    $id = trim((string)($r[$idxId] ?? ''));
+                    if ($id === '') {
+                        continue;
+                    }
+                    $prod = trim((string)($r[$idxProd] ?? ''));
+                    $qtyRaw = $r[$idxQty] ?? null;
+                    $qty = is_numeric($qtyRaw) ? round((float)$qtyRaw, 4) : 0.0;
+
+                    if ($prod === '' && $qty === 0.0) {
+                        continue;
+                    }
+                    if (!isset($solDetails[$id])) {
+                        $solDetails[$id] = [];
+                    }
+                    $solDetails[$id][] = [
+                        'producto' => $prod !== '' ? $prod : '(Sin descripción)',
+                        'cantidad' => $qty,
+                    ];
+                }
+            }
+        }
+
+        $ocDetails = [];
+        if ($ocMtime > 0) {
+            $rows = SimpleXLSX::parse($this->ocExcelPath);
+            if (count($rows) > 1) {
+                $headers = array_map(fn($h) => mb_strtolower(trim((string)$h)), $rows[0]);
+                $colMap  = array_flip($headers);
+                $idxId   = $colMap['no. oc'] ?? 0;
+                $idxProv = $colMap['proveedor'] ?? 1;
+                $idxProd = $colMap['producto'] ?? 2;
+                $idxQty  = $colMap['cantidad comprada'] ?? 3;
+                $idxDiv  = $colMap['divisa'] ?? 4;
+                $idxPu   = $colMap['precio unitario'] ?? 5;
+                $idxTot  = $colMap['total oc'] ?? 6;
+
+                for ($i = 1; $i < count($rows); $i++) {
+                    $r = $rows[$i];
+                    $id = trim((string)($r[$idxId] ?? ''));
+                    if ($id === '') {
+                        continue;
+                    }
+                    $prov = trim((string)($r[$idxProv] ?? ''));
+                    $prod = trim((string)($r[$idxProd] ?? ''));
+                    $qty  = is_numeric($r[$idxQty] ?? null) ? round((float)$r[$idxQty], 4) : 0.0;
+                    $div  = strtoupper(trim((string)($r[$idxDiv] ?? 'GTQ')));
+                    if ($div === '') {
+                        $div = 'GTQ';
+                    }
+                    $pu  = is_numeric($r[$idxPu] ?? null) ? round((float)$r[$idxPu], 4) : 0.0;
+                    $tot = is_numeric($r[$idxTot] ?? null) ? round((float)$r[$idxTot], 2) : round($qty * $pu, 2);
+
+                    if (!isset($ocDetails[$id])) {
+                        $ocDetails[$id] = [
+                            'proveedor' => $prov !== '' ? $prov : 'Sin proveedor',
+                            'divisa'    => $div,
+                            'lineas'    => [],
+                        ];
+                    }
+                    $ocDetails[$id]['lineas'][] = [
+                        'producto'        => $prod !== '' ? $prod : '(Sin descripción)',
+                        'cantidad'        => $qty,
+                        'precio_unitario' => $pu,
+                        'total'           => $tot,
+                    ];
+                }
+            }
+        }
+
+        $detailsPayload = [
+            'schema_v'  => 2,
+            'sol_mtime' => $solMtime,
+            'oc_mtime'  => $ocMtime,
+            'sol'       => $solDetails,
+            'oc'        => $ocDetails,
+        ];
+
+        file_put_contents($this->detailsCachePath, json_encode($detailsPayload, JSON_UNESCAPED_UNICODE));
+    }
+
+    public function getDocumentDetail(string $type, string $id): array
+    {
+        $this->rebuildDetailsCacheIfNeeded(false);
+
+        $id = trim($id);
+        $details = file_exists($this->detailsCachePath)
+            ? json_decode(file_get_contents($this->detailsCachePath), true)
+            : [];
+
+        $mainCache = file_exists($this->cachePath)
+            ? json_decode(file_get_contents($this->cachePath), true)
+            : [];
+
+        if ($type === 'sol') {
+            $meta = null;
+            foreach (($mainCache['records'] ?? []) as $rec) {
+                if (($rec['id'] ?? '') === $id) {
+                    $meta = $rec;
+                    break;
+                }
+            }
+            $lines = $details['sol'][$id] ?? [];
+            return [
+                'found'  => ($meta !== null || !empty($lines)),
+                'type'   => 'sol',
+                'id'     => $id,
+                'meta'   => $meta,
+                'lines'  => $lines,
+            ];
+        }
+
+        if ($type === 'oc') {
+            $meta = null;
+            foreach (($mainCache['spend_records'] ?? []) as $srec) {
+                if (($srec['oc_odoo'] ?? '') === $id) {
+                    $meta = $srec;
+                    break;
+                }
+            }
+            $ocInfo = $details['oc'][$id] ?? null;
+            return [
+                'found'  => ($meta !== null || $ocInfo !== null),
+                'type'   => 'oc',
+                'id'     => $id,
+                'meta'   => $meta,
+                'detail' => $ocInfo,
+            ];
+        }
+
+        return ['found' => false, 'error' => 'Tipo de documento inválido'];
+    }
+
+    public function getFirmOcLines(): array
+    {
+        $this->rebuildDetailsCacheIfNeeded(false);
+
+        $details = file_exists($this->detailsCachePath)
+            ? json_decode(file_get_contents($this->detailsCachePath), true)
+            : [];
+        $mainCache = file_exists($this->cachePath)
+            ? json_decode(file_get_contents($this->cachePath), true)
+            : [];
+
+        $ocDetailMap = $details['oc'] ?? [];
+        $firmLines = [];
+
+        foreach (($mainCache['spend_records'] ?? []) as $srec) {
+            if (empty($srec['is_firm'])) {
+                continue;
+            }
+            $ocId = $srec['oc_odoo'] ?? '';
+            if ($ocId === '') {
+                continue;
+            }
+
+            $ocInfo = $ocDetailMap[$ocId] ?? null;
+            $lineas = $ocInfo['lineas'] ?? [];
+
+            if (!empty($lineas)) {
+                foreach ($lineas as $l) {
+                    $firmLines[] = [
+                        'oc_odoo'        => $ocId,
+                        'solicitud'      => $srec['solicitud'] ?? '',
+                        'ym'             => $srec['ym'] ?? '',
+                        'fecha'          => $srec['fecha'] ?? '',
+                        'sociedad'       => $srec['sociedad'] ?? '',
+                        'comprador'      => $srec['comprador'] ?? '',
+                        'solicitado_por' => $srec['solicitado_por'] ?? '',
+                        'proveedor'      => $srec['proveedor'] ?? '',
+                        'is_caja_chica'  => !empty($srec['is_caja_chica']),
+                        'divisa'         => $srec['divisa'] ?? 'GTQ',
+                        'en_sap'         => !empty($srec['en_sap']),
+                        'producto'       => $l['producto'] ?? '(Sin descripción)',
+                        'cantidad'       => (float)($l['cantidad'] ?? 0),
+                        'pu'             => (float)($l['precio_unitario'] ?? 0),
+                        'total'          => (float)($l['total'] ?? 0),
+                    ];
+                }
+            } else {
+                $firmLines[] = [
+                    'oc_odoo'        => $ocId,
+                    'solicitud'      => $srec['solicitud'] ?? '',
+                    'ym'             => $srec['ym'] ?? '',
+                    'fecha'          => $srec['fecha'] ?? '',
+                    'sociedad'       => $srec['sociedad'] ?? '',
+                    'comprador'      => $srec['comprador'] ?? '',
+                    'solicitado_por' => $srec['solicitado_por'] ?? '',
+                    'proveedor'      => $srec['proveedor'] ?? '',
+                    'is_caja_chica'  => !empty($srec['is_caja_chica']),
+                    'divisa'         => $srec['divisa'] ?? 'GTQ',
+                    'en_sap'         => !empty($srec['en_sap']),
+                    'producto'       => '(Sin detalle de línea)',
+                    'cantidad'       => 1.0,
+                    'pu'             => (float)($srec['monto'] ?? 0),
+                    'total'          => (float)($srec['monto'] ?? 0),
+                ];
+            }
+        }
+
+        return [
+            'count' => count($firmLines),
+            'lines' => $firmLines,
+        ];
+    }
+
     public function getProcessedData(bool $forceSync = false): array
     {
         $syncStatus = $this->syncFromOneDrive($forceSync);
+        $this->rebuildDetailsCacheIfNeeded($forceSync);
 
         if (!file_exists($this->excelPath)) {
             throw new RuntimeException("No se encontró el archivo data/DB.xlsx en el servidor. " . ($syncStatus['message'] ?? ''));
         }
 
         $excelMtime = filemtime($this->excelPath);
+        $solMtime   = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
 
         if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 5) {
+            if (is_array($cached)
+                && ($cached['excel_mtime'] ?? 0) === $excelMtime
+                && ($cached['sol_mtime'] ?? -1) === $solMtime
+                && ($cached['schema_v'] ?? 1) === 14
+            ) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
         }
+
+        // Cargar líneas y SKUs únicos por solicitud desde details_cache.json
+        $detailsData = file_exists($this->detailsCachePath)
+            ? json_decode(file_get_contents($this->detailsCachePath), true)
+            : [];
+        $solLinesMap = $detailsData['sol'] ?? [];
 
         $rawRows = SimpleXLSX::parse($this->excelPath);
         if (count($rawRows) < 2) {
@@ -141,14 +460,17 @@ class DataProcessor
         }
 
         $headers = array_map(fn($h) => trim((string)$h), $rawRows[0]);
-        $colMap = array_flip($headers);
+        $colMap = [];
+        foreach ($headers as $idx => $hName) {
+            $colMap[mb_strtolower($hName)] = $idx;
+        }
 
         $getCol = function (array $row, string $name) use ($colMap) {
-            if (!isset($colMap[$name])) {
+            $key = mb_strtolower(trim($name));
+            if (!isset($colMap[$key])) {
                 return null;
             }
-            $idx = $colMap[$name];
-            return $row[$idx] ?? null;
+            return $row[$colMap[$key]] ?? null;
         };
 
         $lastHeaderData = [
@@ -192,17 +514,32 @@ class DataProcessor
                 $maxDateTs = $fCreacionSolTs;
             }
 
+            $rawTotalOc = $getCol($r, 'Total OC');
+            $totalOc = is_numeric($rawTotalOc) ? round((float)$rawTotalOc, 2) : 0.0;
+            $divisa  = strtoupper(trim((string)($getCol($r, 'Divisa') ?? 'GTQ')));
+            if ($divisa === '') {
+                $divisa = 'GTQ';
+            }
+
+            $solicitanteName = trim((string)($lastHeaderData['Solicitado por'] ?? ''));
+            if ($solicitanteName === '') {
+                $solicitanteName = 'Sin solicitante';
+            }
+
             $normalizedRows[] = [
                 'solicitud'          => trim((string)$lastHeaderData['Solicitud']),
                 'estado_sol'         => trim((string)($lastHeaderData['Estado Solicitud'] ?? '')),
-                'solicitado_por'     => trim((string)($lastHeaderData['Solicitado por'] ?? '')),
+                'solicitado_por'     => $solicitanteName,
                 'autorizador_sol'    => trim((string)($lastHeaderData['Autorizador Solicitud'] ?? '')),
-                'autorizador_oc'     => trim((string)($getCol($r, 'Autorizador') ?? '')),
+                'autorizador_oc_1'   => trim((string)($getCol($r, 'Autorizador 1') ?? '')),
                 'comprador'          => trim((string)($lastHeaderData['Comprador'] ?? 'Sin asignar')),
                 'sociedad'           => trim((string)($lastHeaderData['Sociedad'] ?? 'Sin sociedad')),
                 'no_oc_odoo'         => trim((string)($getCol($r, 'NO. OC Odoo') ?? '')),
                 'no_oc_sap'          => trim((string)($getCol($r, 'NO. OC SAP') ?? '')),
                 'estado_oc'          => trim((string)($getCol($r, 'Estado OC') ?? '')),
+                'proveedor'          => trim((string)($getCol($r, 'Proveedor') ?? '')),
+                'divisa'             => $divisa,
+                'total_oc'           => $totalOc,
                 'ts_creacion_sol'    => $fCreacionSolTs,
                 'ts_aprobacion_sol'  => $fAprobacionSolTs,
                 'ts_creacion_oc'     => $fCreacionOcTs,
@@ -211,11 +548,21 @@ class DataProcessor
             ];
         }
 
+        $buyerNamesNorm = [];
+        foreach ($normalizedRows as $row) {
+            if ($row['comprador'] !== '' && $row['comprador'] !== 'Sin asignar') {
+                $buyerNamesNorm[$this->normalizeForMatch($row['comprador'])] = true;
+            }
+        }
+
         $cutoffTs = $maxDateTs > 0 ? $maxDateTs : time();
 
-        $solicitudesMap = [];
-        $ocStats = [];
-        $ocRecords = [];
+        $solicitudesMap  = [];
+        $ocStats         = [];
+        $ocRecords       = [];
+        $spendRecords    = [];
+        $proveedoresSet  = [];
+        $solicitantesSet = [];
 
         foreach ($normalizedRows as $row) {
             $solId = $row['solicitud'];
@@ -223,8 +570,13 @@ class DataProcessor
                 continue;
             }
 
-            $isSolRechazada = (mb_strtolower($row['estado_sol']) === 'rechazado');
-            $isOcCancelada  = (mb_strtolower($row['estado_oc']) === 'cancelado');
+            $solicitantesSet[$row['solicitado_por']] = true;
+
+            $estadoSolLower = mb_strtolower($row['estado_sol']);
+            $isSolRechazada = ($estadoSolLower === 'rechazado');
+            $isSolBorrador  = ($estadoSolLower === 'borrador' || $estadoSolLower === 'draft');
+            $estadoOcLower  = mb_strtolower($row['estado_oc']);
+            $isOcCancelada  = ($estadoOcLower === 'cancelado');
 
             if ($row['no_oc_odoo'] !== '') {
                 $ym = date('Y-m', $row['ts_creacion_sol']);
@@ -236,37 +588,77 @@ class DataProcessor
                     $ocStats[$ym]['canceladas']++;
                 }
 
-                // Tiempos de aprobación de OC (Creación OC Odoo -> Aprobación OC Odoo) usando la columna exacta 'Autorizador'
-                if (!$isSolRechazada && !$isOcCancelada && $row['ts_creacion_oc'] !== null && $row['ts_aprobacion_oc'] !== null) {
+                if (!$isSolRechazada && !$isSolBorrador && !$isOcCancelada && $row['ts_creacion_oc'] !== null && $row['ts_aprobacion_oc'] !== null) {
                     $diasAprobOc = round(max(0, ($row['ts_aprobacion_oc'] - $row['ts_creacion_oc']) / 86400), 2);
-                    $aprobOcName = $row['autorizador_oc'] !== '' ? $row['autorizador_oc'] : 'Sin asignar';
+                    $aprobOcName = $row['autorizador_oc_1'] !== '' ? $row['autorizador_oc_1'] : 'Sin asignar';
 
                     $ocRecords[] = [
-                        'oc_odoo'      => $row['no_oc_odoo'],
-                        'solicitud'    => $solId,
-                        'ym'           => date('Y-m', $row['ts_creacion_oc']),
-                        'sociedad'     => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
-                        'comprador'    => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
-                        'aprobador_oc' => $aprobOcName,
-                        'd_aprob_oc'   => $diasAprobOc,
+                        'oc_odoo'           => $row['no_oc_odoo'],
+                        'solicitud'         => $solId,
+                        'ym'                => date('Y-m', $row['ts_creacion_oc']),
+                        'sociedad'          => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
+                        'comprador'         => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                        'solicitado_por'    => $row['solicitado_por'],
+                        'aprobador_oc'      => $aprobOcName,
+                        'aprob_oc_excluido' => $this->isExcludedApprover($aprobOcName),
+                        'd_aprob_oc'        => $diasAprobOc,
                     ];
                 }
+
+                $provName = $row['proveedor'] !== '' ? $row['proveedor'] : 'Sin proveedor';
+                $provNorm = $this->normalizeForMatch($provName);
+                $isCajaChica = isset($buyerNamesNorm[$provNorm]);
+
+                $ocTs = $row['ts_creacion_oc'] ?? $row['ts_creacion_sol'];
+                $ocYm = date('Y-m', $ocTs);
+                $ocFecha = date('Y-m-d', $ocTs);
+
+                $isFirm = in_array($estadoOcLower, ['orden de compra', 'para aprobar 1', 'para aprobar 2'], true)
+                          && !$isSolRechazada && !$isSolBorrador;
+                $isRfq  = ($estadoOcLower === 'solicitud de cotización') && !$isSolRechazada && !$isSolBorrador;
+
+                if ($provName !== 'Sin proveedor') {
+                    $proveedoresSet[$provName] = true;
+                }
+
+                $spendRecords[] = [
+                    'oc_odoo'        => $row['no_oc_odoo'],
+                    'oc_sap'         => $row['no_oc_sap'],
+                    'solicitud'      => $solId,
+                    'ym'             => $ocYm,
+                    'fecha'          => $ocFecha,
+                    'sociedad'       => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
+                    'comprador'      => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                    'solicitado_por' => $row['solicitado_por'],
+                    'proveedor'      => $provName,
+                    'is_caja_chica'  => $isCajaChica,
+                    'divisa'         => $row['divisa'],
+                    'monto'          => $row['total_oc'],
+                    'estado_oc'      => $row['estado_oc'],
+                    'is_firm'        => $isFirm,
+                    'is_rfq'         => $isRfq,
+                    'is_cancelada'   => $isOcCancelada,
+                    'en_sap'         => ($row['no_oc_sap'] !== ''),
+                ];
             }
 
             if (!isset($solicitudesMap[$solId])) {
+                $aprobSolName = $row['autorizador_sol'] !== '' ? $row['autorizador_sol'] : 'Sin asignar';
                 $solicitudesMap[$solId] = [
-                    'solicitud'         => $solId,
-                    'estado_sol'        => $row['estado_sol'],
-                    'solicitado_por'    => $row['solicitado_por'],
-                    'autorizador_sol'   => $row['autorizador_sol'] !== '' ? $row['autorizador_sol'] : 'Sin asignar',
-                    'is_rechazada'      => $isSolRechazada,
-                    'comprador'         => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
-                    'sociedad'          => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
-                    'ts_creacion_sol'   => $row['ts_creacion_sol'],
-                    'ts_aprobacion_sol' => $row['ts_aprobacion_sol'],
-                    'valid_ocs'         => [],
-                    'all_ocs_canceled'  => true,
-                    'has_any_oc'        => false,
+                    'solicitud'          => $solId,
+                    'estado_sol'         => $row['estado_sol'],
+                    'solicitado_por'     => $row['solicitado_por'],
+                    'autorizador_sol'    => $aprobSolName,
+                    'aprob_sol_excluido' => $this->isExcludedApprover($aprobSolName),
+                    'is_rechazada'       => $isSolRechazada,
+                    'is_borrador'        => $isSolBorrador,
+                    'comprador'          => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                    'sociedad'           => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
+                    'ts_creacion_sol'    => $row['ts_creacion_sol'],
+                    'ts_aprobacion_sol'  => $row['ts_aprobacion_sol'],
+                    'valid_ocs'          => [],
+                    'all_ocs_canceled'   => true,
+                    'has_any_oc'         => false,
                 ];
             }
 
@@ -285,6 +677,7 @@ class DataProcessor
         $meses = [];
 
         foreach ($solicitudesMap as $sol) {
+            $solId           = $sol['solicitud'];
             $tsCreacionSol   = $sol['ts_creacion_sol'];
             $tsAprobacionSol = $sol['ts_aprobacion_sol'];
             $ym              = date('Y-m', $tsCreacionSol);
@@ -295,7 +688,18 @@ class DataProcessor
             $compradores[$sol['comprador']] = true;
             $meses[$ym]                     = true;
 
-            $excluida = $sol['is_rechazada'] || ($sol['has_any_oc'] && $sol['all_ocs_canceled']);
+            $excluida = $sol['is_rechazada'] || $sol['is_borrador'] || ($sol['has_any_oc'] && $sol['all_ocs_canceled']);
+
+            // Calcular líneas de solicitud y códigos SKU únicos desde Solicitudes.xlsx
+            $linesForSol = $solLinesMap[$solId] ?? [];
+            $lineasCount = count($linesForSol);
+            $skusSet = [];
+            foreach ($linesForSol as $lItem) {
+                $sku = $this->extractSkuCode((string)($lItem['producto'] ?? ''));
+                if ($sku !== '') {
+                    $skusSet[$sku] = true;
+                }
+            }
 
             $diasAprobSol = null;
             if ($tsAprobacionSol && $tsAprobacionSol >= $tsCreacionSol) {
@@ -353,51 +757,63 @@ class DataProcessor
             $edadDias = round(($cutoffTs - $tsCreacionSol) / 86400, 1);
 
             $records[] = [
-                'id'              => $sol['solicitud'],
-                'ym'              => $ym,
-                'quincena'        => $quincena,
-                'fecha'           => date('Y-m-d', $tsCreacionSol),
-                'sociedad'        => $sol['sociedad'],
-                'comprador'       => $sol['comprador'],
-                'autorizador_sol' => $sol['autorizador_sol'],
-                'solicitado_por'  => $sol['solicitado_por'],
-                'estado_sol'      => $sol['estado_sol'],
-                'oc_odoo'         => implode(', ', array_unique($ocCodes)),
-                'estado_oc'       => implode(', ', array_unique($ocStates)),
-                'is_rechazada'    => $sol['is_rechazada'],
-                'excluida'        => $excluida,
-                'aprobada'        => ($tsAprobacionSol !== null),
-                'tiene_oc_odoo'   => $tieneOcOdoo,
-                'tiene_oc_sap'    => $tieneOcSap,
-                'd_aprob_sol'     => $diasAprobSol,
-                'd_comprador'     => $diasGestionComprador,
-                'd_aprob_sap'     => $diasAprobSap,
-                'd_to_sap'        => $diasAprobToSap,
-                'd_ciclo_total'   => $diasCicloTotal,
-                'edad_dias'       => $edadDias,
+                'id'                 => $solId,
+                'ym'                 => $ym,
+                'quincena'           => $quincena,
+                'fecha'              => date('Y-m-d', $tsCreacionSol),
+                'sociedad'           => $sol['sociedad'],
+                'comprador'          => $sol['comprador'],
+                'autorizador_sol'    => $sol['autorizador_sol'],
+                'aprob_sol_excluido' => $sol['aprob_sol_excluido'],
+                'solicitado_por'     => $sol['solicitado_por'],
+                'estado_sol'         => $sol['estado_sol'],
+                'oc_odoo'            => implode(', ', array_unique($ocCodes)),
+                'estado_oc'          => implode(', ', array_unique($ocStates)),
+                'is_rechazada'       => $sol['is_rechazada'],
+                'is_borrador'        => $sol['is_borrador'],
+                'excluida'           => $excluida,
+                'aprobada'           => ($tsAprobacionSol !== null),
+                'tiene_oc_odoo'      => $tieneOcOdoo,
+                'tiene_oc_sap'       => $tieneOcSap,
+                'd_aprob_sol'        => $diasAprobSol,
+                'd_comprador'        => $diasGestionComprador,
+                'd_aprob_sap'        => $diasAprobSap,
+                'd_to_sap'           => $diasAprobToSap,
+                'd_ciclo_total'      => $diasCicloTotal,
+                'edad_dias'          => $edadDias,
+                'lineas_count'       => $lineasCount,
+                'skus'               => array_keys($skusSet),
             ];
         }
 
         ksort($meses);
-        $listSociedades  = array_keys($sociedades);
-        $listCompradores = array_keys($compradores);
+        $listSociedades   = array_keys($sociedades);
+        $listCompradores  = array_keys($compradores);
+        $listProveedores  = array_keys($proveedoresSet);
+        $listSolicitantes = array_keys($solicitantesSet);
         sort($listSociedades);
         sort($listCompradores);
+        sort($listProveedores);
+        sort($listSolicitantes);
 
         $output = [
-            'schema_v'      => 5,
+            'schema_v'      => 14,
             'excel_mtime'   => $excelMtime,
+            'sol_mtime'     => $solMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),
             'sync_info'     => $syncStatus,
             'filters'       => [
-                'meses'       => array_keys($meses),
-                'sociedades'  => $listSociedades,
-                'compradores' => $listCompradores,
+                'meses'        => array_keys($meses),
+                'sociedades'   => $listSociedades,
+                'compradores'  => $listCompradores,
+                'proveedores'  => $listProveedores,
+                'solicitantes' => $listSolicitantes,
             ],
             'oc_stats'      => $ocStats,
             'records'       => $records,
             'oc_records'    => $ocRecords,
+            'spend_records' => $spendRecords,
         ];
 
         file_put_contents($this->cachePath, json_encode($output, JSON_UNESCAPED_UNICODE));

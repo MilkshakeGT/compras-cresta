@@ -329,36 +329,7 @@ function renderModalTable() {
     }).join('');
 }
 
-function exportAuditCSV() {
-    const cfg = MODAL_CONFIG[activeModalCategory];
-    const rows = getFilteredModalRows();
-
-    if (cfg.mode === 'spend') {
-        const headers = ['OC Odoo', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Solicitante', 'Proveedor', 'Comprador', 'Estado OC', 'Divisa', 'Total OC'];
-        const csvLines = [headers.join(',')];
-
-        rows.forEach(r => {
-            const line = [
-                `"${r.oc_odoo}"`,
-                `"${r.oc_sap || ''}"`,
-                `"${r.solicitud}"`,
-                `"${r.fecha}"`,
-                `"${r.sociedad}"`,
-                `"${(r.solicitado_por || '').replace(/"/g, '""')}"`,
-                `"${r.proveedor.replace(/"/g, '""')}"`,
-                `"${r.comprador}"`,
-                `"${r.estado_oc}"`,
-                `"${r.divisa}"`,
-                r.monto.toFixed(2)
-            ];
-            csvLines.push(line.join(','));
-        });
-
-        downloadCsvBlob(csvLines.join('\n'), `auditoria_${activeModalCategory.toLowerCase()}_${activeCurrency}_${RAW_DATA.cutoff_date}.csv`);
-        return;
-    }
-
-    function exportAuditExcel() {
+function exportAuditExcel() {
     const cfg = MODAL_CONFIG[activeModalCategory];
     const rows = getFilteredModalRows();
 
@@ -413,94 +384,6 @@ function exportAuditCSV() {
         `auditoria_${activeModalCategory.toLowerCase()}_cresta_${RAW_DATA.cutoff_date}.xlsx`,
         'Auditoria Solicitudes'
     );
-}
-
-function exportDocumentDetailExcel() {
-    if (!activeDocDetail) return;
-
-    if (activeDocDetail.type === 'sol') {
-        const m = activeDocDetail.meta || {};
-        const lines = activeDocDetail.lines || [];
-        const headers = ['Solicitud', 'Fecha', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Linea', 'Producto Solicitado', 'Cantidad Solicitada'];
-        const dataRows = lines.map((l, idx) => [
-            activeDocDetail.id,
-            m.fecha || '',
-            m.sociedad || '',
-            m.solicitado_por || '',
-            m.comprador || '',
-            m.oc_odoo || '',
-            idx + 1,
-            String(l.producto).replace(/\n/g, ' '),
-            Number(l.cantidad)
-        ]);
-
-        exportToExcel(
-            headers,
-            dataRows,
-            `detalle_solicitud_${activeDocDetail.id}.xlsx`,
-            `Solicitud ${activeDocDetail.id}`
-        );
-        return;
-    }
-
-    if (activeDocDetail.type === 'oc') {
-        const m = activeDocDetail.meta || {};
-        const d = activeDocDetail.detail || {};
-        const lines = d.lineas || [];
-        const prov = d.proveedor || m.proveedor || '';
-        const divisa = d.divisa || m.divisa || 'GTQ';
-
-        const headers = ['No. OC', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Proveedor', 'Comprador', 'Solicitante', 'Linea', 'Producto', 'Cantidad Comprada', 'Divisa', 'Precio Unitario', 'Total Linea'];
-        const dataRows = lines.map((l, idx) => [
-            activeDocDetail.id,
-            m.oc_sap || '',
-            m.solicitud || '',
-            m.fecha || '',
-            m.sociedad || '',
-            prov,
-            m.comprador || '',
-            m.solicitado_por || '',
-            idx + 1,
-            String(l.producto).replace(/\n/g, ' '),
-            Number(l.cantidad),
-            divisa,
-            Number(l.precio_unitario),
-            Number(l.total)
-        ]);
-
-        exportToExcel(
-            headers,
-            dataRows,
-            `detalle_oc_${activeDocDetail.id}.xlsx`,
-            `OC ${activeDocDetail.id}`
-        );
-    }
-}
-
-    const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Estatus', cfg.daysLabel];
-    const csvLines = [headers.join(',')];
-
-    rows.forEach(r => {
-        const statusTxt = r.tiene_oc_sap
-            ? 'En SAP'
-            : (r.tiene_oc_odoo ? (r.estado_oc || 'OC Odoo sin SAP') : (!r.aprobada ? (r.estado_sol || 'Sin aprobar') : 'Sin OC en Odoo'));
-        const rawDays = r[cfg.daysField];
-        const daysVal = rawDays !== null && rawDays !== undefined ? rawDays.toFixed(1) : '';
-
-        const line = [
-            `"${r.id}"`,
-            `"${r.fecha}"`,
-            `"${r.sociedad}"`,
-            `"${(r.solicitado_por || '').replace(/"/g, '""')}"`,
-            `"${r.comprador}"`,
-            `"${r.oc_odoo || ''}"`,
-            `"${statusTxt}"`,
-            daysVal
-        ];
-        csvLines.push(line.join(','));
-    });
-
-    downloadCsvBlob(csvLines.join('\n'), `auditoria_${activeModalCategory.toLowerCase()}_cresta_${RAW_DATA.cutoff_date}.csv`);
 }
 
 // =========================================================================
@@ -630,30 +513,31 @@ function closeDocDetailModal() {
     document.getElementById('docDetailModal').classList.add('hidden');
 }
 
-function exportDocumentDetailCSV() {
+function exportDocumentDetailExcel() {
     if (!activeDocDetail) return;
 
     if (activeDocDetail.type === 'sol') {
         const m = activeDocDetail.meta || {};
         const lines = activeDocDetail.lines || [];
         const headers = ['Solicitud', 'Fecha', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Linea', 'Producto Solicitado', 'Cantidad Solicitada'];
-        const csvLines = [headers.join(',')];
+        const dataRows = lines.map((l, idx) => [
+            activeDocDetail.id,
+            m.fecha || '',
+            m.sociedad || '',
+            m.solicitado_por || '',
+            m.comprador || '',
+            m.oc_odoo || '',
+            idx + 1,
+            String(l.producto).replace(/\n/g, ' '),
+            Number(l.cantidad)
+        ]);
 
-        lines.forEach((l, idx) => {
-            csvLines.push([
-                `"${activeDocDetail.id}"`,
-                `"${m.fecha || ''}"`,
-                `"${m.sociedad || ''}"`,
-                `"${(m.solicitado_por || '').replace(/"/g, '""')}"`,
-                `"${(m.comprador || '').replace(/"/g, '""')}"`,
-                `"${m.oc_odoo || ''}"`,
-                idx + 1,
-                `"${String(l.producto).replace(/"/g, '""').replace(/\n/g, ' ')}"`,
-                l.cantidad
-            ].join(','));
-        });
-
-        downloadCsvBlob(csvLines.join('\n'), `detalle_solicitud_${activeDocDetail.id}.csv`);
+        exportToExcel(
+            headers,
+            dataRows,
+            `detalle_solicitud_${activeDocDetail.id}.xlsx`,
+            `Solicitud ${activeDocDetail.id}`
+        );
         return;
     }
 
@@ -665,27 +549,28 @@ function exportDocumentDetailCSV() {
         const divisa = d.divisa || m.divisa || 'GTQ';
 
         const headers = ['No. OC', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Proveedor', 'Comprador', 'Solicitante', 'Linea', 'Producto', 'Cantidad Comprada', 'Divisa', 'Precio Unitario', 'Total Linea'];
-        const csvLines = [headers.join(',')];
+        const dataRows = lines.map((l, idx) => [
+            activeDocDetail.id,
+            m.oc_sap || '',
+            m.solicitud || '',
+            m.fecha || '',
+            m.sociedad || '',
+            prov,
+            m.comprador || '',
+            m.solicitado_por || '',
+            idx + 1,
+            String(l.producto).replace(/\n/g, ' '),
+            Number(l.cantidad),
+            divisa,
+            Number(l.precio_unitario),
+            Number(l.total)
+        ]);
 
-        lines.forEach((l, idx) => {
-            csvLines.push([
-                `"${activeDocDetail.id}"`,
-                `"${m.oc_sap || ''}"`,
-                `"${m.solicitud || ''}"`,
-                `"${m.fecha || ''}"`,
-                `"${m.sociedad || ''}"`,
-                `"${prov.replace(/"/g, '""')}"`,
-                `"${(m.comprador || '').replace(/"/g, '""')}"`,
-                `"${(m.solicitado_por || '').replace(/"/g, '""')}"`,
-                idx + 1,
-                `"${String(l.producto).replace(/"/g, '""').replace(/\n/g, ' ')}"`,
-                l.cantidad,
-                `"${divisa}"`,
-                l.precio_unitario,
-                l.total
-            ].join(','));
-        });
-
-        downloadCsvBlob(csvLines.join('\n'), `detalle_oc_${activeDocDetail.id}.csv`);
+        exportToExcel(
+            headers,
+            dataRows,
+            `detalle_oc_${activeDocDetail.id}.xlsx`,
+            `OC ${activeDocDetail.id}`
+        );
     }
 }

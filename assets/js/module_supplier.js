@@ -299,32 +299,6 @@ function renderSup360TablesOnly() {
     }
 }
 
-function exportSupplier360CSV() {
-    const selectedProv = document.getElementById('sup360Selector').value;
-    const provLabel = selectedProv === 'ALL' ? 'todos_proveedores' : selectedProv.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
-
-    const headers = ['Proveedor', 'Producto / Servicio', 'OCs', 'Cantidad Total', 'Divisa', 'Precio Minimo', 'Precio Promedio', 'Precio Maximo', 'Ultimo Precio', 'Monto Total', '% Participacion'];
-    const csvLines = [headers.join(',')];
-
-    cachedSup360Products.forEach(p => {
-        csvLines.push([
-            `"${selectedProv.replace(/"/g, '""')}"`,
-            `"${p.producto.replace(/"/g, '""').replace(/\n/g, ' ')}"`,
-            p.ocsCount,
-            p.qty.toFixed(2),
-            `"${activeCurrency}"`,
-            p.minPu.toFixed(4),
-            p.avgPu.toFixed(4),
-            p.maxPu.toFixed(4),
-            p.lastPu.toFixed(4),
-            p.monto.toFixed(2),
-            p.pct.toFixed(2)
-        ].join(','));
-    });
-
-    downloadCsvBlob(csvLines.join('\n'), `portal360_${provLabel}_${activeCurrency}_${RAW_DATA.cutoff_date}.csv`);
-}
-
 function exportSupplier360Excel() {
     const selectedProv = document.getElementById('sup360Selector').value;
     const provLabel = selectedProv === 'ALL' ? 'todos_proveedores' : selectedProv.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);

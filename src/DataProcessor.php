@@ -179,6 +179,18 @@ class DataProcessor
         return preg_replace('/\s+/', ' ', $s);
     }
 
+    private function extractSkuCode(string $productText): string
+    {
+        $clean = trim($productText);
+        if ($clean === '') {
+            return '';
+        }
+        if (preg_match('/^\[([^\]]+)\]/', $clean, $m)) {
+            return strtoupper(trim($m[1]));
+        }
+        return mb_strtoupper($clean);
+    }
+
     private function rebuildDetailsCacheIfNeeded(bool $force = false): void
     {
         $solMtime = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
@@ -339,7 +351,6 @@ class DataProcessor
         return ['found' => false, 'error' => 'Tipo de documento inválido'];
     }
 
-    // Devuelve todas las líneas de producto de OCs EN FIRME cruzadas con metadatos de DB.xlsx
     public function getFirmOcLines(): array
     {
         $this->rebuildDetailsCacheIfNeeded(false);
@@ -387,7 +398,6 @@ class DataProcessor
                     ];
                 }
             } else {
-                // Fallback si la OC firme aún no aparece en OC.xlsx
                 $firmLines[] = [
                     'oc_odoo'        => $ocId,
                     'solicitud'      => $srec['solicitud'] ?? '',
@@ -424,14 +434,25 @@ class DataProcessor
         }
 
         $excelMtime = filemtime($this->excelPath);
+        $solMtime   = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
 
         if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['excel_mtime'] ?? 0) === $excelMtime && ($cached['schema_v'] ?? 1) === 13) {
+            if (is_array($cached)
+                && ($cached['excel_mtime'] ?? 0) === $excelMtime
+                && ($cached['sol_mtime'] ?? -1) === $solMtime
+                && ($cached['schema_v'] ?? 1) === 14
+            ) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
         }
+
+        // Cargar líneas y SKUs únicos por solicitud desde details_cache.json
+        $detailsData = file_exists($this->detailsCachePath)
+            ? json_decode(file_get_contents($this->detailsCachePath), true)
+            : [];
+        $solLinesMap = $detailsData['sol'] ?? [];
 
         $rawRows = SimpleXLSX::parse($this->excelPath);
         if (count($rawRows) < 2) {
@@ -656,6 +677,7 @@ class DataProcessor
         $meses = [];
 
         foreach ($solicitudesMap as $sol) {
+            $solId           = $sol['solicitud'];
             $tsCreacionSol   = $sol['ts_creacion_sol'];
             $tsAprobacionSol = $sol['ts_aprobacion_sol'];
             $ym              = date('Y-m', $tsCreacionSol);
@@ -667,6 +689,17 @@ class DataProcessor
             $meses[$ym]                     = true;
 
             $excluida = $sol['is_rechazada'] || $sol['is_borrador'] || ($sol['has_any_oc'] && $sol['all_ocs_canceled']);
+
+            // Calcular líneas de solicitud y códigos SKU únicos desde Solicitudes.xlsx
+            $linesForSol = $solLinesMap[$solId] ?? [];
+            $lineasCount = count($linesForSol);
+            $skusSet = [];
+            foreach ($linesForSol as $lItem) {
+                $sku = $this->extractSkuCode((string)($lItem['producto'] ?? ''));
+                if ($sku !== '') {
+                    $skusSet[$sku] = true;
+                }
+            }
 
             $diasAprobSol = null;
             if ($tsAprobacionSol && $tsAprobacionSol >= $tsCreacionSol) {
@@ -724,7 +757,7 @@ class DataProcessor
             $edadDias = round(($cutoffTs - $tsCreacionSol) / 86400, 1);
 
             $records[] = [
-                'id'                 => $sol['solicitud'],
+                'id'                 => $solId,
                 'ym'                 => $ym,
                 'quincena'           => $quincena,
                 'fecha'              => date('Y-m-d', $tsCreacionSol),
@@ -748,6 +781,8 @@ class DataProcessor
                 'd_to_sap'           => $diasAprobToSap,
                 'd_ciclo_total'      => $diasCicloTotal,
                 'edad_dias'          => $edadDias,
+                'lineas_count'       => $lineasCount,
+                'skus'               => array_keys($skusSet),
             ];
         }
 
@@ -762,8 +797,9 @@ class DataProcessor
         sort($listSolicitantes);
 
         $output = [
-            'schema_v'      => 13,
+            'schema_v'      => 14,
             'excel_mtime'   => $excelMtime,
+            'sol_mtime'     => $solMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),
             'sync_info'     => $syncStatus,

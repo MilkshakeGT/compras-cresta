@@ -161,6 +161,44 @@
         </div>
     </section>
 
+    <!-- Nueva Sección: Carga Operativa por Comprador (Líneas de Solicitud y SKUs Individuales Atendidos) -->
+    <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+                <div class="flex items-center gap-2">
+                    <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-navy dark:bg-cresta-red text-white">CARGA OPERATIVA · SOLICITUDES.XLSX</span>
+                    <h2 class="text-sm font-bold text-cresta-navy dark:text-white">Carga Operativa por Comprador: Líneas de Solicitud y SKUs Individuales Atendidos</h2>
+                </div>
+                <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Contrasta el volumen real de ítems procesados y la diversidad de artículos distintos gestionados por cada comprador</p>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+                <span id="badgeTotalLineasComp" class="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-cresta-navy dark:text-sky-300 font-bold">0 Líneas</span>
+                <span id="badgeTotalSkusComp" class="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-gray-800 text-emerald-700 dark:text-emerald-300 font-bold">0 SKUs únicos</span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <div class="lg:col-span-6">
+                <div id="chartBuyerWorkload" class="w-full h-80"></div>
+            </div>
+            <div class="lg:col-span-6 overflow-x-auto">
+                <table class="w-full text-xs text-left border-collapse">
+                    <thead class="bg-cresta-navy text-white dark:bg-gray-800 dark:text-gray-200">
+                        <tr>
+                            <th class="py-2.5 px-3 font-bold rounded-tl-lg">Comprador</th>
+                            <th class="py-2.5 px-2.5 text-right font-bold">Solicitudes</th>
+                            <th class="py-2.5 px-2.5 text-right font-bold">Líneas Atendidas</th>
+                            <th class="py-2.5 px-2.5 text-right font-bold">SKUs Únicos</th>
+                            <th class="py-2.5 px-2.5 text-right font-bold">Lín./Sol.</th>
+                            <th class="py-2.5 px-2.5 text-right font-bold rounded-tr-lg">SLA ≤14d</th>
+                        </tr>
+                    </thead>
+                    <tbody id="buyerWorkloadTableBody" class="divide-y divide-slate-200 dark:divide-gray-800"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
     <!-- Fila 3: Ranking de Aprobadores -->
     <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-6">

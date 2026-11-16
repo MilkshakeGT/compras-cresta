@@ -42,7 +42,9 @@ try {
 
 $syncInfo    = $payload['sync_info'] ?? [];
 $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
-$assetVer    = '1.06.' . (file_exists(__DIR__ . '/assets/js/app.js') ? filemtime(__DIR__ . '/assets/js/app.js') : time());
+$verExport   = file_exists(__DIR__ . '/assets/js/export.js') ? filemtime(__DIR__ . '/assets/js/export.js') : time();
+$verApp      = file_exists(__DIR__ . '/assets/js/app.js') ? filemtime(__DIR__ . '/assets/js/app.js') : time();
+$assetVer    = "1.07.{$verApp}.{$verExport}";
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -69,7 +71,6 @@ $assetVer    = '1.06.' . (file_exists(__DIR__ . '/assets/js/app.js') ? filemtime
         };
     </script>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
-    <!-- Librerías para exportación nativa a Excel (.xlsx) y PDF gráfico -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <link rel="stylesheet" href="assets/css/app.css?v=<?= $assetVer ?>">

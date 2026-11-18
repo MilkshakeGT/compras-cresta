@@ -2,6 +2,26 @@
  * MÓDULO 1: CICLO OPERATIVO Y SLA (assets/js/module_cycle.js)
  * ========================================================================= */
 
+let quincenaChartMode = 'cumulative'; // 'cumulative' | 'buckets'
+
+function setQuincenaChartMode(mode) {
+    quincenaChartMode = mode;
+    const btnCum  = document.getElementById('btnQuincenaCum');
+    const btnDist = document.getElementById('btnQuincenaDist');
+
+    const activeCls   = 'px-2.5 py-1 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition';
+    const inactiveCls = 'px-2.5 py-1 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition';
+
+    if (btnCum && btnDist) {
+        btnCum.className  = mode === 'cumulative' ? activeCls : inactiveCls;
+        btnDist.className = mode === 'buckets'    ? activeCls : inactiveCls;
+    }
+
+    const entityRecords = filterByEntity(RAW_DATA.records);
+    const maxYm = getMaxYmForCurrentSelection();
+    renderChartQuincenas(entityRecords, maxYm);
+}
+
 function getPreviousQuarterRecords(entityRecords, year, qId) {
     const order = ['Q1', 'Q2', 'Q3', 'Q4'];
     const idx = order.indexOf(qId);
@@ -317,6 +337,84 @@ function renderChartQuincenas(entityRecords, maxYm) {
     const validas = entityRecords.filter(r => !r.excluida && r.aprobada && r.ym <= maxYm);
     const quincenasSet = [...new Set(validas.map(r => r.quincena))].sort();
     const recentQ = quincenasSet.slice(-8);
+    const themeCfg = getChartThemeConfig();
+
+    const titleEl = document.getElementById('chartQuincenasTitle');
+    const subEl   = document.getElementById('chartQuincenasSub');
+
+    if (charts.quincenas) charts.quincenas.destroy();
+
+    if (quincenaChartMode === 'buckets') {
+        if (titleEl) titleEl.textContent = 'Distribución de Tiempos a SAP por Rangos Excluyentes (100%)';
+        if (subEl) subEl.textContent = 'Cada barra suma 100% del total de solicitudes de la quincena (0-7d, 8-14d, 15-30d y >30d/pendientes)';
+
+        const labels = [];
+        const b0_7 = [], b8_14 = [], b15_30 = [], bGt30 = [];
+
+        recentQ.forEach(q => {
+            const rows = validas.filter(r => r.quincena === q);
+            const [ym, half] = q.split('-Q');
+            labels.push(`${half === '1' ? '1ª Q' : '2ª Q'} ${formatYm(ym)}`);
+
+            const tot = rows.length;
+            if (!tot) {
+                b0_7.push(0); b8_14.push(0); b15_30.push(0); bGt30.push(0);
+                return;
+            }
+
+            let c0_7 = 0, c8_14 = 0, c15_30 = 0;
+            rows.forEach(r => {
+                if (r.tiene_oc_sap && r.d_to_sap !== null) {
+                    if (r.d_to_sap <= 7) c0_7++;
+                    else if (r.d_to_sap <= 14) c8_14++;
+                    else if (r.d_to_sap <= 30) c15_30++;
+                }
+            });
+
+            const p0_7   = Math.round((c0_7 / tot) * 100);
+            const p8_14  = Math.round((c8_14 / tot) * 100);
+            const p15_30 = Math.round((c15_30 / tot) * 100);
+            const pGt30  = Math.max(0, 100 - (p0_7 + p8_14 + p15_30));
+
+            b0_7.push(p0_7);
+            b8_14.push(p8_14);
+            b15_30.push(p15_30);
+            bGt30.push(pGt30);
+        });
+
+        const options = {
+            chart: { type: 'bar', stacked: true, stackType: '100%', height: 280, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
+            theme: { mode: themeCfg.mode },
+            colors: ['#15803D', '#1B2A4A', '#D97706', '#C8102E'],
+            series: [
+                { name: '0–7 días', data: b0_7 },
+                { name: '8–14 días', data: b8_14 },
+                { name: '15–30 días', data: b15_30 },
+                { name: '> 30d / Pendientes', data: bGt30 }
+            ],
+            xaxis: { categories: labels, labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
+            yaxis: { min: 0, max: 100, labels: { formatter: v => Math.round(v) + '%', style: { colors: themeCfg.labelColor } } },
+            plotOptions: { bar: { borderRadius: 3, columnWidth: '58%' } },
+            dataLabels: {
+                enabled: true,
+                formatter: v => v >= 6 ? Math.round(v) + '%' : '',
+                style: { fontSize: '9px', colors: ['#FFFFFF'] }
+            },
+            tooltip: {
+                y: { formatter: val => `${val}%` }
+            },
+            grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
+            legend: { position: 'top', fontSize: '10px' }
+        };
+
+        charts.quincenas = new ApexCharts(document.querySelector('#chartQuincenas'), options);
+        charts.quincenas.render();
+        return;
+    }
+
+    // Modo Acumulado (original)
+    if (titleEl) titleEl.textContent = '% Solicitudes en SAP dentro de plazo (por Quincena)';
+    if (subEl) subEl.textContent = 'Umbrales acumulados sobre solicitudes que ya cumplieron la ventana de 7, 14 o 30 días';
 
     const s7 = [], s14 = [], s30 = [], labels = [];
 
@@ -338,7 +436,6 @@ function renderChartQuincenas(entityRecords, maxYm) {
         s30.push(eval30.length >= 10 ? Math.round((ok30.length / eval30.length) * 100) : null);
     });
 
-    const themeCfg = getChartThemeConfig();
     const options = {
         chart: { type: 'line', height: 280, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
         theme: { mode: themeCfg.mode },
@@ -361,7 +458,6 @@ function renderChartQuincenas(entityRecords, maxYm) {
         options.colors = ['#38BDF8', '#818CF8', '#F87171'];
     }
 
-    if (charts.quincenas) charts.quincenas.destroy();
     charts.quincenas = new ApexCharts(document.querySelector('#chartQuincenas'), options);
     charts.quincenas.render();
 }

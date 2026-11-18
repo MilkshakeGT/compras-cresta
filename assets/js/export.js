@@ -148,11 +148,14 @@ async function exportActiveTabPDF() {
                 }
             ];
 
+            const qTitleEl = document.getElementById('chartQuincenasTitle');
+            const qSubEl   = document.getElementById('chartQuincenasSub');
+
             chartBlocks = [
                 {
                     instance: charts.quincenas,
-                    title: '% Solicitudes en SAP dentro de plazo (por Quincena)',
-                    sub: 'Evaluado sobre solicitudes que cumplieron ventana de 7, 14 o 30 días',
+                    title: qTitleEl ? qTitleEl.textContent.trim() : '% Solicitudes en SAP dentro de plazo (por Quincena)',
+                    sub: qSubEl ? qSubEl.textContent.trim() : 'Evaluado sobre solicitudes que cumplieron ventana de 7, 14 o 30 días',
                     cols: 1,
                     heightMm: 62
                 },

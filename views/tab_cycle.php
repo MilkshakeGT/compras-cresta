@@ -115,9 +115,21 @@
     <!-- Fila 1 de Gráficas (Ciclo) -->
     <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm lg:col-span-7">
-            <div class="mb-3">
-                <h2 class="text-sm font-bold text-cresta-navy dark:text-white">% Solicitudes en SAP dentro de plazo (por Quincena)</h2>
-                <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Evaluado estrictamente sobre solicitudes que ya cumplieron la ventana de 7, 14 o 30 días</p>
+            <div class="mb-3 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                <div>
+                    <h2 id="chartQuincenasTitle" class="text-sm font-bold text-cresta-navy dark:text-white">% Solicitudes en SAP dentro de plazo (por Quincena)</h2>
+                    <p id="chartQuincenasSub" class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">Umbrales acumulados sobre solicitudes que ya cumplieron la ventana de 7, 14 o 30 días</p>
+                </div>
+                <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-0.5 border border-slate-200 dark:border-gray-700 text-[11px] shrink-0">
+                    <button id="btnQuincenaCum" type="button" onclick="setQuincenaChartMode('cumulative')"
+                        class="px-2.5 py-1 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition">
+                        Acumulado
+                    </button>
+                    <button id="btnQuincenaDist" type="button" onclick="setQuincenaChartMode('buckets')"
+                        class="px-2.5 py-1 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
+                        Rangos 100%
+                    </button>
+                </div>
             </div>
             <div id="chartQuincenas" class="w-full h-72"></div>
         </div>
@@ -161,7 +173,7 @@
         </div>
     </section>
 
-    <!-- Nueva Sección: Carga Operativa por Comprador (Líneas de Solicitud y SKUs Individuales Atendidos) -->
+    <!-- Carga Operativa por Comprador (Líneas de Solicitud y SKUs Individuales Atendidos) -->
     <section class="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 shadow-sm space-y-4">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>

@@ -95,7 +95,7 @@ class DataProcessor
         $oldHash = file_exists($targetPath) ? md5_file($targetPath) : '';
 
         if ($newHash !== $oldHash) {
-            rename($tmpFile, $targetPath);
+            rename($tmpFile, $this->excelPath === $targetPath ? $this->excelPath : $targetPath);
             touch($targetPath);
             return ['synced' => true, 'source' => 'onedrive', 'message' => 'Actualizado'];
         }
@@ -189,6 +189,15 @@ class DataProcessor
             return strtoupper(trim($m[1]));
         }
         return mb_strtoupper($clean);
+    }
+
+    private function formatTsDisplay(?int $ts): ?string
+    {
+        if ($ts === null || $ts <= 0) {
+            return null;
+        }
+        $timeStr = date('H:i', $ts);
+        return $timeStr === '00:00' ? date('Y-m-d', $ts) : date('Y-m-d H:i', $ts);
     }
 
     private function rebuildDetailsCacheIfNeeded(bool $force = false): void
@@ -312,6 +321,8 @@ class DataProcessor
             ? json_decode(file_get_contents($this->cachePath), true)
             : [];
 
+        $cutoffDate = $mainCache['cutoff_date'] ?? date('Y-m-d');
+
         if ($type === 'sol') {
             $meta = null;
             foreach (($mainCache['records'] ?? []) as $rec) {
@@ -322,11 +333,12 @@ class DataProcessor
             }
             $lines = $details['sol'][$id] ?? [];
             return [
-                'found'  => ($meta !== null || !empty($lines)),
-                'type'   => 'sol',
-                'id'     => $id,
-                'meta'   => $meta,
-                'lines'  => $lines,
+                'found'       => ($meta !== null || !empty($lines)),
+                'type'        => 'sol',
+                'id'          => $id,
+                'cutoff_date' => $cutoffDate,
+                'meta'        => $meta,
+                'lines'       => $lines,
             ];
         }
 
@@ -338,13 +350,24 @@ class DataProcessor
                     break;
                 }
             }
+            $solMeta = null;
+            if ($meta !== null && !empty($meta['solicitud'])) {
+                foreach (($mainCache['records'] ?? []) as $rec) {
+                    if (($rec['id'] ?? '') === $meta['solicitud']) {
+                        $solMeta = $rec;
+                        break;
+                    }
+                }
+            }
             $ocInfo = $details['oc'][$id] ?? null;
             return [
-                'found'  => ($meta !== null || $ocInfo !== null),
-                'type'   => 'oc',
-                'id'     => $id,
-                'meta'   => $meta,
-                'detail' => $ocInfo,
+                'found'       => ($meta !== null || $ocInfo !== null),
+                'type'        => 'oc',
+                'id'          => $id,
+                'cutoff_date' => $cutoffDate,
+                'meta'        => $meta,
+                'sol_meta'    => $solMeta,
+                'detail'      => $ocInfo,
             ];
         }
 
@@ -441,14 +464,13 @@ class DataProcessor
             if (is_array($cached)
                 && ($cached['excel_mtime'] ?? 0) === $excelMtime
                 && ($cached['sol_mtime'] ?? -1) === $solMtime
-                && ($cached['schema_v'] ?? 1) === 14
+                && ($cached['schema_v'] ?? 1) === 15
             ) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
         }
 
-        // Cargar líneas y SKUs únicos por solicitud desde details_cache.json
         $detailsData = file_exists($this->detailsCachePath)
             ? json_decode(file_get_contents($this->detailsCachePath), true)
             : [];
@@ -621,24 +643,56 @@ class DataProcessor
                     $proveedoresSet[$provName] = true;
                 }
 
+                // Tiempos exactos para línea de tiempo de la OC
+                $dSolAprob = ($row['ts_aprobacion_sol'] !== null && $row['ts_creacion_sol'] !== null)
+                    ? round(max(0, ($row['ts_aprobacion_sol'] - $row['ts_creacion_sol']) / 86400), 2)
+                    : null;
+
+                $dCompOc = ($row['ts_creacion_oc'] !== null && $row['ts_aprobacion_sol'] !== null)
+                    ? round(max(0, ($row['ts_creacion_oc'] - $row['ts_aprobacion_sol']) / 86400), 2)
+                    : null;
+
+                $dAprobOc = ($row['ts_aprobacion_oc'] !== null && $row['ts_creacion_oc'] !== null)
+                    ? round(max(0, ($row['ts_aprobacion_oc'] - $row['ts_creacion_oc']) / 86400), 2)
+                    : null;
+
+                $dToSapOc = null;
+                if ($row['ts_creacion_sap'] !== null && $row['ts_creacion_oc'] !== null) {
+                    $dToSapOc = round(max(0, ($row['ts_creacion_sap'] - $row['ts_creacion_oc']) / 86400), 2);
+                } elseif ($row['ts_creacion_oc'] !== null) {
+                    $dToSapOc = round(max(0, ($cutoffTs - $row['ts_creacion_oc']) / 86400), 2);
+                }
+
                 $spendRecords[] = [
-                    'oc_odoo'        => $row['no_oc_odoo'],
-                    'oc_sap'         => $row['no_oc_sap'],
-                    'solicitud'      => $solId,
-                    'ym'             => $ocYm,
-                    'fecha'          => $ocFecha,
-                    'sociedad'       => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
-                    'comprador'      => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
-                    'solicitado_por' => $row['solicitado_por'],
-                    'proveedor'      => $provName,
-                    'is_caja_chica'  => $isCajaChica,
-                    'divisa'         => $row['divisa'],
-                    'monto'          => $row['total_oc'],
-                    'estado_oc'      => $row['estado_oc'],
-                    'is_firm'        => $isFirm,
-                    'is_rfq'         => $isRfq,
-                    'is_cancelada'   => $isOcCancelada,
-                    'en_sap'         => ($row['no_oc_sap'] !== ''),
+                    'oc_odoo'          => $row['no_oc_odoo'],
+                    'oc_sap'           => $row['no_oc_sap'],
+                    'solicitud'        => $solId,
+                    'estado_sol'       => $row['estado_sol'],
+                    'ym'               => $ocYm,
+                    'fecha'            => $ocFecha,
+                    'sociedad'         => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
+                    'comprador'        => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
+                    'solicitado_por'   => $row['solicitado_por'],
+                    'autorizador_sol'  => $row['autorizador_sol'] !== '' ? $row['autorizador_sol'] : 'Sin asignar',
+                    'autorizador_oc_1' => $row['autorizador_oc_1'] !== '' ? $row['autorizador_oc_1'] : 'Sin asignar',
+                    'proveedor'        => $provName,
+                    'is_caja_chica'    => $isCajaChica,
+                    'divisa'           => $row['divisa'],
+                    'monto'            => $row['total_oc'],
+                    'estado_oc'        => $row['estado_oc'],
+                    'is_firm'          => $isFirm,
+                    'is_rfq'           => $isRfq,
+                    'is_cancelada'     => $isOcCancelada,
+                    'en_sap'           => ($row['no_oc_sap'] !== ''),
+                    'dt_creacion_sol'  => $this->formatTsDisplay($row['ts_creacion_sol']),
+                    'dt_aprob_sol'     => $this->formatTsDisplay($row['ts_aprobacion_sol']),
+                    'dt_creacion_oc'   => $this->formatTsDisplay($row['ts_creacion_oc']),
+                    'dt_aprob_oc'      => $this->formatTsDisplay($row['ts_aprobacion_oc']),
+                    'dt_creacion_sap'  => $this->formatTsDisplay($row['ts_creacion_sap']),
+                    'd_sol_aprob'      => $dSolAprob,
+                    'd_comp_oc'        => $dCompOc,
+                    'd_aprob_oc'       => $dAprobOc,
+                    'd_to_sap_oc'      => $dToSapOc,
                 ];
             }
 
@@ -690,7 +744,6 @@ class DataProcessor
 
             $excluida = $sol['is_rechazada'] || $sol['is_borrador'] || ($sol['has_any_oc'] && $sol['all_ocs_canceled']);
 
-            // Calcular líneas de solicitud y códigos SKU únicos desde Solicitudes.xlsx
             $linesForSol = $solLinesMap[$solId] ?? [];
             $lineasCount = count($linesForSol);
             $skusSet = [];
@@ -761,6 +814,10 @@ class DataProcessor
                 'ym'                 => $ym,
                 'quincena'           => $quincena,
                 'fecha'              => date('Y-m-d', $tsCreacionSol),
+                'dt_creacion_sol'    => $this->formatTsDisplay($tsCreacionSol),
+                'dt_aprob_sol'       => $this->formatTsDisplay($tsAprobacionSol),
+                'dt_first_oc'        => $this->formatTsDisplay($firstOcOdooTs),
+                'dt_first_sap'       => $this->formatTsDisplay($firstSapTs),
                 'sociedad'           => $sol['sociedad'],
                 'comprador'          => $sol['comprador'],
                 'autorizador_sol'    => $sol['autorizador_sol'],
@@ -797,7 +854,7 @@ class DataProcessor
         sort($listSolicitantes);
 
         $output = [
-            'schema_v'      => 14,
+            'schema_v'      => 15,
             'excel_mtime'   => $excelMtime,
             'sol_mtime'     => $solMtime,
             'generated_at'  => date('Y-m-d H:i:s'),

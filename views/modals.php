@@ -29,7 +29,7 @@
 
         <div class="overflow-auto flex-1 p-5">
             <p class="text-[11px] text-slate-400 dark:text-gray-500 mb-2">
-                * Haz clic en cualquier número de <strong>Solicitud</strong> o de <strong>OC Odoo</strong> para ver su desglose de productos, cantidades y precios.
+                * Haz clic en cualquier número de <strong>Solicitud</strong> o de <strong>OC Odoo</strong> para ver su línea de tiempo, productos, cantidades y precios.
             </p>
             <table class="w-full text-xs text-left border-collapse">
                 <thead id="modalTableHead" class="bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 sticky top-0"></thead>
@@ -39,9 +39,9 @@
     </div>
 </div>
 
-<!-- Modal 2 (Superpuesto z-50): Ficha Detallada de Solicitud u Orden de Compra -->
+<!-- Modal 2 (Superpuesto z-50): Ficha Detallada con Línea de Tiempo de Solicitud u OC -->
 <div id="docDetailModal" class="fixed inset-0 z-50 hidden bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-white dark:bg-gray-900 border-2 border-cresta-navy dark:border-indigo-500 rounded-2xl max-w-4xl w-full max-h-[86vh] flex flex-col shadow-2xl">
+    <div class="bg-white dark:bg-gray-900 border-2 border-cresta-navy dark:border-indigo-500 rounded-2xl max-w-4xl w-full max-h-[88vh] flex flex-col shadow-2xl">
         <div class="p-5 border-b border-slate-200 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-50/70 dark:bg-gray-800/50 rounded-t-2xl">
             <div>
                 <div class="flex items-center gap-2">
@@ -63,6 +63,9 @@
         </div>
 
         <div id="docModalMetaBox" class="px-5 py-3.5 border-b border-slate-200 dark:border-gray-800 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-white dark:bg-gray-900"></div>
+
+        <!-- Línea de Tiempo de Trazabilidad y Tiempos de Autorización -->
+        <div id="docModalTimelineBox" class="px-5 py-4 border-b border-slate-200 dark:border-gray-800 bg-slate-50/60 dark:bg-gray-800/30"></div>
 
         <div class="overflow-auto flex-1 p-5">
             <table class="w-full text-xs text-left border-collapse">

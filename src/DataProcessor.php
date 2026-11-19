@@ -95,7 +95,7 @@ class DataProcessor
         $oldHash = file_exists($targetPath) ? md5_file($targetPath) : '';
 
         if ($newHash !== $oldHash) {
-            rename($tmpFile, $this->excelPath === $targetPath ? $this->excelPath : $targetPath);
+            rename($tmpFile, $targetPath);
             touch($targetPath);
             return ['synced' => true, 'source' => 'onedrive', 'message' => 'Actualizado'];
         }
@@ -189,15 +189,6 @@ class DataProcessor
             return strtoupper(trim($m[1]));
         }
         return mb_strtoupper($clean);
-    }
-
-    private function formatTsDisplay(?int $ts): ?string
-    {
-        if ($ts === null || $ts <= 0) {
-            return null;
-        }
-        $timeStr = date('H:i', $ts);
-        return $timeStr === '00:00' ? date('Y-m-d', $ts) : date('Y-m-d H:i', $ts);
     }
 
     private function rebuildDetailsCacheIfNeeded(bool $force = false): void
@@ -351,14 +342,16 @@ class DataProcessor
                 }
             }
             $solMeta = null;
-            if ($meta !== null && !empty($meta['solicitud'])) {
+            $solId = $meta['solicitud'] ?? '';
+            if ($solId !== '') {
                 foreach (($mainCache['records'] ?? []) as $rec) {
-                    if (($rec['id'] ?? '') === $meta['solicitud']) {
+                    if (($rec['id'] ?? '') === $solId) {
                         $solMeta = $rec;
                         break;
                     }
                 }
             }
+
             $ocInfo = $details['oc'][$id] ?? null;
             return [
                 'found'       => ($meta !== null || $ocInfo !== null),
@@ -458,13 +451,15 @@ class DataProcessor
 
         $excelMtime = filemtime($this->excelPath);
         $solMtime   = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
+        $ocMtime    = file_exists($this->ocExcelPath) ? filemtime($this->ocExcelPath) : 0;
 
         if (!$forceSync && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
             if (is_array($cached)
                 && ($cached['excel_mtime'] ?? 0) === $excelMtime
                 && ($cached['sol_mtime'] ?? -1) === $solMtime
-                && ($cached['schema_v'] ?? 1) === 15
+                && ($cached['oc_mtime'] ?? -1) === $ocMtime
+                && ($cached['schema_v'] ?? 1) === 16
             ) {
                 $cached['sync_info'] = $syncStatus;
                 return $cached;
@@ -475,6 +470,21 @@ class DataProcessor
             ? json_decode(file_get_contents($this->detailsCachePath), true)
             : [];
         $solLinesMap = $detailsData['sol'] ?? [];
+        $ocDetailMap = $detailsData['oc'] ?? [];
+
+        // Precalcular totales y proveedor por No. OC desde OC.xlsx como respaldo automático
+        $ocSummaryFromDetail = [];
+        foreach ($ocDetailMap as $ocCode => $ocInfo) {
+            $sumTot = 0.0;
+            foreach (($ocInfo['lineas'] ?? []) as $ln) {
+                $sumTot += (float)($ln['total'] ?? 0);
+            }
+            $ocSummaryFromDetail[$ocCode] = [
+                'proveedor' => trim((string)($ocInfo['proveedor'] ?? '')),
+                'divisa'    => strtoupper(trim((string)($ocInfo['divisa'] ?? 'GTQ'))),
+                'total'     => round($sumTot, 2),
+            ];
+        }
 
         $rawRows = SimpleXLSX::parse($this->excelPath);
         if (count($rawRows) < 2) {
@@ -487,12 +497,15 @@ class DataProcessor
             $colMap[mb_strtolower($hName)] = $idx;
         }
 
-        $getCol = function (array $row, string $name) use ($colMap) {
-            $key = mb_strtolower(trim($name));
-            if (!isset($colMap[$key])) {
-                return null;
+        $getCol = function (array $row, array|string $names) use ($colMap) {
+            $list = is_array($names) ? $names : [$names];
+            foreach ($list as $name) {
+                $key = mb_strtolower(trim($name));
+                if (isset($colMap[$key])) {
+                    return $row[$colMap[$key]] ?? null;
+                }
             }
-            return $row[$colMap[$key]] ?? null;
+            return null;
         };
 
         $lastHeaderData = [
@@ -528,19 +541,34 @@ class DataProcessor
 
             $fCreacionSolTs   = SimpleXLSX::excelDateToTimestamp($lastHeaderData['Fcreacion Solicitud']);
             $fAprobacionSolTs = SimpleXLSX::excelDateToTimestamp($lastHeaderData['Aprobacion Solicitud']);
-            $fCreacionOcTs    = SimpleXLSX::excelDateToTimestamp($getCol($r, 'Fcreacion OC Odoo'));
-            $fAprobacionOcTs  = SimpleXLSX::excelDateToTimestamp($getCol($r, 'Aprobacion OC Odoo'));
-            $fCreacionSapTs   = SimpleXLSX::excelDateToTimestamp($getCol($r, 'Fcreacion OC SAP'));
+            $fCreacionOcTs    = SimpleXLSX::excelDateToTimestamp($getCol($r, ['Fcreacion OC Odoo', 'Fecha OC Odoo']));
+            $fAprobacionOcTs  = SimpleXLSX::excelDateToTimestamp($getCol($r, ['Aprobacion OC Odoo']));
+            $fCreacionSapTs   = SimpleXLSX::excelDateToTimestamp($getCol($r, ['Fcreacion OC SAP', 'Fecha OC SAP']));
 
             if ($fCreacionSolTs && $fCreacionSolTs > $maxDateTs) {
                 $maxDateTs = $fCreacionSolTs;
             }
 
-            $rawTotalOc = $getCol($r, 'Total OC');
+            $noOcOdoo = trim((string)($getCol($r, ['NO. OC Odoo', 'No. OC Odoo', 'No. OC']) ?? ''));
+            $ocFallback = ($noOcOdoo !== '' && isset($ocSummaryFromDetail[$noOcOdoo])) ? $ocSummaryFromDetail[$noOcOdoo] : null;
+
+            $rawTotalOc = $getCol($r, ['Total OC', 'Total', 'Monto OC']);
             $totalOc = is_numeric($rawTotalOc) ? round((float)$rawTotalOc, 2) : 0.0;
-            $divisa  = strtoupper(trim((string)($getCol($r, 'Divisa') ?? 'GTQ')));
+            if ($totalOc == 0.0 && $ocFallback !== null && $ocFallback['total'] > 0) {
+                $totalOc = $ocFallback['total'];
+            }
+
+            $divisa = strtoupper(trim((string)($getCol($r, ['Divisa', 'Moneda']) ?? '')));
+            if ($divisa === '' && $ocFallback !== null && $ocFallback['divisa'] !== '') {
+                $divisa = $ocFallback['divisa'];
+            }
             if ($divisa === '') {
                 $divisa = 'GTQ';
+            }
+
+            $proveedor = trim((string)($getCol($r, ['Proveedor', 'Supplier', 'Partner']) ?? ''));
+            if (($proveedor === '' || $proveedor === 'Sin proveedor') && $ocFallback !== null && $ocFallback['proveedor'] !== '') {
+                $proveedor = $ocFallback['proveedor'];
             }
 
             $solicitanteName = trim((string)($lastHeaderData['Solicitado por'] ?? ''));
@@ -553,13 +581,13 @@ class DataProcessor
                 'estado_sol'         => trim((string)($lastHeaderData['Estado Solicitud'] ?? '')),
                 'solicitado_por'     => $solicitanteName,
                 'autorizador_sol'    => trim((string)($lastHeaderData['Autorizador Solicitud'] ?? '')),
-                'autorizador_oc_1'   => trim((string)($getCol($r, 'Autorizador 1') ?? '')),
+                'autorizador_oc_1'   => trim((string)($getCol($r, ['Autorizador 1', 'Autorizador OC']) ?? '')),
                 'comprador'          => trim((string)($lastHeaderData['Comprador'] ?? 'Sin asignar')),
                 'sociedad'           => trim((string)($lastHeaderData['Sociedad'] ?? 'Sin sociedad')),
-                'no_oc_odoo'         => trim((string)($getCol($r, 'NO. OC Odoo') ?? '')),
-                'no_oc_sap'          => trim((string)($getCol($r, 'NO. OC SAP') ?? '')),
-                'estado_oc'          => trim((string)($getCol($r, 'Estado OC') ?? '')),
-                'proveedor'          => trim((string)($getCol($r, 'Proveedor') ?? '')),
+                'no_oc_odoo'         => $noOcOdoo,
+                'no_oc_sap'          => trim((string)($getCol($r, ['NO. OC SAP', 'No. OC SAP']) ?? '')),
+                'estado_oc'          => trim((string)($getCol($r, ['Estado OC']) ?? '')),
+                'proveedor'          => $proveedor,
                 'divisa'             => $divisa,
                 'total_oc'           => $totalOc,
                 'ts_creacion_sol'    => $fCreacionSolTs,
@@ -643,38 +671,43 @@ class DataProcessor
                     $proveedoresSet[$provName] = true;
                 }
 
-                // Tiempos exactos para línea de tiempo de la OC
-                $dSolAprob = ($row['ts_aprobacion_sol'] !== null && $row['ts_creacion_sol'] !== null)
-                    ? round(max(0, ($row['ts_aprobacion_sol'] - $row['ts_creacion_sol']) / 86400), 2)
+                $dAprobSolOc = ($row['ts_aprobacion_sol'] && $row['ts_aprobacion_sol'] >= $row['ts_creacion_sol'])
+                    ? round(($row['ts_aprobacion_sol'] - $row['ts_creacion_sol']) / 86400, 2)
                     : null;
 
-                $dCompOc = ($row['ts_creacion_oc'] !== null && $row['ts_aprobacion_sol'] !== null)
+                $dCompOc = ($row['ts_aprobacion_sol'] && $row['ts_creacion_oc'])
                     ? round(max(0, ($row['ts_creacion_oc'] - $row['ts_aprobacion_sol']) / 86400), 2)
                     : null;
 
-                $dAprobOc = ($row['ts_aprobacion_oc'] !== null && $row['ts_creacion_oc'] !== null)
+                $dAprobOc = ($row['ts_creacion_oc'] && $row['ts_aprobacion_oc'])
                     ? round(max(0, ($row['ts_aprobacion_oc'] - $row['ts_creacion_oc']) / 86400), 2)
                     : null;
 
-                $dToSapOc = null;
-                if ($row['ts_creacion_sap'] !== null && $row['ts_creacion_oc'] !== null) {
-                    $dToSapOc = round(max(0, ($row['ts_creacion_sap'] - $row['ts_creacion_oc']) / 86400), 2);
-                } elseif ($row['ts_creacion_oc'] !== null) {
-                    $dToSapOc = round(max(0, ($cutoffTs - $row['ts_creacion_oc']) / 86400), 2);
-                }
+                $dSapOc = ($row['ts_creacion_oc'] && $row['ts_creacion_sap'])
+                    ? round(max(0, ($row['ts_creacion_sap'] - $row['ts_creacion_oc']) / 86400), 2)
+                    : null;
 
                 $spendRecords[] = [
                     'oc_odoo'          => $row['no_oc_odoo'],
                     'oc_sap'           => $row['no_oc_sap'],
                     'solicitud'        => $solId,
                     'estado_sol'       => $row['estado_sol'],
+                    'autorizador_sol'  => $row['autorizador_sol'],
+                    'autorizador_oc_1' => $row['autorizador_oc_1'],
                     'ym'               => $ocYm,
                     'fecha'            => $ocFecha,
+                    'f_creacion_sol'   => $row['ts_creacion_sol'] ? date('Y-m-d H:i', $row['ts_creacion_sol']) : null,
+                    'f_aprobacion_sol' => $row['ts_aprobacion_sol'] ? date('Y-m-d H:i', $row['ts_aprobacion_sol']) : null,
+                    'f_creacion_oc'    => $row['ts_creacion_oc'] ? date('Y-m-d H:i', $row['ts_creacion_oc']) : null,
+                    'f_aprobacion_oc'  => $row['ts_aprobacion_oc'] ? date('Y-m-d H:i', $row['ts_aprobacion_oc']) : null,
+                    'f_creacion_sap'   => $row['ts_creacion_sap'] ? date('Y-m-d H:i', $row['ts_creacion_sap']) : null,
+                    'd_aprob_sol'      => $dAprobSolOc,
+                    'd_comprador'      => $dCompOc,
+                    'd_aprob_oc'       => $dAprobOc,
+                    'd_to_sap_oc'      => $dSapOc,
                     'sociedad'         => $row['sociedad'] !== '' ? $row['sociedad'] : 'Sin sociedad',
                     'comprador'        => $row['comprador'] !== '' ? $row['comprador'] : 'Sin asignar',
                     'solicitado_por'   => $row['solicitado_por'],
-                    'autorizador_sol'  => $row['autorizador_sol'] !== '' ? $row['autorizador_sol'] : 'Sin asignar',
-                    'autorizador_oc_1' => $row['autorizador_oc_1'] !== '' ? $row['autorizador_oc_1'] : 'Sin asignar',
                     'proveedor'        => $provName,
                     'is_caja_chica'    => $isCajaChica,
                     'divisa'           => $row['divisa'],
@@ -684,15 +717,6 @@ class DataProcessor
                     'is_rfq'           => $isRfq,
                     'is_cancelada'     => $isOcCancelada,
                     'en_sap'           => ($row['no_oc_sap'] !== ''),
-                    'dt_creacion_sol'  => $this->formatTsDisplay($row['ts_creacion_sol']),
-                    'dt_aprob_sol'     => $this->formatTsDisplay($row['ts_aprobacion_sol']),
-                    'dt_creacion_oc'   => $this->formatTsDisplay($row['ts_creacion_oc']),
-                    'dt_aprob_oc'      => $this->formatTsDisplay($row['ts_aprobacion_oc']),
-                    'dt_creacion_sap'  => $this->formatTsDisplay($row['ts_creacion_sap']),
-                    'd_sol_aprob'      => $dSolAprob,
-                    'd_comp_oc'        => $dCompOc,
-                    'd_aprob_oc'       => $dAprobOc,
-                    'd_to_sap_oc'      => $dToSapOc,
                 ];
             }
 
@@ -814,10 +838,10 @@ class DataProcessor
                 'ym'                 => $ym,
                 'quincena'           => $quincena,
                 'fecha'              => date('Y-m-d', $tsCreacionSol),
-                'dt_creacion_sol'    => $this->formatTsDisplay($tsCreacionSol),
-                'dt_aprob_sol'       => $this->formatTsDisplay($tsAprobacionSol),
-                'dt_first_oc'        => $this->formatTsDisplay($firstOcOdooTs),
-                'dt_first_sap'       => $this->formatTsDisplay($firstSapTs),
+                'f_creacion_sol'     => date('Y-m-d H:i', $tsCreacionSol),
+                'f_aprobacion_sol'   => $tsAprobacionSol ? date('Y-m-d H:i', $tsAprobacionSol) : null,
+                'f_creacion_oc'      => $firstOcOdooTs ? date('Y-m-d H:i', $firstOcOdooTs) : null,
+                'f_creacion_sap'     => $firstSapTs ? date('Y-m-d H:i', $firstSapTs) : null,
                 'sociedad'           => $sol['sociedad'],
                 'comprador'          => $sol['comprador'],
                 'autorizador_sol'    => $sol['autorizador_sol'],
@@ -854,9 +878,10 @@ class DataProcessor
         sort($listSolicitantes);
 
         $output = [
-            'schema_v'      => 15,
+            'schema_v'      => 16,
             'excel_mtime'   => $excelMtime,
             'sol_mtime'     => $solMtime,
+            'oc_mtime'      => $ocMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),
             'sync_info'     => $syncStatus,

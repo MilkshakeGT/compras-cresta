@@ -105,8 +105,43 @@ function formatYearQuarterShort(yq) {
     return `${qId} ${y}`;
 }
 
+// Formatea a: Un Nombre + Un Apellido (ej. "Jaqueline Karina Solares Alvarez" -> "Jaqueline Solares")
 function shortName(fullName) {
-    return String(fullName || '').split(' ').slice(0, 2).join(' ');
+    const clean = String(fullName || '').trim().replace(/\s+/g, ' ');
+    if (!clean) return '';
+
+    const lower = clean.toLowerCase();
+    if (lower === 'sin asignar' || lower === 'sin solicitante') {
+        return clean;
+    }
+
+    const parts = clean.split(' ');
+    if (parts.length <= 2) {
+        return clean;
+    }
+
+    // Si tiene 3 palabras (ej. "Kevin Saravia Garcia" o "Juan De Leon")
+    const particles = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'san', 'santa']);
+    if (parts.length === 3) {
+        if (particles.has(parts[1].toLowerCase())) {
+            return `${parts[0]} ${parts[1]} ${parts[2]}`;
+        }
+        return `${parts[0]} ${parts[1]}`;
+    }
+
+    // 4 o más palabras: [PrimerNombre, SegundoNombre, PrimerApellido, SegundoApellido...]
+    // Detectar partículas compuestas como "Erick De Jesús García Cruz" -> "Erick García"
+    let surnameIdx = 2;
+    if (particles.has(parts[1].toLowerCase()) && parts.length >= 4) {
+        // Segundo nombre compuesto (ej. "De Jesús") -> el primer apellido empieza en índice 3
+        surnameIdx = 3;
+    }
+
+    if (particles.has(parts[surnameIdx]?.toLowerCase()) && parts[surnameIdx + 1]) {
+        return `${parts[0]} ${parts[surnameIdx]} ${parts[surnameIdx + 1]}`;
+    }
+
+    return `${parts[0]} ${parts[surnameIdx] || parts[1]}`;
 }
 
 function shortSupplier(name) {
@@ -391,14 +426,14 @@ function initFilters() {
     RAW_DATA.filters.compradores.forEach(c => {
         const opt = document.createElement('option');
         opt.value = c;
-        opt.textContent = c;
+        opt.textContent = shortName(c);
         selComp.appendChild(opt);
     });
 
     (RAW_DATA.filters.solicitantes || []).forEach(sol => {
         const opt = document.createElement('option');
         opt.value = sol;
-        opt.textContent = sol;
+        opt.textContent = shortName(sol);
         selSol.appendChild(opt);
     });
 

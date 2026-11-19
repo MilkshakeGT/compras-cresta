@@ -42,9 +42,27 @@ try {
 
 $syncInfo    = $payload['sync_info'] ?? [];
 $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
-$verExport   = file_exists(__DIR__ . '/assets/js/export.js') ? filemtime(__DIR__ . '/assets/js/export.js') : time();
-$verApp      = file_exists(__DIR__ . '/assets/js/app.js') ? filemtime(__DIR__ . '/assets/js/app.js') : time();
-$assetVer    = "1.08.{$verApp}.{$verExport}";
+
+// Versionado dinámico basado en la última modificación de TODOS los assets
+$assetFiles = [
+    __DIR__ . '/assets/css/app.css',
+    __DIR__ . '/assets/js/app.js',
+    __DIR__ . '/assets/js/export.js',
+    __DIR__ . '/assets/js/modals.js',
+    __DIR__ . '/assets/js/module_cycle.js',
+    __DIR__ . '/assets/js/module_spend.js',
+    __DIR__ . '/assets/js/module_supplier.js',
+];
+$maxAssetMtime = 0;
+foreach ($assetFiles as $af) {
+    if (file_exists($af)) {
+        $mt = (int)filemtime($af);
+        if ($mt > $maxAssetMtime) {
+            $maxAssetMtime = $mt;
+        }
+    }
+}
+$assetVer = '1.09.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
 ?>
 <!DOCTYPE html>
 <html lang="es">

@@ -112,7 +112,7 @@ function renderSolLink(solId) {
     const clean = String(solId ?? '').trim();
     if (!clean) return '—';
     return `<button type="button" onclick="event.stopPropagation(); openDocumentDetail('sol', '${escapeHtml(clean)}')"
-        title="Ver detalle de productos solicitados en ${escapeHtml(clean)}"
+        title="Ver línea de tiempo y productos solicitados en ${escapeHtml(clean)}"
         class="font-bold text-cresta-navy dark:text-indigo-300 underline decoration-dotted hover:decoration-solid hover:text-cresta-red dark:hover:text-white transition cursor-pointer">
         ${escapeHtml(clean)}
     </button>`;
@@ -124,7 +124,7 @@ function renderOcLinks(ocListStr) {
     const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
     return parts.map(code => `
         <button type="button" onclick="event.stopPropagation(); openDocumentDetail('oc', '${escapeHtml(code)}')"
-            title="Ver líneas, precios y proveedor de ${escapeHtml(code)}"
+            title="Ver línea de tiempo, precios y proveedor de ${escapeHtml(code)}"
             class="inline-block font-semibold text-cresta-blue dark:text-sky-400 underline decoration-dotted hover:decoration-solid hover:text-cresta-red dark:hover:text-white transition cursor-pointer">
             ${escapeHtml(code)}
         </button>
@@ -387,6 +387,268 @@ function exportAuditExcel() {
 }
 
 // =========================================================================
+// RENDERIZADOR DE LÍNEA DE TIEMPO EJECUTIVA (SOLICITUD Y OC)
+// =========================================================================
+function buildTimelineStepHtml(step, isLast) {
+    const palette = {
+        done: {
+            dot: 'bg-emerald-600 text-white border-emerald-600',
+            card: 'bg-white dark:bg-gray-900 border-emerald-200 dark:border-emerald-800/70',
+            badge: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800',
+            icon: '✓'
+        },
+        active: {
+            dot: 'bg-cresta-navy dark:bg-indigo-600 text-white border-cresta-navy',
+            card: 'bg-white dark:bg-gray-900 border-slate-200 dark:border-gray-700',
+            badge: 'bg-slate-100 text-cresta-navy border-slate-300 dark:bg-gray-800 dark:text-indigo-300 dark:border-gray-700',
+            icon: '●'
+        },
+        warn: {
+            dot: 'bg-amber-500 text-white border-amber-500',
+            card: 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800',
+            badge: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800',
+            icon: '⏳'
+        },
+        danger: {
+            dot: 'bg-cresta-red text-white border-cresta-red',
+            card: 'bg-red-50/50 dark:bg-red-950/20 border-red-300 dark:border-red-800',
+            badge: 'bg-red-100 text-cresta-red border-red-300 dark:bg-red-950 dark:text-red-300 dark:border-red-800',
+            icon: '!'
+        }
+    };
+
+    const st = palette[step.status] || palette.active;
+
+    return `
+        <div class="flex-1 min-w-[175px] relative">
+            <div class="flex items-center gap-2 mb-1.5">
+                <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold border shrink-0 ${st.dot}">
+                    ${st.icon}
+                </span>
+                <span class="text-[11px] font-bold text-slate-800 dark:text-gray-200 truncate">${escapeHtml(step.title)}</span>
+                ${!isLast ? '<div class="hidden md:block flex-1 h-0.5 bg-slate-300 dark:bg-gray-700"></div>' : ''}
+            </div>
+            <div class="p-2.5 rounded-xl border text-[11px] space-y-1 ${st.card}">
+                <div class="flex items-center justify-between gap-1">
+                    <span class="font-bold text-slate-700 dark:text-gray-200">${escapeHtml(step.dateText)}</span>
+                    ${step.deltaText ? `<span class="px-1.5 py-0.5 rounded border text-[10px] font-bold shrink-0 ${st.badge}">${escapeHtml(step.deltaText)}</span>` : ''}
+                </div>
+                <div class="text-[10px] text-slate-500 dark:text-gray-400 truncate" title="${escapeHtml(step.actor || '')}">
+                    ${escapeHtml(step.actor || '')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderDocumentTimeline(type, data) {
+    const box = document.getElementById('docModalTimelineBox');
+    if (!box) return;
+
+    const cutoff = data.cutoff_date || RAW_DATA.cutoff_date;
+
+    if (type === 'sol') {
+        const m = data.meta;
+        if (!m) {
+            box.innerHTML = `<div class="text-xs text-slate-400">Sin registros de fechas en DB.xlsx para construir la línea de tiempo.</div>`;
+            return;
+        }
+
+        const steps = [];
+        // Paso 1: Creación Solicitud
+        steps.push({
+            status: 'done',
+            title: '1. Creación Solicitud',
+            dateText: m.dt_creacion_sol || m.fecha || '—',
+            deltaText: 'Inicio',
+            actor: `Solicitó: ${shortName(m.solicitado_por || '—')}`
+        });
+
+        // Paso 2: Autorización de Solicitud
+        if (m.aprobada && m.dt_aprob_sol) {
+            const dAprob = m.d_aprob_sol !== null && m.d_aprob_sol !== undefined ? `+${Number(m.d_aprob_sol).toFixed(1)} d` : 'Aprobada';
+            steps.push({
+                status: 'done',
+                title: '2. Autorización Solicitud',
+                dateText: m.dt_aprob_sol,
+                deltaText: dAprob,
+                actor: `Autorizó: ${shortName(m.autorizador_sol || '—')}`
+            });
+        } else if (m.is_rechazada) {
+            steps.push({
+                status: 'danger',
+                title: '2. Estatus Solicitud',
+                dateText: 'Rechazada',
+                deltaText: 'Detenida',
+                actor: `Autorizador: ${shortName(m.autorizador_sol || '—')}`
+            });
+        } else {
+            steps.push({
+                status: 'warn',
+                title: '2. Autorización Solicitud',
+                dateText: `Pendiente (${m.estado_sol || 'Sin aprobar'})`,
+                deltaText: `${Number(m.edad_dias || 0).toFixed(1)} d abierta`,
+                actor: `Asignado a: ${shortName(m.autorizador_sol || '—')}`
+            });
+        }
+
+        // Paso 3: Gestión de Compra (OC Odoo / SAP)
+        if (m.tiene_oc_sap) {
+            const dTot = m.d_ciclo_total !== null && m.d_ciclo_total !== undefined ? `Ciclo: ${Number(m.d_ciclo_total).toFixed(1)} d` : 'En SAP';
+            steps.push({
+                status: 'done',
+                title: '3. Orden en SAP',
+                dateText: m.dt_first_sap || 'Sincronizada',
+                deltaText: dTot,
+                actor: `OC: ${m.oc_odoo || '—'} · ${shortName(m.comprador || '')}`
+            });
+        } else if (m.tiene_oc_odoo) {
+            const dComp = m.d_comprador !== null && m.d_comprador !== undefined ? `OC en +${Number(m.d_comprador).toFixed(1)} d` : 'OC creada';
+            steps.push({
+                status: 'warn',
+                title: '3. OC Odoo (Sin SAP)',
+                dateText: m.dt_first_oc || 'En proceso',
+                deltaText: dComp,
+                actor: `${m.oc_odoo || ''} (${m.estado_oc || 'Pendiente SAP'})`
+            });
+        } else if (m.aprobada && !m.is_rechazada) {
+            const dWait = m.d_comprador !== null && m.d_comprador !== undefined ? `${Number(m.d_comprador).toFixed(1)} d sin OC` : 'En cola';
+            steps.push({
+                status: 'warn',
+                title: '3. Gestión Comprador',
+                dateText: 'Sin OC en Odoo aún',
+                deltaText: dWait,
+                actor: `Comprador: ${shortName(m.comprador || '—')}`
+            });
+        }
+
+        box.innerHTML = `
+            <div class="flex items-center justify-between mb-2.5">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-cresta-navy dark:text-indigo-300">
+                    Línea de Tiempo y Tiempos de Autorización
+                </span>
+                <span class="text-[10px] text-slate-400">Corte de referencia: ${escapeHtml(cutoff)}</span>
+            </div>
+            <div class="flex flex-col md:flex-row gap-3">
+                ${steps.map((s, idx) => buildTimelineStepHtml(s, idx === steps.length - 1)).join('')}
+            </div>
+        `;
+        return;
+    }
+
+    if (type === 'oc') {
+        const m = data.meta;
+        const sm = data.sol_meta || {};
+
+        if (!m && !sm.id) {
+            box.innerHTML = `<div class="text-xs text-slate-400">Sin registros de fechas en DB.xlsx para esta orden de compra.</div>`;
+            return;
+        }
+
+        const dtCreSol = (m && m.dt_creacion_sol) || sm.dt_creacion_sol || sm.fecha || '—';
+        const dtAprSol = (m && m.dt_aprob_sol) || sm.dt_aprob_sol || null;
+        const dtCreOc  = (m && m.dt_creacion_oc) || (m && m.fecha) || '—';
+        const dtAprOc  = (m && m.dt_aprob_oc) || null;
+        const dtSap    = (m && m.dt_creacion_sap) || null;
+
+        const dSolAprob = m && m.d_sol_aprob !== null && m.d_sol_aprob !== undefined ? m.d_sol_aprob : sm.d_aprob_sol;
+        const dCompOc   = m && m.d_comp_oc !== null && m.d_comp_oc !== undefined ? m.d_comp_oc : sm.d_comprador;
+        const dAprobOc  = m && m.d_aprob_oc !== null && m.d_aprob_oc !== undefined ? m.d_aprob_oc : null;
+
+        const steps = [];
+
+        // Hito 1: Creación de Solicitud
+        steps.push({
+            status: 'done',
+            title: '1. Creación Solicitud',
+            dateText: dtCreSol,
+            deltaText: (m && m.solicitud) ? m.solicitud : 'Origen',
+            actor: `Solicitó: ${shortName((m && m.solicitado_por) || sm.solicitado_por || '—')}`
+        });
+
+        // Hito 2: Aprobación de Solicitud
+        if (dtAprSol) {
+            steps.push({
+                status: 'done',
+                title: '2. Aprobación Solicitud',
+                dateText: dtAprSol,
+                deltaText: dSolAprob !== null && dSolAprob !== undefined ? `+${Number(dSolAprob).toFixed(1)} d` : 'Aprobada',
+                actor: `Autorizó: ${shortName((m && m.autorizador_sol) || sm.autorizador_sol || '—')}`
+            });
+        } else {
+            steps.push({
+                status: 'warn',
+                title: '2. Aprobación Solicitud',
+                dateText: 'Sin fecha registrada',
+                deltaText: (m && m.estado_sol) || sm.estado_sol || 'Pendiente',
+                actor: `Autorizador: ${shortName((m && m.autorizador_sol) || sm.autorizador_sol || '—')}`
+            });
+        }
+
+        // Hito 3: Creación de OC en Odoo
+        steps.push({
+            status: 'done',
+            title: '3. Creación OC Odoo',
+            dateText: dtCreOc,
+            deltaText: dCompOc !== null && dCompOc !== undefined ? `+${Number(dCompOc).toFixed(1)} d` : data.id,
+            actor: `Comprador: ${shortName((m && m.comprador) || sm.comprador || '—')}`
+        });
+
+        // Hito 4: Aprobación OC / Envío a SAP (o estatus actual)
+        if (m && m.en_sap) {
+            const subDate = dtSap ? dtSap : (dtAprOc ? `Aprob. OC: ${dtAprOc}` : 'Sincronizada en SAP');
+            const deltaInfo = dAprobOc !== null && dAprobOc !== undefined ? `Aprob OC +${Number(dAprobOc).toFixed(1)} d` : `SAP ${m.oc_sap}`;
+            steps.push({
+                status: 'done',
+                title: `4. Aprobada y en SAP (${m.oc_sap})`,
+                dateText: subDate,
+                deltaText: deltaInfo,
+                actor: `Aut. OC: ${shortName(m.autorizador_oc_1 || '—')}`
+            });
+        } else if (m && m.is_cancelada) {
+            steps.push({
+                status: 'danger',
+                title: '4. Estatus OC: Cancelada',
+                dateText: dtAprOc || 'Cancelada en Odoo',
+                deltaText: 'Anulada',
+                actor: `Estado: ${m.estado_oc || 'Cancelado'}`
+            });
+        } else if (dtAprOc) {
+            const waitSap = m && m.d_to_sap_oc !== null ? `${Number(m.d_to_sap_oc).toFixed(1)} d sin SAP` : 'Pendiente SAP';
+            steps.push({
+                status: 'warn',
+                title: '4. OC Aprobada (Pend. SAP)',
+                dateText: dtAprOc,
+                deltaText: dAprobOc !== null ? `+${Number(dAprobOc).toFixed(1)} d aprob.` : waitSap,
+                actor: `Aut. OC: ${shortName((m && m.autorizador_oc_1) || '—')} · ${waitSap}`
+            });
+        } else {
+            const estadoActual = (m && m.estado_oc) ? m.estado_oc : 'Pendiente de aprobación';
+            const diasDetenida = m && m.d_to_sap_oc !== null ? `${Number(m.d_to_sap_oc).toFixed(1)} d abierta` : 'En curso';
+            steps.push({
+                status: 'warn',
+                title: '4. Pendiente Aprob. / SAP',
+                dateText: estadoActual,
+                deltaText: diasDetenida,
+                actor: `Autorizador 1: ${shortName((m && m.autorizador_oc_1) || 'Sin asignar')}`
+            });
+        }
+
+        box.innerHTML = `
+            <div class="flex items-center justify-between mb-2.5">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-cresta-navy dark:text-indigo-300">
+                    Línea de Tiempo Completa (Solicitud → Autorización → OC Odoo → SAP)
+                </span>
+                <span class="text-[10px] text-slate-400">Corte de referencia: ${escapeHtml(cutoff)}</span>
+            </div>
+            <div class="flex flex-col md:flex-row gap-3">
+                ${steps.map((s, idx) => buildTimelineStepHtml(s, idx === steps.length - 1)).join('')}
+            </div>
+        `;
+    }
+}
+
+// =========================================================================
 // MODAL 2: FICHA DETALLADA DE SOLICITUD U ORDEN DE COMPRA
 // =========================================================================
 async function openDocumentDetail(type, id) {
@@ -395,6 +657,7 @@ async function openDocumentDetail(type, id) {
     const badgeEl = document.getElementById('docModalBadge');
     const subBadgeEl = document.getElementById('docModalSubBadge');
     const metaBox = document.getElementById('docModalMetaBox');
+    const timelineBox = document.getElementById('docModalTimelineBox');
     const thead = document.getElementById('docModalTableHead');
     const tbody = document.getElementById('docModalTableBody');
     const tfoot = document.getElementById('docModalTableFoot');
@@ -404,6 +667,7 @@ async function openDocumentDetail(type, id) {
     subBadgeEl.textContent = 'Consultando...';
     titleEl.textContent = id;
     metaBox.innerHTML = `<div class="col-span-4 text-slate-400">Cargando información del documento...</div>`;
+    if (timelineBox) timelineBox.innerHTML = '';
     thead.innerHTML = '';
     tbody.innerHTML = '';
     tfoot.innerHTML = '';
@@ -420,6 +684,7 @@ async function openDocumentDetail(type, id) {
         }
 
         activeDocDetail = data;
+        renderDocumentTimeline(type, data);
 
         if (type === 'sol') {
             const m = data.meta || {};
@@ -519,10 +784,13 @@ function exportDocumentDetailExcel() {
     if (activeDocDetail.type === 'sol') {
         const m = activeDocDetail.meta || {};
         const lines = activeDocDetail.lines || [];
-        const headers = ['Solicitud', 'Fecha', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Linea', 'Producto Solicitado', 'Cantidad Solicitada'];
+        const headers = ['Solicitud', 'Fecha Creacion', 'Fecha Autorizacion', 'Dias Aprobacion', 'Autorizador', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Linea', 'Producto Solicitado', 'Cantidad Solicitada'];
         const dataRows = lines.map((l, idx) => [
             activeDocDetail.id,
-            m.fecha || '',
+            m.dt_creacion_sol || m.fecha || '',
+            m.dt_aprob_sol || '',
+            m.d_aprob_sol !== null && m.d_aprob_sol !== undefined ? Number(m.d_aprob_sol) : '',
+            m.autorizador_sol || '',
             m.sociedad || '',
             m.solicitado_por || '',
             m.comprador || '',
@@ -548,12 +816,17 @@ function exportDocumentDetailExcel() {
         const prov = d.proveedor || m.proveedor || '';
         const divisa = d.divisa || m.divisa || 'GTQ';
 
-        const headers = ['No. OC', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Proveedor', 'Comprador', 'Solicitante', 'Linea', 'Producto', 'Cantidad Comprada', 'Divisa', 'Precio Unitario', 'Total Linea'];
+        const headers = ['No. OC', 'OC SAP', 'Solicitud', 'Creacion Solicitud', 'Aprobacion Solicitud', 'Creacion OC Odoo', 'Aprobacion OC', 'Fecha SAP', 'Estado OC', 'Sociedad', 'Proveedor', 'Comprador', 'Solicitante', 'Linea', 'Producto', 'Cantidad Comprada', 'Divisa', 'Precio Unitario', 'Total Linea'];
         const dataRows = lines.map((l, idx) => [
             activeDocDetail.id,
             m.oc_sap || '',
             m.solicitud || '',
-            m.fecha || '',
+            m.dt_creacion_sol || '',
+            m.dt_aprob_sol || '',
+            m.dt_creacion_oc || m.fecha || '',
+            m.dt_aprob_oc || '',
+            m.dt_creacion_sap || '',
+            m.estado_oc || '',
             m.sociedad || '',
             prov,
             m.comprador || '',

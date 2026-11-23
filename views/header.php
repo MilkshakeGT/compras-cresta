@@ -11,45 +11,50 @@
              ================================================================= -->
         <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
 
-            <!-- Bloque Izquierdo: Marca + Título + Metadatos en línea -->
+            <!-- Bloque Izquierdo: Marca + Título Completo + Fechas de Corte y Odoo -->
             <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-navy dark:bg-cresta-red text-white tracking-wide shrink-0">
                         GRUPO CRESTA
                     </span>
-                    <h1 id="mainHeaderTitle" class="text-sm sm:text-base font-bold text-cresta-navy dark:text-white truncate">
+                    <h1 id="mainHeaderTitle" class="text-sm sm:text-base font-bold text-cresta-navy dark:text-white leading-tight">
                         Evolución del Ciclo de Compras · Grupo Cresta
                     </h1>
                 </div>
 
-                <div class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5 text-[11px] text-slate-500 dark:text-gray-400">
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-[11px] text-slate-500 dark:text-gray-400">
                     <span>
                         Corte: <strong class="text-slate-700 dark:text-gray-200"><?= htmlspecialchars((string)($payload['cutoff_date'] ?? date('Y-m-d'))) ?></strong>
                     </span>
                     <?php if (!empty($odooSyncInfo['last_sync'])): ?>
-                        <span class="hidden sm:inline text-slate-400 dark:text-gray-500" title="Última sincronización directa con Odoo">
+                        <span class="text-slate-400 dark:text-gray-500" title="Última sincronización directa con Odoo">
                             · Odoo: <?= htmlspecialchars((string)$odooSyncInfo['last_sync']) ?>
                         </span>
                     <?php endif; ?>
-                    <span class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded font-semibold <?= !empty($isManager)
-                        ? 'bg-indigo-50 text-cresta-navy dark:bg-indigo-950/80 dark:text-indigo-300'
-                        : 'bg-sky-50 text-cresta-blue dark:bg-sky-950/80 dark:text-sky-300' ?>">
+                </div>
+            </div>
+
+            <!-- Bloque Derecho: Fila Superior (Notificación + Usuario) y Fila Inferior (Módulos + Buscador + Acciones) -->
+            <div class="flex flex-col lg:items-end gap-1.5 shrink-0">
+
+                <!-- Subfila Superior: Notificación Verde + Badge de Usuario -->
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <?php if (!empty($uploadFeedback) && !empty($uploadFeedback['ok'])): ?>
+                        <div id="headerSyncBanner" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 text-[10px] font-semibold whitespace-nowrap">
+                            <span>✓ <?= htmlspecialchars((string)$uploadFeedback['message']) ?></span>
+                            <button type="button" onclick="document.getElementById('headerSyncBanner').remove()" class="ml-1 opacity-70 hover:opacity-100 font-bold" title="Ocultar aviso">✕</button>
+                        </div>
+                    <?php endif; ?>
+
+                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap <?= !empty($isManager)
+                        ? 'bg-indigo-50 text-cresta-navy border border-indigo-200 dark:bg-indigo-950/80 dark:text-indigo-300 dark:border-indigo-800'
+                        : 'bg-sky-50 text-cresta-blue border border-sky-200 dark:bg-sky-950/80 dark:text-sky-300 dark:border-sky-800' ?>">
                         👤 <?= htmlspecialchars((string)($currentUser['display_name'] ?? '')) ?>
                         <span class="opacity-75">(<?= !empty($isManager) ? 'Manager' : 'Comprador' ?>)</span>
                     </span>
                 </div>
-            </div>
 
-            <!-- Bloque Derecho: Notificación en una línea arriba + Módulos y Botones -->
-            <div class="flex flex-col lg:items-end gap-1 shrink-0">
-
-                <?php if (!empty($uploadFeedback) && !empty($uploadFeedback['ok'])): ?>
-                    <div id="headerSyncBanner" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 text-[10px] font-semibold whitespace-nowrap max-w-full overflow-x-auto">
-                        <span>✓ <?= htmlspecialchars((string)$uploadFeedback['message']) ?></span>
-                        <button type="button" onclick="document.getElementById('headerSyncBanner').remove()" class="ml-1 opacity-70 hover:opacity-100 font-bold" title="Ocultar aviso">✕</button>
-                    </div>
-                <?php endif; ?>
-
+                <!-- Subfila Inferior: Módulos + Buscador + Herramientas -->
                 <div class="flex flex-wrap items-center gap-1.5 text-xs">
                     <!-- Selector Principal de 3 Módulos -->
                     <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-0.5 border border-slate-200 dark:border-gray-700">

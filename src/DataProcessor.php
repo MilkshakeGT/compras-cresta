@@ -81,7 +81,7 @@ class DataProcessor
     private function buildAllowedBuyersLookup(?array $allowedBuyers): ?array
     {
         if ($allowedBuyers === null) {
-            return null; // null = Manager (acceso global)
+            return null;
         }
         $lookup = [];
         foreach ($allowedBuyers as $b) {
@@ -105,7 +105,7 @@ class DataProcessor
     }
 
     // =========================================================================
-    // INDEXACIÓN DE LÍNEAS CRUDAS DE SOLICITUDES Y ÓRDENES DE COMPRA (ODOO)
+    // INDEXACIÓN DE LÍNEAS CRUDAS DE SOLICITUDES Y ÓRDENES DE COMPRA (RESPALDO EXCEL)
     // =========================================================================
     private function rebuildDetailsCacheIfNeeded(bool $force = false): void
     {
@@ -114,16 +114,22 @@ class DataProcessor
 
         if (!$force && file_exists($this->detailsCachePath)) {
             $existing = json_decode(file_get_contents($this->detailsCachePath), true);
-            if (is_array($existing)
-                && ($existing['schema_v'] ?? 0) === 3
-                && ($existing['sol_mtime'] ?? -1) === $solMtime
-                && ($existing['oc_mtime'] ?? -1) === $ocMtime
-            ) {
-                return;
+            if (is_array($existing) && ($existing['schema_v'] ?? 0) === 3) {
+                // Si la caché proviene de Odoo API y ningún Excel es más reciente, conservarla
+                if (($existing['source'] ?? '') === 'odoo_api'
+                    && $solMtime <= (int)($existing['sol_mtime'] ?? 0)
+                    && $ocMtime <= (int)($existing['oc_mtime'] ?? 0)
+                ) {
+                    return;
+                }
+                if (($existing['sol_mtime'] ?? -1) === $solMtime
+                    && ($existing['oc_mtime'] ?? -1) === $ocMtime
+                ) {
+                    return;
+                }
             }
         }
 
-        // 1. Parseo de Líneas de Solicitud (purchase.request.line) con forward-fill
         $solDetails = [];
         if ($solMtime > 0) {
             $rows = SimpleXLSX::parse($this->solExcelPath);
@@ -164,7 +170,6 @@ class DataProcessor
             }
         }
 
-        // 2. Parseo de Líneas de Órdenes de Compra (purchase.order.line) con forward-fill
         $ocDetails = [];
         if ($ocMtime > 0) {
             $rows = SimpleXLSX::parse($this->ocExcelPath);
@@ -223,6 +228,7 @@ class DataProcessor
 
         $detailsPayload = [
             'schema_v'  => 3,
+            'source'    => 'excel_upload',
             'sol_mtime' => $solMtime,
             'oc_mtime'  => $ocMtime,
             'sol'       => $solDetails,
@@ -367,7 +373,6 @@ class DataProcessor
         $results = [];
         $maxResults = 400;
 
-        // 1. Buscar en Líneas de Solicitud (solo permitidas)
         foreach (($details['sol'] ?? []) as $solId => $lines) {
             $meta = $solMetaMap[$solId] ?? null;
             if ($allowedLookup !== null) {
@@ -413,7 +418,6 @@ class DataProcessor
             }
         }
 
-        // 2. Buscar en Líneas de Órdenes de Compra (solo permitidas)
         if (count($results) < $maxResults) {
             foreach (($details['oc'] ?? []) as $ocId => $ocInfo) {
                 $meta = $ocMetaMap[$ocId] ?? null;
@@ -567,7 +571,6 @@ class DataProcessor
         $allowedBuyers = array_values(array_filter(array_map('strval', (array)($user['odoo_buyers'] ?? []))));
         $allowedLookup = $this->buildAllowedBuyersLookup($allowedBuyers);
 
-        // 1. Precalcular promedio anónimo del equipo por mes y sociedad (sin exponer registros individuales)
         $teamBySocYm = [];
         $teamGlobalYm = [];
         foreach (($payload['records'] ?? []) as $r) {
@@ -596,7 +599,6 @@ class DataProcessor
             }
         }
 
-        // 2. Recortar estrictamente records, oc_records y spend_records a los compradores asignados
         $scopedRecords = array_values(array_filter(
             $payload['records'] ?? [],
             fn($r) => $this->isBuyerAllowed($allowedLookup, (string)($r['comprador'] ?? ''))
@@ -612,7 +614,6 @@ class DataProcessor
             fn($r) => $this->isBuyerAllowed($allowedLookup, (string)($r['comprador'] ?? ''))
         ));
 
-        // 3. Reconstruir catálogos de filtros visibles únicamente con los datos permitidos
         $socSet   = [];
         $compSet  = [];
         $solSet   = [];
@@ -648,7 +649,6 @@ class DataProcessor
             }
         }
 
-        // Asegurar que aparezcan en el selector los compradores asignados aunque no tengan datos en algún mes
         foreach ($allowedBuyers as $ab) {
             $compSet[$ab] = true;
         }
@@ -688,30 +688,39 @@ class DataProcessor
     }
 
     // =========================================================================
-    // MOTOR PRINCIPAL ETL DE SOLICITUDES Y OCs (purchase.request)
+    // MOTOR PRINCIPAL ETL (CACHÉ ODOO API O RESPALDO EXCEL)
     // =========================================================================
     public function getProcessedData(bool $forceRebuild = false): array
     {
         $this->rebuildDetailsCacheIfNeeded($forceRebuild);
 
-        if (!file_exists($this->excelPath)) {
-            throw new RuntimeException("No se encontró el archivo data/DB.xlsx. Un Manager debe cargar los reportes de Odoo.");
-        }
-
-        $excelMtime = filemtime($this->excelPath);
+        $excelMtime = file_exists($this->excelPath) ? filemtime($this->excelPath) : 0;
         $solMtime   = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
         $ocMtime    = file_exists($this->ocExcelPath) ? filemtime($this->ocExcelPath) : 0;
 
         if (!$forceRebuild && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
-            if (is_array($cached)
-                && ($cached['excel_mtime'] ?? 0) === $excelMtime
-                && ($cached['sol_mtime'] ?? -1) === $solMtime
-                && ($cached['oc_mtime'] ?? -1) === $ocMtime
-                && ($cached['schema_v'] ?? 1) === 17
-            ) {
-                return $cached;
+            if (is_array($cached) && ($cached['schema_v'] ?? 1) === 17) {
+                // Si la caché proviene de Odoo API y ningún Excel manual es más reciente, devolverla directamente
+                if (($cached['source'] ?? '') === 'odoo_api'
+                    && $excelMtime <= (int)($cached['excel_mtime'] ?? 0)
+                    && $solMtime <= (int)($cached['sol_mtime'] ?? 0)
+                    && $ocMtime <= (int)($cached['oc_mtime'] ?? 0)
+                ) {
+                    return $cached;
+                }
+                if ($excelMtime > 0
+                    && ($cached['excel_mtime'] ?? 0) === $excelMtime
+                    && ($cached['sol_mtime'] ?? -1) === $solMtime
+                    && ($cached['oc_mtime'] ?? -1) === $ocMtime
+                ) {
+                    return $cached;
+                }
             }
+        }
+
+        if (!file_exists($this->excelPath)) {
+            throw new RuntimeException("Aún no hay datos cargados. Presiona 'Sincronizar Odoo' o sube los reportes Excel.");
         }
 
         $detailsData = file_exists($this->detailsCachePath)
@@ -1136,6 +1145,7 @@ class DataProcessor
 
         $output = [
             'schema_v'      => 17,
+            'source'        => 'excel_upload',
             'excel_mtime'   => $excelMtime,
             'sol_mtime'     => $solMtime,
             'oc_mtime'      => $ocMtime,

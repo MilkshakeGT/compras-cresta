@@ -207,7 +207,7 @@ class DataProcessor
     }
 
     // =========================================================================
-    // ENDPOINTS AJAX DE DETALLE DOCUMENTAL Y LÍNEAS FIRMES
+    // ENDPOINTS AJAX DE DETALLE, LÍNEAS FIRMES Y BÚSQUEDA GLOBAL POR ÍTEM/SKU
     // =========================================================================
     public function getDocumentDetail(string $type, string $id): array
     {
@@ -275,6 +275,148 @@ class DataProcessor
         }
 
         return ['found' => false, 'error' => 'Tipo de documento inválido'];
+    }
+
+    public function searchLines(string $rawQuery): array
+    {
+        $this->rebuildDetailsCacheIfNeeded(false);
+
+        $qTrim = trim($rawQuery);
+        if (mb_strlen($qTrim) < 2) {
+            return ['query' => $qTrim, 'total' => 0, 'results' => []];
+        }
+
+        // Permitir búsqueda multipalabra (todas las palabras deben coincidir sin importar acentos)
+        $normQuery = $this->normalizeForMatch($qTrim);
+        $tokens = array_values(array_filter(explode(' ', $normQuery), fn($t) => $t !== ''));
+
+        $matchesTokens = function (string $haystack) use ($tokens): bool {
+            $normHay = $this->normalizeForMatch($haystack);
+            foreach ($tokens as $tok) {
+                if (!str_contains($normHay, $tok)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        $details = file_exists($this->detailsCachePath)
+            ? json_decode(file_get_contents($this->detailsCachePath), true)
+            : [];
+        $mainCache = file_exists($this->cachePath)
+            ? json_decode(file_get_contents($this->cachePath), true)
+            : [];
+
+        // Indexar cabeceras de Solicitudes y OCs para cruce O(1)
+        $solMetaMap = [];
+        foreach (($mainCache['records'] ?? []) as $rec) {
+            $id = $rec['id'] ?? '';
+            if ($id !== '') {
+                $solMetaMap[$id] = $rec;
+            }
+        }
+
+        $ocMetaMap = [];
+        foreach (($mainCache['spend_records'] ?? []) as $srec) {
+            $ocId = $srec['oc_odoo'] ?? '';
+            if ($ocId !== '') {
+                $ocMetaMap[$ocId] = $srec;
+            }
+        }
+
+        $results = [];
+        $maxResults = 400;
+
+        // 1. Buscar en Líneas de Solicitud
+        foreach (($details['sol'] ?? []) as $solId => $lines) {
+            $meta = $solMetaMap[$solId] ?? [];
+            $fecha = $meta['fecha'] ?? '';
+            $sociedad = $meta['sociedad'] ?? 'Sin sociedad';
+            $comprador = $meta['comprador'] ?? 'Sin asignar';
+            $solicitante = $meta['solicitado_por'] ?? 'Sin solicitante';
+            $ocVinculada = $meta['oc_odoo'] ?? '';
+            $estado = $meta['estado_sol'] ?? '';
+
+            foreach ($lines as $ln) {
+                $prod = (string)($ln['producto'] ?? '');
+                $searchHaystack = "{$solId} {$prod} {$ocVinculada}";
+
+                if ($matchesTokens($searchHaystack)) {
+                    $results[] = [
+                        'doc_type'    => 'sol',
+                        'doc_id'      => (string)$solId,
+                        'related_doc' => (string)$ocVinculada,
+                        'fecha'       => (string)$fecha,
+                        'sociedad'    => (string)$sociedad,
+                        'comprador'   => (string)$comprador,
+                        'solicitante' => (string)$solicitante,
+                        'proveedor'   => '',
+                        'sku'         => $this->extractSkuCode($prod),
+                        'producto'    => $prod,
+                        'cantidad'    => (float)($ln['cantidad'] ?? 0),
+                        'divisa'      => '',
+                        'pu'          => null,
+                        'total'       => null,
+                        'estado'      => (string)$estado,
+                    ];
+
+                    if (count($results) >= $maxResults) {
+                        break 2;
+                    }
+                }
+            }
+        }
+
+        // 2. Buscar en Líneas de Órdenes de Compra
+        if (count($results) < $maxResults) {
+            foreach (($details['oc'] ?? []) as $ocId => $ocInfo) {
+                $meta = $ocMetaMap[$ocId] ?? [];
+                $fecha = $meta['fecha'] ?? '';
+                $sociedad = $meta['sociedad'] ?? 'Sin sociedad';
+                $comprador = $meta['comprador'] ?? 'Sin asignar';
+                $solicitante = $meta['solicitado_por'] ?? 'Sin solicitante';
+                $solVinculada = $meta['solicitud'] ?? '';
+                $prov = trim((string)($meta['proveedor'] ?? ($ocInfo['proveedor'] ?? 'Sin proveedor')));
+                $divisa = strtoupper(trim((string)($meta['divisa'] ?? ($ocInfo['divisa'] ?? 'GTQ'))));
+                $estado = $meta['estado_oc'] ?? '';
+                $ocSap = $meta['oc_sap'] ?? '';
+
+                foreach (($ocInfo['lineas'] ?? []) as $ln) {
+                    $prod = (string)($ln['producto'] ?? '');
+                    $searchHaystack = "{$ocId} {$ocSap} {$solVinculada} {$prod} {$prov}";
+
+                    if ($matchesTokens($searchHaystack)) {
+                        $results[] = [
+                            'doc_type'    => 'oc',
+                            'doc_id'      => (string)$ocId,
+                            'related_doc' => (string)$solVinculada,
+                            'fecha'       => (string)$fecha,
+                            'sociedad'    => (string)$sociedad,
+                            'comprador'   => (string)$comprador,
+                            'solicitante' => (string)$solicitante,
+                            'proveedor'   => $prov,
+                            'sku'         => $this->extractSkuCode($prod),
+                            'producto'    => $prod,
+                            'cantidad'    => (float)($ln['cantidad'] ?? 0),
+                            'divisa'      => $divisa,
+                            'pu'          => (float)($ln['precio_unitario'] ?? 0),
+                            'total'       => (float)($ln['total'] ?? 0),
+                            'estado'      => $ocSap !== '' ? "SAP {$ocSap}" : (string)$estado,
+                        ];
+
+                        if (count($results) >= $maxResults) {
+                            break 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        return [
+            'query'   => $qTrim,
+            'total'   => count($results),
+            'results' => $results,
+        ];
     }
 
     public function getFirmOcLines(): array
@@ -383,7 +525,6 @@ class DataProcessor
         $solLinesMap = $detailsData['sol'] ?? [];
         $ocDetailMap = $detailsData['oc'] ?? [];
 
-        // Precalcular totales, proveedor y divisa por No. OC desde OC.xlsx
         $ocSummaryFromDetail = [];
         foreach ($ocDetailMap as $ocCode => $ocInfo) {
             $sumTot = 0.0;
@@ -419,7 +560,6 @@ class DataProcessor
             return null;
         };
 
-        // Aliases duales: Reporte crudo Odoo (purchase.request) + Formato histórico
         $headerAliases = [
             'Solicitud'             => ['Referencia de Solicitud', 'Solicitud'],
             'Estado Solicitud'      => ['Estado', 'Estado Solicitud'],
@@ -487,7 +627,6 @@ class DataProcessor
                 $proveedor = $ocFallback['proveedor'];
             }
 
-            // Limpiar DocNum SAP (evitar que "104817.0" aparezca con decimal)
             $rawSapDoc = trim((string)($getCol($r, ['Purchase Orders/DocNum SAP', 'NO. OC SAP', 'No. OC SAP']) ?? ''));
             if ($rawSapDoc !== '' && is_numeric($rawSapDoc)) {
                 $rawSapDoc = (string)(int)round((float)$rawSapDoc);

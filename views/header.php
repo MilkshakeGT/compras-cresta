@@ -1,7 +1,7 @@
 <!-- Header Ejecutivo -->
 <header class="border-b border-slate-200 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 sticky top-0 z-30 backdrop-blur shadow-sm">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 space-y-3">
-        <!-- Fila Superior: Marca + Buscador Rápido + Navegación de 3 Módulos + Acciones -->
+        <!-- Fila Superior: Marca + Buscador Global + Navegación de 3 Módulos + Acciones -->
         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
             <div>
                 <div class="flex flex-wrap items-center gap-2.5">
@@ -23,12 +23,12 @@
             </div>
 
             <div class="flex flex-wrap items-center gap-2 text-xs">
-                <!-- Buscador Directo de Solicitud u OC -->
+                <!-- Buscador Global: Solicitud, OC, SKU o Descripción de Artículo -->
                 <form onsubmit="handleQuickDocLookup(event)" class="inline-flex items-center">
-                    <input id="quickDocInput" type="text" placeholder="Buscar Solicitud / OC..."
-                        title="Escribe un código (ej. SV2396 o P17177) y presiona Enter"
-                        class="bg-slate-50 dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-l-lg px-2.5 py-2 w-36 sm:w-40 focus:border-cresta-navy">
-                    <button type="submit" title="Ver detalle del documento"
+                    <input id="quickDocInput" type="text" placeholder="Solicitud, OC, SKU o ítem..."
+                        title="Busca por Solicitud (SV2396), OC (P17177), SKU (M017675) o descripción del artículo"
+                        class="bg-slate-50 dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-l-lg px-2.5 py-2 w-44 sm:w-52 focus:border-cresta-navy">
+                    <button type="submit" title="Buscar en solicitudes, OCs y líneas de artículos"
                         class="px-2.5 py-2 rounded-r-lg bg-slate-200 hover:bg-slate-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-cresta-navy dark:text-white font-bold border border-l-0 border-slate-300 dark:border-gray-700">
                         🔍
                     </button>

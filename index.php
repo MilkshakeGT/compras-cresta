@@ -10,6 +10,7 @@ require_once __DIR__ . '/src/Auth.php';
 require_once __DIR__ . '/src/DataProcessor.php';
 require_once __DIR__ . '/src/UploadHandler.php';
 require_once __DIR__ . '/src/OdooConnector.php';
+require_once __DIR__ . '/src/StatusConfig.php';
 
 $auth = new Auth(__DIR__ . '/data/auth.config.php');
 $auth->requireAuthOrRenderLogin(__DIR__ . '/views/login.php');
@@ -26,6 +27,7 @@ $odooConfigPath   = $dataDir . '/odoo.config.php';
 
 $odooConnector = new OdooConnector($odooConfigPath, $cachePath, $detailsCachePath);
 $processor     = new DataProcessor($excelPath, $cachePath);
+$statusMgr     = new StatusConfig($dataDir);
 
 // =========================================================================
 // SECCIÓN 2: ENDPOINTS AJAX PROTEGIDOS CON AISLAMIENTO POR COMPRADOR
@@ -84,6 +86,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($resCfg['ok'])) {
             $forceRebuild = true;
         }
+    } elseif ($postAction === 'save_status_config') {
+        if (!$isManager) {
+            http_response_code(403);
+            die('Acceso denegado: solo un usuario con perfil Manager puede configurar los estatus.');
+        }
+        $resSt = $statusMgr->saveConfig($_POST);
+        $resSt['tab'] = 'statuses';
+        $userAdminFeedback = $resSt;
+        if (!empty($resSt['ok'])) {
+            // Forzar re-sincronización o limpieza de caché para reflejar estatus inmediatamente
+            if (file_exists($cachePath)) {
+                @unlink($cachePath);
+            }
+            $forceRebuild = true;
+        }
     } elseif ($postAction === 'upload_odoo_files') {
         if (!$isManager) {
             http_response_code(403);
@@ -111,6 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $filesStatus  = $isManager ? $uploadHandler->getFilesStatus() : [];
 $odooSyncInfo = $odooConnector->getLastSyncInfo();
 $syncConfig   = $isManager ? $odooConnector->getSyncConfig() : [];
+$statusConfig = $isManager ? $statusMgr->getConfig() : [];
 
 // =========================================================================
 // SECCIÓN 4: CARGA DE PAYLOAD, AISLAMIENTO RBAC Y VERSIONADO DE ASSETS
@@ -157,7 +175,7 @@ foreach ($assetFiles as $af) {
         }
     }
 }
-$assetVer = '1.16.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
+$assetVer = '1.17.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
 ?>
 <!DOCTYPE html>
 <html lang="es">

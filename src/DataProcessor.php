@@ -2,7 +2,11 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/SimpleXLSX.php';
+require_once __DIR__ . '/StatusConfig.php';
 
+// =========================================================================
+// SECCIÓN 1: PROCESADOR DE DATOS Y REGLAS ANALÍTICAS POR ESTATUS (RBAC)
+// =========================================================================
 class DataProcessor
 {
     private string $excelPath;
@@ -10,6 +14,7 @@ class DataProcessor
     private string $solExcelPath;
     private string $ocExcelPath;
     private string $detailsCachePath;
+    private StatusConfig $statusConfigMgr;
 
     // Aprobadores retirados / inactivos que distorsionan el ranking operativo
     private array $excludedApprovers = [
@@ -25,10 +30,125 @@ class DataProcessor
         $this->solExcelPath     = $dataDir . '/Solicitudes.xlsx';
         $this->ocExcelPath      = $dataDir . '/OC.xlsx';
         $this->detailsCachePath = $dataDir . '/details_cache.json';
+        $this->statusConfigMgr  = new StatusConfig($dataDir);
     }
 
     // =========================================================================
-    // UTILIDADES DE NORMALIZACIÓN Y LIMPIEZA
+    // SECCIÓN 2: EVALUACIÓN DE ESTATUS SEGÚN STATUS_CONFIG.JSON
+    // =========================================================================
+    private function isPrStatusIncluded(string $estadoSol, array $prIncluded): bool
+    {
+        $st = trim($estadoSol);
+        if ($st === '') {
+            return false;
+        }
+        if (array_key_exists($st, $prIncluded)) {
+            return !empty($prIncluded[$st]);
+        }
+        // Coincidencia insensible a mayúsculas/minúsculas como respaldo
+        foreach ($prIncluded as $k => $v) {
+            if (mb_strtolower((string)$k) === mb_strtolower($st)) {
+                return !empty($v);
+            }
+        }
+        return true;
+    }
+
+    private function isPoStatusIncluded(string $estadoOc, array $poIncluded): bool
+    {
+        $st = trim($estadoOc);
+        if ($st === '') {
+            return false;
+        }
+        if (array_key_exists($st, $poIncluded)) {
+            return !empty($poIncluded[$st]);
+        }
+        foreach ($poIncluded as $k => $v) {
+            if (mb_strtolower((string)$k) === mb_strtolower($st)) {
+                return !empty($v);
+            }
+        }
+        return true;
+    }
+
+    private function applyStatusRulesToCache(array $cache, array $statusCfg): array
+    {
+        $prIncluded = is_array($statusCfg['pr_included'] ?? null) ? $statusCfg['pr_included'] : [];
+        $poIncluded = is_array($statusCfg['po_included'] ?? null) ? $statusCfg['po_included'] : [];
+
+        // Mapear estados de OCs activas por solicitud para determinar si todas están excluidas
+        $activePoBySol = [];
+        $totalPoBySol  = [];
+        $ocStatsByYm   = [];
+
+        foreach (($cache['spend_records'] ?? []) as &$sr) {
+            $ocSt     = (string)($sr['estado_oc'] ?? '');
+            $solSt    = (string)($sr['estado_sol'] ?? '');
+            $solRef   = (string)($sr['solicitud'] ?? '');
+            $ym       = (string)($sr['ym'] ?? '');
+            $ocStLow  = mb_strtolower($ocSt);
+            $solStLow = mb_strtolower($solSt);
+
+            $poIncludedFlag  = $this->isPoStatusIncluded($ocSt, $poIncluded);
+            $prIncludedFlag  = ($solSt === '' || $solSt === 'OC Directa')
+                ? true
+                : $this->isPrStatusIncluded($solSt, $prIncluded);
+
+            $isCancelada = ($ocStLow === 'cancelado') || !$poIncludedFlag;
+            $isFirm      = in_array($ocStLow, ['orden de compra', 'para aprobar 1', 'para aprobar 2'], true)
+                && $poIncludedFlag
+                && $prIncludedFlag;
+            $isRfq       = ($ocStLow === 'solicitud de cotización' || $ocStLow === 'solicitud de cotizacion')
+                && $poIncludedFlag
+                && $prIncludedFlag;
+
+            $sr['is_cancelada'] = $isCancelada;
+            $sr['is_firm']      = $isFirm;
+            $sr['is_rfq']       = $isRfq;
+
+            if ($solRef !== '') {
+                $totalPoBySol[$solRef] = ($totalPoBySol[$solRef] ?? 0) + 1;
+                if (!$isCancelada) {
+                    $activePoBySol[$solRef] = ($activePoBySol[$solRef] ?? 0) + 1;
+                }
+                if ($ym !== '') {
+                    if (!isset($ocStatsByYm[$ym])) {
+                        $ocStatsByYm[$ym] = ['total' => 0, 'canceladas' => 0];
+                    }
+                    $ocStatsByYm[$ym]['total']++;
+                    if ($isCancelada) {
+                        $ocStatsByYm[$ym]['canceladas']++;
+                    }
+                }
+            }
+        }
+        unset($sr);
+
+        foreach (($cache['records'] ?? []) as &$rec) {
+            $recId     = (string)($rec['id'] ?? '');
+            $solSt     = (string)($rec['estado_sol'] ?? '');
+            $solStLow  = mb_strtolower($solSt);
+            $included  = $this->isPrStatusIncluded($solSt, $prIncluded);
+
+            $hasAnyPo      = ($totalPoBySol[$recId] ?? 0) > 0;
+            $hasActivePo   = ($activePoBySol[$recId] ?? 0) > 0;
+            $allPoExcluded = $hasAnyPo && !$hasActivePo;
+
+            $rec['is_rechazada'] = ($solStLow === 'rechazado') || (!$included && $solStLow !== 'borrador' && $solStLow !== 'draft');
+            $rec['is_borrador']  = ($solStLow === 'borrador' || $solStLow === 'draft') && !$included;
+            $rec['excluida']     = (!$included) || $allPoExcluded;
+        }
+        unset($rec);
+
+        if (!empty($ocStatsByYm)) {
+            $cache['oc_stats'] = $ocStatsByYm;
+        }
+
+        return $cache;
+    }
+
+    // =========================================================================
+    // SECCIÓN 3: UTILIDADES DE NORMALIZACIÓN Y LIMPIEZA
     // =========================================================================
     private function isExcludedApprover(string $name): bool
     {
@@ -105,7 +225,7 @@ class DataProcessor
     }
 
     // =========================================================================
-    // INDEXACIÓN DE LÍNEAS CRUDAS DE SOLICITUDES Y ÓRDENES DE COMPRA (RESPALDO EXCEL)
+    // SECCIÓN 4: INDEXACIÓN DE LÍNEAS CRUDAS (RESPALDO EXCEL)
     // =========================================================================
     private function rebuildDetailsCacheIfNeeded(bool $force = false): void
     {
@@ -113,9 +233,8 @@ class DataProcessor
         $ocMtime  = file_exists($this->ocExcelPath) ? filemtime($this->ocExcelPath) : 0;
 
         if (!$force && file_exists($this->detailsCachePath)) {
-            $existing = json_decode(file_get_contents($this->detailsCachePath), true);
+            $existing = json_decode((string)file_get_contents($this->detailsCachePath), true);
             if (is_array($existing) && ($existing['schema_v'] ?? 0) === 3) {
-                // Si la caché proviene de Odoo API y ningún Excel es más reciente, conservarla
                 if (($existing['source'] ?? '') === 'odoo_api'
                     && $solMtime <= (int)($existing['sol_mtime'] ?? 0)
                     && $ocMtime <= (int)($existing['oc_mtime'] ?? 0)
@@ -235,11 +354,11 @@ class DataProcessor
             'oc'        => $ocDetails,
         ];
 
-        file_put_contents($this->detailsCachePath, json_encode($detailsPayload, JSON_UNESCAPED_UNICODE));
+        file_put_contents($this->detailsCachePath, json_encode($detailsPayload, JSON_UNESCAPED_UNICODE), LOCK_EX);
     }
 
     // =========================================================================
-    // ENDPOINTS AJAX CON AISLAMIENTO POR COMPRADOR (ROW-LEVEL SECURITY)
+    // SECCIÓN 5: ENDPOINTS AJAX CON AISLAMIENTO POR COMPRADOR (RBAC)
     // =========================================================================
     public function getDocumentDetail(string $type, string $id, ?array $allowedBuyers = null): array
     {
@@ -248,11 +367,11 @@ class DataProcessor
         $allowedLookup = $this->buildAllowedBuyersLookup($allowedBuyers);
         $id = trim($id);
         $details = file_exists($this->detailsCachePath)
-            ? json_decode(file_get_contents($this->detailsCachePath), true)
+            ? (json_decode((string)file_get_contents($this->detailsCachePath), true) ?: [])
             : [];
 
         $mainCache = file_exists($this->cachePath)
-            ? json_decode(file_get_contents($this->cachePath), true)
+            ? (json_decode((string)file_get_contents($this->cachePath), true) ?: [])
             : [];
 
         $cutoffDate = $mainCache['cutoff_date'] ?? date('Y-m-d');
@@ -348,10 +467,10 @@ class DataProcessor
         };
 
         $details = file_exists($this->detailsCachePath)
-            ? json_decode(file_get_contents($this->detailsCachePath), true)
+            ? (json_decode((string)file_get_contents($this->detailsCachePath), true) ?: [])
             : [];
         $mainCache = file_exists($this->cachePath)
-            ? json_decode(file_get_contents($this->cachePath), true)
+            ? (json_decode((string)file_get_contents($this->cachePath), true) ?: [])
             : [];
 
         $solMetaMap = [];
@@ -481,10 +600,10 @@ class DataProcessor
 
         $allowedLookup = $this->buildAllowedBuyersLookup($allowedBuyers);
         $details = file_exists($this->detailsCachePath)
-            ? json_decode(file_get_contents($this->detailsCachePath), true)
+            ? (json_decode((string)file_get_contents($this->detailsCachePath), true) ?: [])
             : [];
         $mainCache = file_exists($this->cachePath)
-            ? json_decode(file_get_contents($this->cachePath), true)
+            ? (json_decode((string)file_get_contents($this->cachePath), true) ?: [])
             : [];
 
         $ocDetailMap = $details['oc'] ?? [];
@@ -554,7 +673,7 @@ class DataProcessor
     }
 
     // =========================================================================
-    // FILTRADO DE SEGURIDAD A NIVEL DE SERVIDOR PARA PERFIL COMPRADOR (RBAC)
+    // SECCIÓN 6: AISLAMIENTO A NIVEL DE SERVIDOR PARA PERFIL COMPRADOR (RBAC)
     // =========================================================================
     public function scopePayloadForUser(array $payload, ?array $user): array
     {
@@ -688,33 +807,33 @@ class DataProcessor
     }
 
     // =========================================================================
-    // MOTOR PRINCIPAL ETL (CACHÉ ODOO API O RESPALDO EXCEL)
+    // SECCIÓN 7: CARGA PRINCIPAL DE DATOS CON REGLAS DE ESTATUS ACTIVAS
     // =========================================================================
     public function getProcessedData(bool $forceRebuild = false): array
     {
         $this->rebuildDetailsCacheIfNeeded($forceRebuild);
 
+        $statusCfg = $this->statusConfigMgr->getConfig();
         $excelMtime = file_exists($this->excelPath) ? filemtime($this->excelPath) : 0;
         $solMtime   = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
         $ocMtime    = file_exists($this->ocExcelPath) ? filemtime($this->ocExcelPath) : 0;
 
         if (!$forceRebuild && file_exists($this->cachePath)) {
-            $cached = json_decode(file_get_contents($this->cachePath), true);
+            $cached = json_decode((string)file_get_contents($this->cachePath), true);
             if (is_array($cached) && ($cached['schema_v'] ?? 1) === 17) {
-                // Si la caché proviene de Odoo API y ningún Excel manual es más reciente, devolverla directamente
                 if (($cached['source'] ?? '') === 'odoo_api'
                     && $excelMtime <= (int)($cached['excel_mtime'] ?? 0)
                     && $solMtime <= (int)($cached['sol_mtime'] ?? 0)
                     && $ocMtime <= (int)($cached['oc_mtime'] ?? 0)
                 ) {
-                    return $cached;
+                    return $this->applyStatusRulesToCache($cached, $statusCfg);
                 }
                 if ($excelMtime > 0
                     && ($cached['excel_mtime'] ?? 0) === $excelMtime
                     && ($cached['sol_mtime'] ?? -1) === $solMtime
                     && ($cached['oc_mtime'] ?? -1) === $ocMtime
                 ) {
-                    return $cached;
+                    return $this->applyStatusRulesToCache($cached, $statusCfg);
                 }
             }
         }
@@ -724,7 +843,7 @@ class DataProcessor
         }
 
         $detailsData = file_exists($this->detailsCachePath)
-            ? json_decode(file_get_contents($this->detailsCachePath), true)
+            ? (json_decode((string)file_get_contents($this->detailsCachePath), true) ?: [])
             : [];
         $solLinesMap = $detailsData['sol'] ?? [];
         $ocDetailMap = $detailsData['oc'] ?? [];
@@ -1164,8 +1283,8 @@ class DataProcessor
             'spend_records' => $spendRecords,
         ];
 
-        file_put_contents($this->cachePath, json_encode($output, JSON_UNESCAPED_UNICODE));
+        file_put_contents($this->cachePath, json_encode($output, JSON_UNESCAPED_UNICODE), LOCK_EX);
 
-        return $output;
+        return $this->applyStatusRulesToCache($output, $statusCfg);
     }
 }

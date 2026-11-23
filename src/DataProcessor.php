@@ -78,6 +78,32 @@ class DataProcessor
         return null;
     }
 
+    private function buildAllowedBuyersLookup(?array $allowedBuyers): ?array
+    {
+        if ($allowedBuyers === null) {
+            return null; // null = Manager (acceso global)
+        }
+        $lookup = [];
+        foreach ($allowedBuyers as $b) {
+            $norm = $this->normalizeForMatch((string)$b);
+            if ($norm !== '') {
+                $lookup[$norm] = true;
+            }
+        }
+        return $lookup;
+    }
+
+    private function isBuyerAllowed(?array $allowedLookup, string $buyerName): bool
+    {
+        if ($allowedLookup === null) {
+            return true;
+        }
+        if (empty($allowedLookup)) {
+            return false;
+        }
+        return isset($allowedLookup[$this->normalizeForMatch($buyerName)]);
+    }
+
     // =========================================================================
     // INDEXACIÓN DE LÍNEAS CRUDAS DE SOLICITUDES Y ÓRDENES DE COMPRA (ODOO)
     // =========================================================================
@@ -207,12 +233,13 @@ class DataProcessor
     }
 
     // =========================================================================
-    // ENDPOINTS AJAX DE DETALLE, LÍNEAS FIRMES Y BÚSQUEDA GLOBAL POR ÍTEM/SKU
+    // ENDPOINTS AJAX CON AISLAMIENTO POR COMPRADOR (ROW-LEVEL SECURITY)
     // =========================================================================
-    public function getDocumentDetail(string $type, string $id): array
+    public function getDocumentDetail(string $type, string $id, ?array $allowedBuyers = null): array
     {
         $this->rebuildDetailsCacheIfNeeded(false);
 
+        $allowedLookup = $this->buildAllowedBuyersLookup($allowedBuyers);
         $id = trim($id);
         $details = file_exists($this->detailsCachePath)
             ? json_decode(file_get_contents($this->detailsCachePath), true)
@@ -232,6 +259,13 @@ class DataProcessor
                     break;
                 }
             }
+
+            if ($allowedLookup !== null) {
+                if ($meta === null || !$this->isBuyerAllowed($allowedLookup, (string)($meta['comprador'] ?? ''))) {
+                    return ['found' => false, 'error' => 'Documento no disponible para tu perfil de comprador.'];
+                }
+            }
+
             $lines = $details['sol'][$id] ?? [];
             return [
                 'found'       => ($meta !== null || !empty($lines)),
@@ -251,6 +285,13 @@ class DataProcessor
                     break;
                 }
             }
+
+            if ($allowedLookup !== null) {
+                if ($meta === null || !$this->isBuyerAllowed($allowedLookup, (string)($meta['comprador'] ?? ''))) {
+                    return ['found' => false, 'error' => 'Orden de compra no disponible para tu perfil de comprador.'];
+                }
+            }
+
             $solMeta = null;
             $solId = $meta['solicitud'] ?? '';
             if ($solId !== '') {
@@ -277,16 +318,16 @@ class DataProcessor
         return ['found' => false, 'error' => 'Tipo de documento inválido'];
     }
 
-    public function searchLines(string $rawQuery): array
+    public function searchLines(string $rawQuery, ?array $allowedBuyers = null): array
     {
         $this->rebuildDetailsCacheIfNeeded(false);
 
+        $allowedLookup = $this->buildAllowedBuyersLookup($allowedBuyers);
         $qTrim = trim($rawQuery);
         if (mb_strlen($qTrim) < 2) {
             return ['query' => $qTrim, 'total' => 0, 'results' => []];
         }
 
-        // Permitir búsqueda multipalabra (todas las palabras deben coincidir sin importar acentos)
         $normQuery = $this->normalizeForMatch($qTrim);
         $tokens = array_values(array_filter(explode(' ', $normQuery), fn($t) => $t !== ''));
 
@@ -307,7 +348,6 @@ class DataProcessor
             ? json_decode(file_get_contents($this->cachePath), true)
             : [];
 
-        // Indexar cabeceras de Solicitudes y OCs para cruce O(1)
         $solMetaMap = [];
         foreach (($mainCache['records'] ?? []) as $rec) {
             $id = $rec['id'] ?? '';
@@ -327,15 +367,21 @@ class DataProcessor
         $results = [];
         $maxResults = 400;
 
-        // 1. Buscar en Líneas de Solicitud
+        // 1. Buscar en Líneas de Solicitud (solo permitidas)
         foreach (($details['sol'] ?? []) as $solId => $lines) {
-            $meta = $solMetaMap[$solId] ?? [];
-            $fecha = $meta['fecha'] ?? '';
-            $sociedad = $meta['sociedad'] ?? 'Sin sociedad';
-            $comprador = $meta['comprador'] ?? 'Sin asignar';
+            $meta = $solMetaMap[$solId] ?? null;
+            if ($allowedLookup !== null) {
+                if ($meta === null || !$this->isBuyerAllowed($allowedLookup, (string)($meta['comprador'] ?? ''))) {
+                    continue;
+                }
+            }
+
+            $fecha       = $meta['fecha'] ?? '';
+            $sociedad    = $meta['sociedad'] ?? 'Sin sociedad';
+            $comprador   = $meta['comprador'] ?? 'Sin asignar';
             $solicitante = $meta['solicitado_por'] ?? 'Sin solicitante';
             $ocVinculada = $meta['oc_odoo'] ?? '';
-            $estado = $meta['estado_sol'] ?? '';
+            $estado      = $meta['estado_sol'] ?? '';
 
             foreach ($lines as $ln) {
                 $prod = (string)($ln['producto'] ?? '');
@@ -367,19 +413,25 @@ class DataProcessor
             }
         }
 
-        // 2. Buscar en Líneas de Órdenes de Compra
+        // 2. Buscar en Líneas de Órdenes de Compra (solo permitidas)
         if (count($results) < $maxResults) {
             foreach (($details['oc'] ?? []) as $ocId => $ocInfo) {
-                $meta = $ocMetaMap[$ocId] ?? [];
-                $fecha = $meta['fecha'] ?? '';
-                $sociedad = $meta['sociedad'] ?? 'Sin sociedad';
-                $comprador = $meta['comprador'] ?? 'Sin asignar';
-                $solicitante = $meta['solicitado_por'] ?? 'Sin solicitante';
+                $meta = $ocMetaMap[$ocId] ?? null;
+                if ($allowedLookup !== null) {
+                    if ($meta === null || !$this->isBuyerAllowed($allowedLookup, (string)($meta['comprador'] ?? ''))) {
+                        continue;
+                    }
+                }
+
+                $fecha        = $meta['fecha'] ?? '';
+                $sociedad     = $meta['sociedad'] ?? 'Sin sociedad';
+                $comprador    = $meta['comprador'] ?? 'Sin asignar';
+                $solicitante  = $meta['solicitado_por'] ?? 'Sin solicitante';
                 $solVinculada = $meta['solicitud'] ?? '';
-                $prov = trim((string)($meta['proveedor'] ?? ($ocInfo['proveedor'] ?? 'Sin proveedor')));
-                $divisa = strtoupper(trim((string)($meta['divisa'] ?? ($ocInfo['divisa'] ?? 'GTQ'))));
-                $estado = $meta['estado_oc'] ?? '';
-                $ocSap = $meta['oc_sap'] ?? '';
+                $prov         = trim((string)($meta['proveedor'] ?? ($ocInfo['proveedor'] ?? 'Sin proveedor')));
+                $divisa       = strtoupper(trim((string)($meta['divisa'] ?? ($ocInfo['divisa'] ?? 'GTQ'))));
+                $estado       = $meta['estado_oc'] ?? '';
+                $ocSap        = $meta['oc_sap'] ?? '';
 
                 foreach (($ocInfo['lineas'] ?? []) as $ln) {
                     $prod = (string)($ln['producto'] ?? '');
@@ -419,10 +471,11 @@ class DataProcessor
         ];
     }
 
-    public function getFirmOcLines(): array
+    public function getFirmOcLines(?array $allowedBuyers = null): array
     {
         $this->rebuildDetailsCacheIfNeeded(false);
 
+        $allowedLookup = $this->buildAllowedBuyersLookup($allowedBuyers);
         $details = file_exists($this->detailsCachePath)
             ? json_decode(file_get_contents($this->detailsCachePath), true)
             : [];
@@ -437,6 +490,10 @@ class DataProcessor
             if (empty($srec['is_firm'])) {
                 continue;
             }
+            if (!$this->isBuyerAllowed($allowedLookup, (string)($srec['comprador'] ?? ''))) {
+                continue;
+            }
+
             $ocId = $srec['oc_odoo'] ?? '';
             if ($ocId === '') {
                 continue;
@@ -493,6 +550,144 @@ class DataProcessor
     }
 
     // =========================================================================
+    // FILTRADO DE SEGURIDAD A NIVEL DE SERVIDOR PARA PERFIL COMPRADOR (RBAC)
+    // =========================================================================
+    public function scopePayloadForUser(array $payload, ?array $user): array
+    {
+        if ($user === null || ($user['role'] ?? '') === 'manager') {
+            $payload['user_context'] = [
+                'role'           => 'manager',
+                'username'       => $user['username'] ?? '',
+                'display_name'   => $user['display_name'] ?? 'Manager',
+                'allowed_buyers' => [],
+            ];
+            return $payload;
+        }
+
+        $allowedBuyers = array_values(array_filter(array_map('strval', (array)($user['odoo_buyers'] ?? []))));
+        $allowedLookup = $this->buildAllowedBuyersLookup($allowedBuyers);
+
+        // 1. Precalcular promedio anónimo del equipo por mes y sociedad (sin exponer registros individuales)
+        $teamBySocYm = [];
+        $teamGlobalYm = [];
+        foreach (($payload['records'] ?? []) as $r) {
+            if (!empty($r['excluida']) || empty($r['aprobada']) || empty($r['tiene_oc_odoo']) || $r['d_comprador'] === null) {
+                continue;
+            }
+            $ym  = (string)$r['ym'];
+            $soc = (string)$r['sociedad'];
+            $val = (float)$r['d_comprador'];
+
+            $teamGlobalYm[$ym]['sum'] = ($teamGlobalYm[$ym]['sum'] ?? 0.0) + $val;
+            $teamGlobalYm[$ym]['cnt'] = ($teamGlobalYm[$ym]['cnt'] ?? 0) + 1;
+
+            $teamBySocYm[$soc][$ym]['sum'] = ($teamBySocYm[$soc][$ym]['sum'] ?? 0.0) + $val;
+            $teamBySocYm[$soc][$ym]['cnt'] = ($teamBySocYm[$soc][$ym]['cnt'] ?? 0) + 1;
+        }
+
+        $teamAvgMap = ['ALL' => []];
+        foreach ($teamGlobalYm as $ym => $agg) {
+            $teamAvgMap['ALL'][$ym] = $agg['cnt'] > 0 ? round($agg['sum'] / $agg['cnt'], 1) : null;
+        }
+        foreach ($teamBySocYm as $soc => $byYm) {
+            $teamAvgMap[$soc] = [];
+            foreach ($byYm as $ym => $agg) {
+                $teamAvgMap[$soc][$ym] = $agg['cnt'] > 0 ? round($agg['sum'] / $agg['cnt'], 1) : null;
+            }
+        }
+
+        // 2. Recortar estrictamente records, oc_records y spend_records a los compradores asignados
+        $scopedRecords = array_values(array_filter(
+            $payload['records'] ?? [],
+            fn($r) => $this->isBuyerAllowed($allowedLookup, (string)($r['comprador'] ?? ''))
+        ));
+
+        $scopedOcRecords = array_values(array_filter(
+            $payload['oc_records'] ?? [],
+            fn($r) => $this->isBuyerAllowed($allowedLookup, (string)($r['comprador'] ?? ''))
+        ));
+
+        $scopedSpendRecords = array_values(array_filter(
+            $payload['spend_records'] ?? [],
+            fn($r) => $this->isBuyerAllowed($allowedLookup, (string)($r['comprador'] ?? ''))
+        ));
+
+        // 3. Reconstruir catálogos de filtros visibles únicamente con los datos permitidos
+        $socSet   = [];
+        $compSet  = [];
+        $solSet   = [];
+        $provSet  = [];
+        $mesesSet = [];
+        $scopedOcStats = [];
+
+        foreach ($scopedRecords as $r) {
+            if (!empty($r['ym'])) $mesesSet[$r['ym']] = true;
+            if (!empty($r['sociedad'])) $socSet[$r['sociedad']] = true;
+            if (!empty($r['comprador'])) $compSet[$r['comprador']] = true;
+            if (!empty($r['solicitado_por'])) $solSet[$r['solicitado_por']] = true;
+        }
+
+        foreach ($scopedSpendRecords as $sr) {
+            if (!empty($sr['ym'])) $mesesSet[$sr['ym']] = true;
+            if (!empty($sr['sociedad'])) $socSet[$sr['sociedad']] = true;
+            if (!empty($sr['comprador'])) $compSet[$sr['comprador']] = true;
+            if (!empty($sr['solicitado_por'])) $solSet[$sr['solicitado_por']] = true;
+            if (!empty($sr['proveedor']) && $sr['proveedor'] !== 'Sin proveedor') {
+                $provSet[$sr['proveedor']] = true;
+            }
+
+            $ym = (string)($sr['ym'] ?? '');
+            if ($ym !== '') {
+                if (!isset($scopedOcStats[$ym])) {
+                    $scopedOcStats[$ym] = ['total' => 0, 'canceladas' => 0];
+                }
+                $scopedOcStats[$ym]['total']++;
+                if (!empty($sr['is_cancelada'])) {
+                    $scopedOcStats[$ym]['canceladas']++;
+                }
+            }
+        }
+
+        // Asegurar que aparezcan en el selector los compradores asignados aunque no tengan datos en algún mes
+        foreach ($allowedBuyers as $ab) {
+            $compSet[$ab] = true;
+        }
+
+        $mesesList = array_keys($mesesSet);
+        $socList   = array_keys($socSet);
+        $compList  = array_keys($compSet);
+        $provList  = array_keys($provSet);
+        $solList   = array_keys($solSet);
+
+        sort($mesesList);
+        sort($socList);
+        sort($compList);
+        sort($provList);
+        sort($solList);
+
+        $payload['filters'] = [
+            'meses'        => $mesesList,
+            'sociedades'   => $socList,
+            'compradores'  => $compList,
+            'proveedores'  => $provList,
+            'solicitantes' => $solList,
+        ];
+        $payload['oc_stats']          = $scopedOcStats;
+        $payload['records']           = $scopedRecords;
+        $payload['oc_records']        = $scopedOcRecords;
+        $payload['spend_records']     = $scopedSpendRecords;
+        $payload['team_avg_by_month'] = $teamAvgMap;
+        $payload['user_context']      = [
+            'role'           => 'buyer',
+            'username'       => $user['username'] ?? '',
+            'display_name'   => $user['display_name'] ?? '',
+            'allowed_buyers' => $compList,
+        ];
+
+        return $payload;
+    }
+
+    // =========================================================================
     // MOTOR PRINCIPAL ETL DE SOLICITUDES Y OCs (purchase.request)
     // =========================================================================
     public function getProcessedData(bool $forceRebuild = false): array
@@ -500,7 +695,7 @@ class DataProcessor
         $this->rebuildDetailsCacheIfNeeded($forceRebuild);
 
         if (!file_exists($this->excelPath)) {
-            throw new RuntimeException("No se encontró el archivo data/DB.xlsx. Usa el botón 'Cargar Datos' para subir los reportes de Odoo.");
+            throw new RuntimeException("No se encontró el archivo data/DB.xlsx. Un Manager debe cargar los reportes de Odoo.");
         }
 
         $excelMtime = filemtime($this->excelPath);

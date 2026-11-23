@@ -3,13 +3,15 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/src/Auth.php';
 require_once __DIR__ . '/src/DataProcessor.php';
+require_once __DIR__ . '/src/UploadHandler.php';
 
 // 1. Control de acceso y sesión
 $auth = new Auth(__DIR__ . '/data/auth.config.php');
 $auth->requireAuthOrRenderLogin(__DIR__ . '/views/login.php');
 
-$excelPath = __DIR__ . '/data/DB.xlsx';
-$cachePath = __DIR__ . '/data/cache.json';
+$dataDir   = __DIR__ . '/data';
+$excelPath = $dataDir . '/DB.xlsx';
+$cachePath = $dataDir . '/cache.json';
 
 // 2. Endpoints AJAX protegidos por sesión
 if (isset($_GET['action'])) {
@@ -29,18 +31,41 @@ if (isset($_GET['action'])) {
     }
 }
 
-// 3. Carga de datos principales para el dashboard
-$forceSync = isset($_GET['sync']) && $_GET['sync'] === '1';
+// 3. Procesamiento de carga manual de reportes crudos de Odoo (.xlsx)
+$uploadHandler  = new UploadHandler($dataDir);
+$uploadFeedback = null;
+$forceRebuild   = isset($_GET['rebuild']) && $_GET['rebuild'] === '1';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'upload_odoo_files') {
+    $uploadFeedback = $uploadHandler->handleUploads();
+    if (!empty($uploadFeedback['ok'])) {
+        $forceRebuild = true;
+    }
+}
+
+$filesStatus = $uploadHandler->getFilesStatus();
+
+// 4. Carga de datos principales para el dashboard
+$loadError = null;
+$payload   = [
+    'cutoff_date'   => date('Y-m-d'),
+    'filters'       => ['meses' => [], 'sociedades' => [], 'compradores' => [], 'proveedores' => [], 'solicitantes' => []],
+    'oc_stats'      => [],
+    'records'       => [],
+    'oc_records'    => [],
+    'spend_records' => [],
+];
 
 try {
     $processor = new DataProcessor($excelPath, $cachePath);
-    $payload   = $processor->getProcessedData($forceSync);
+    $payload   = $processor->getProcessedData($forceRebuild);
 } catch (Throwable $e) {
-    http_response_code(500);
-    die("Error cargando datos del dashboard: " . htmlspecialchars($e->getMessage()));
+    $loadError = $e->getMessage();
+    if ($uploadFeedback === null) {
+        $uploadFeedback = ['ok' => false, 'message' => $loadError];
+    }
 }
 
-$syncInfo    = $payload['sync_info'] ?? [];
 $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
 // Versionado dinámico basado en la última modificación de TODOS los assets
@@ -62,7 +87,7 @@ foreach ($assetFiles as $af) {
         }
     }
 }
-$assetVer = '1.09.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
+$assetVer = '1.10.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -109,6 +134,7 @@ $assetVer = '1.09.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
     </footer>
 
     <?php require __DIR__ . '/views/modals.php'; ?>
+    <?php require __DIR__ . '/views/admin_upload.php'; ?>
 
     <!-- Inyección de datos y módulos JS -->
     <script>

@@ -4,12 +4,17 @@
         <!-- Fila Superior: Marca + Buscador Global + Navegación de 3 Módulos + Acciones -->
         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
             <div>
-                <div class="flex flex-wrap items-center gap-2.5">
+                <div class="flex flex-wrap items-center gap-2">
                     <span class="px-2.5 py-0.5 text-[11px] font-bold rounded-md text-white bg-cresta-navy dark:bg-cresta-red tracking-wide">
                         GRUPO CRESTA · SUPPLY CHAIN
                     </span>
                     <span class="text-xs text-slate-500 dark:text-gray-400">
                         Corte: <strong class="text-slate-800 dark:text-gray-200"><?= htmlspecialchars($payload['cutoff_date']) ?></strong>
+                    </span>
+                    <span class="text-[11px] px-2 py-0.5 rounded-full font-semibold <?= !empty($isManager)
+                        ? 'bg-indigo-50 text-cresta-navy border border-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800'
+                        : 'bg-sky-50 text-cresta-blue border border-sky-200 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800' ?>">
+                        👤 <?= htmlspecialchars((string)($currentUser['display_name'] ?? '')) ?> · <?= !empty($isManager) ? 'Manager' : 'Comprador' ?>
                     </span>
                     <?php if ($uploadFeedback !== null && !empty($uploadFeedback['ok'])): ?>
                         <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 font-semibold">
@@ -27,7 +32,7 @@
                 <form onsubmit="handleQuickDocLookup(event)" class="inline-flex items-center">
                     <input id="quickDocInput" type="text" placeholder="Solicitud, OC, SKU o ítem..."
                         title="Busca por Solicitud (SV2396), OC (P17177), SKU (M017675) o descripción del artículo"
-                        class="bg-slate-50 dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-l-lg px-2.5 py-2 w-44 sm:w-52 focus:border-cresta-navy">
+                        class="bg-slate-50 dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-l-lg px-2.5 py-2 w-40 sm:w-48 focus:border-cresta-navy">
                     <button type="submit" title="Buscar en solicitudes, OCs y líneas de artículos"
                         class="px-2.5 py-2 rounded-r-lg bg-slate-200 hover:bg-slate-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-cresta-navy dark:text-white font-bold border border-l-0 border-slate-300 dark:border-gray-700">
                         🔍
@@ -57,12 +62,21 @@
                     <span>Descargar PDF</span>
                 </button>
 
-                <!-- Botón Admin: Cargar Reportes Crudos de Odoo -->
-                <button type="button" onclick="openAdminUploadModal()" title="Cargar archivos Excel exportados de Odoo"
-                    class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
-                    <span>⚙️</span>
-                    <span class="hidden md:inline">Cargar Datos</span>
-                </button>
+                <?php if (!empty($isManager)): ?>
+                    <!-- Botón Admin: Cargar Reportes Crudos de Odoo (Solo Manager) -->
+                    <button type="button" onclick="openAdminUploadModal()" title="Cargar archivos Excel exportados de Odoo"
+                        class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
+                        <span>⚙️</span>
+                        <span class="hidden md:inline">Cargar Datos</span>
+                    </button>
+
+                    <!-- Botón Admin: Gestión de Usuarios y Permisos (Solo Manager) -->
+                    <button type="button" onclick="openAdminUsersModal()" title="Administrar usuarios y compradores asignados"
+                        class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
+                        <span>👥</span>
+                        <span class="hidden md:inline">Usuarios</span>
+                    </button>
+                <?php endif; ?>
 
                 <!-- Toggle Modo Claro / Oscuro -->
                 <button id="btnThemeToggle" type="button" onclick="toggleTheme()" title="Alternar modo claro / oscuro"

@@ -5,7 +5,7 @@ require_once __DIR__ . '/SimpleXLSX.php';
 require_once __DIR__ . '/StatusConfig.php';
 
 // =========================================================================
-// SECCIÓN 1: PROCESADOR DE DATOS Y REGLAS ANALÍTICAS POR ESTATUS (RBAC)
+// SECCIÓN 1: PROCESADOR DE DATOS, REGLAS DE ESTATUS Y LIMPIEZA DE DUALIDAD ERP
 // =========================================================================
 class DataProcessor
 {
@@ -34,7 +34,7 @@ class DataProcessor
     }
 
     // =========================================================================
-    // SECCIÓN 2: EVALUACIÓN DE ESTATUS SEGÚN STATUS_CONFIG.JSON
+    // SECCIÓN 2: EVALUACIÓN DE ESTATUS Y EXCLUSIÓN DE LEGACY "HECHO" SIN OC/SAP
     // =========================================================================
     private function isPrStatusIncluded(string $estadoSol, array $prIncluded): bool
     {
@@ -45,7 +45,6 @@ class DataProcessor
         if (array_key_exists($st, $prIncluded)) {
             return !empty($prIncluded[$st]);
         }
-        // Coincidencia insensible a mayúsculas/minúsculas como respaldo
         foreach ($prIncluded as $k => $v) {
             if (mb_strtolower((string)$k) === mb_strtolower($st)) {
                 return !empty($v);
@@ -71,12 +70,25 @@ class DataProcessor
         return true;
     }
 
+    /**
+     * Detecta solicitudes marcadas como "hecho" que no tienen OC en Odoo ni en SAP
+     * (flujo completado manualmente en SAP por dualidad ERP histórica).
+     */
+    private function isLegacyDoneWithoutOcOrSap(array $rec): bool
+    {
+        $solStLow   = mb_strtolower(trim((string)($rec['estado_sol'] ?? '')));
+        $isDonePr   = in_array($solStLow, ['hecho', 'done'], true);
+        $hasOcOdoo  = !empty($rec['tiene_oc_odoo']) || trim((string)($rec['oc_odoo'] ?? '')) !== '';
+        $hasOcSap   = !empty($rec['tiene_oc_sap'])  || trim((string)($rec['f_creacion_sap'] ?? '')) !== '';
+
+        return $isDonePr && !$hasOcOdoo && !$hasOcSap;
+    }
+
     private function applyStatusRulesToCache(array $cache, array $statusCfg): array
     {
         $prIncluded = is_array($statusCfg['pr_included'] ?? null) ? $statusCfg['pr_included'] : [];
         $poIncluded = is_array($statusCfg['po_included'] ?? null) ? $statusCfg['po_included'] : [];
 
-        // Mapear estados de OCs activas por solicitud para determinar si todas están excluidas
         $activePoBySol = [];
         $totalPoBySol  = [];
         $ocStatsByYm   = [];
@@ -87,10 +99,9 @@ class DataProcessor
             $solRef   = (string)($sr['solicitud'] ?? '');
             $ym       = (string)($sr['ym'] ?? '');
             $ocStLow  = mb_strtolower($ocSt);
-            $solStLow = mb_strtolower($solSt);
 
-            $poIncludedFlag  = $this->isPoStatusIncluded($ocSt, $poIncluded);
-            $prIncludedFlag  = ($solSt === '' || $solSt === 'OC Directa')
+            $poIncludedFlag = $this->isPoStatusIncluded($ocSt, $poIncluded);
+            $prIncludedFlag = ($solSt === '' || $solSt === 'OC Directa')
                 ? true
                 : $this->isPrStatusIncluded($solSt, $prIncluded);
 
@@ -124,21 +135,41 @@ class DataProcessor
         }
         unset($sr);
 
+        $excludedSolIds = [];
+
         foreach (($cache['records'] ?? []) as &$rec) {
-            $recId     = (string)($rec['id'] ?? '');
-            $solSt     = (string)($rec['estado_sol'] ?? '');
-            $solStLow  = mb_strtolower($solSt);
-            $included  = $this->isPrStatusIncluded($solSt, $prIncluded);
+            $recId    = (string)($rec['id'] ?? '');
+            $solSt    = (string)($rec['estado_sol'] ?? '');
+            $solStLow = mb_strtolower($solSt);
+            $included = $this->isPrStatusIncluded($solSt, $prIncluded);
 
             $hasAnyPo      = ($totalPoBySol[$recId] ?? 0) > 0;
             $hasActivePo   = ($activePoBySol[$recId] ?? 0) > 0;
             $allPoExcluded = $hasAnyPo && !$hasActivePo;
+            $isLegacyDone  = $this->isLegacyDoneWithoutOcOrSap($rec);
 
             $rec['is_rechazada'] = ($solStLow === 'rechazado') || (!$included && $solStLow !== 'borrador' && $solStLow !== 'draft');
             $rec['is_borrador']  = ($solStLow === 'borrador' || $solStLow === 'draft') && !$included;
-            $rec['excluida']     = (!$included) || $allPoExcluded;
+            $rec['excluida']     = (!$included) || $allPoExcluded || $isLegacyDone;
+
+            // Evitar que solicitudes cerradas manualmente en SAP sin OC/SAP inflen rezagos o castiguen SLA
+            if ($isLegacyDone) {
+                $rec['d_comprador']   = null;
+                $rec['d_to_sap']      = null;
+                $rec['d_ciclo_total'] = null;
+                if ($recId !== '') {
+                    $excludedSolIds[$recId] = true;
+                }
+            }
         }
         unset($rec);
+
+        if (!empty($excludedSolIds) && !empty($cache['oc_records'])) {
+            $cache['oc_records'] = array_values(array_filter(
+                $cache['oc_records'],
+                fn($ocr) => !isset($excludedSolIds[(string)($ocr['solicitud'] ?? '')])
+            ));
+        }
 
         if (!empty($ocStatsByYm)) {
             $cache['oc_stats'] = $ocStatsByYm;
@@ -813,7 +844,7 @@ class DataProcessor
     {
         $this->rebuildDetailsCacheIfNeeded($forceRebuild);
 
-        $statusCfg = $this->statusConfigMgr->getConfig();
+        $statusCfg  = $this->statusConfigMgr->getConfig();
         $excelMtime = file_exists($this->excelPath) ? filemtime($this->excelPath) : 0;
         $solMtime   = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
         $ocMtime    = file_exists($this->ocExcelPath) ? filemtime($this->ocExcelPath) : 0;

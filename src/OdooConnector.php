@@ -7,6 +7,7 @@ class OdooConnector
     private string $cachePath;
     private string $detailsCachePath;
     private string $syncMetaPath;
+    private string $syncConfigPath;
 
     // Aprobadores retirados / inactivos que distorsionan el ranking operativo
     private array $excludedApprovers = [
@@ -16,12 +17,232 @@ class OdooConnector
 
     public function __construct(string $configPath, string $cachePath, string $detailsCachePath)
     {
+        $dataDir = dirname($cachePath);
+        if (!is_dir($dataDir)) {
+            mkdir($dataDir, 0755, true);
+        }
+
         $this->configPath       = $configPath;
         $this->cachePath        = $cachePath;
         $this->detailsCachePath = $detailsCachePath;
-        $this->syncMetaPath     = dirname($cachePath) . '/odoo_sync_meta.json';
+        $this->syncMetaPath     = $dataDir . '/odoo_sync_meta.json';
+        $this->syncConfigPath   = $dataDir . '/sync_config.json';
     }
 
+    // =========================================================================
+    // SECCIÓN 1: CONFIGURACIÓN DE VENTANA DE FECHAS (data/sync_config.json)
+    // =========================================================================
+    public function getSyncConfig(): array
+    {
+        $today = date('Y-m-d');
+        $default = [
+            'date_from'      => date('Y') . '-01-01',
+            'date_to'        => $today,
+            'follow_today'   => true,
+            'incremental'    => true,
+            'last_watermark' => null,
+            'updated_at'     => null,
+        ];
+
+        if (!file_exists($this->syncConfigPath)) {
+            return $default;
+        }
+
+        $saved = json_decode((string)file_get_contents($this->syncConfigPath), true);
+        if (!is_array($saved)) {
+            return $default;
+        }
+
+        $merged = array_merge($default, $saved);
+        if (!empty($merged['follow_today'])) {
+            $merged['date_to'] = $today;
+        } elseif (empty($merged['date_to'])) {
+            $merged['date_to'] = $today;
+        }
+
+        return $merged;
+    }
+
+    public function saveSyncConfig(array $input): array
+    {
+        $rawFrom = trim((string)($input['date_from'] ?? ''));
+        $rawTo   = trim((string)($input['date_to'] ?? ''));
+        $today   = date('Y-m-d');
+
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawFrom)) {
+            return ['ok' => false, 'message' => 'Selecciona una fecha de inicio válida (AAAA-MM-DD).'];
+        }
+
+        if ($rawTo === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawTo)) {
+            $rawTo = $today;
+        }
+
+        if ($rawFrom > $rawTo) {
+            return ['ok' => false, 'message' => 'La fecha de inicio no puede ser posterior a la fecha final.'];
+        }
+
+        $prevCfg = $this->getSyncConfig();
+        $prevFrom = (string)($prevCfg['date_from'] ?? '');
+        $dateFromAdvanced = ($prevFrom !== '' && $rawFrom > $prevFrom);
+        $followToday = ($rawTo === $today) && !empty($input['follow_today']);
+
+        $newCfg = [
+            'date_from'      => $rawFrom,
+            'date_to'        => $followToday ? $today : $rawTo,
+            'follow_today'   => $followToday,
+            'incremental'    => !empty($input['incremental']) || true,
+            // Si la fecha inicial cambió o se modificó la ventana, reiniciar marca de agua incremental
+            'last_watermark' => ($prevFrom === $rawFrom && ($prevCfg['date_to'] ?? '') === $rawTo)
+                ? ($prevCfg['last_watermark'] ?? null)
+                : null,
+            'updated_at'     => date('Y-m-d H:i:s'),
+        ];
+
+        file_put_contents(
+            $this->syncConfigPath,
+            json_encode($newCfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            LOCK_EX
+        );
+
+        // Purga inmediata si la fecha de inicio se movió hacia adelante respecto a la anterior
+        $purgedInfo = '';
+        if ($dateFromAdvanced) {
+            $purgedCount = $this->purgeRecordsBeforeDate($rawFrom);
+            $purgedInfo = " Se eliminaron {$purgedCount} registros anteriores a {$rawFrom}.";
+        }
+
+        return [
+            'ok'      => true,
+            'message' => "Configuración de fechas guardada ({$rawFrom} al {$newCfg['date_to']}).{$purgedInfo}",
+            'config'  => $newCfg,
+        ];
+    }
+
+    // =========================================================================
+    // SECCIÓN 2: PURGA SELECTIVA DE DATOS FUERA DE VENTANA
+    // =========================================================================
+    private function purgeRecordsBeforeDate(string $minDate): int
+    {
+        if (!file_exists($this->cachePath)) {
+            return 0;
+        }
+
+        $cache = json_decode((string)file_get_contents($this->cachePath), true);
+        if (!is_array($cache)) {
+            return 0;
+        }
+
+        $beforeRecords = count($cache['records'] ?? []);
+        $keptSolIds = [];
+
+        $cache['records'] = array_values(array_filter($cache['records'] ?? [], function ($r) use ($minDate, &$keptSolIds) {
+            $f = (string)($r['fecha'] ?? '');
+            $keep = ($f === '' || $f >= $minDate);
+            if ($keep && !empty($r['id'])) {
+                $keptSolIds[(string)$r['id']] = true;
+            }
+            return $keep;
+        }));
+
+        $keptOcIds = [];
+        $cache['spend_records'] = array_values(array_filter($cache['spend_records'] ?? [], function ($sr) use ($minDate, &$keptOcIds) {
+            $f = (string)($sr['fecha'] ?? '');
+            $keep = ($f === '' || $f >= $minDate);
+            if ($keep && !empty($sr['oc_odoo'])) {
+                $keptOcIds[(string)$sr['oc_odoo']] = true;
+            }
+            return $keep;
+        }));
+
+        $cache['oc_records'] = array_values(array_filter($cache['oc_records'] ?? [], function ($ocr) use ($minDate) {
+            $ym = (string)($ocr['ym'] ?? '');
+            $minYm = substr($minDate, 0, 7);
+            return ($ym === '' || $ym >= $minYm);
+        }));
+
+        $minYm = substr($minDate, 0, 7);
+        foreach (array_keys($cache['oc_stats'] ?? []) as $ymKey) {
+            if ($ymKey < $minYm) {
+                unset($cache['oc_stats'][$ymKey]);
+            }
+        }
+
+        $this->rebuildFiltersFromCache($cache);
+        file_put_contents($this->cachePath, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
+
+        // Limpiar también detalles de líneas huérfanas anteriores a $minDate
+        if (file_exists($this->detailsCachePath)) {
+            $details = json_decode((string)file_get_contents($this->detailsCachePath), true);
+            if (is_array($details)) {
+                if (isset($details['sol']) && is_array($details['sol'])) {
+                    foreach (array_keys($details['sol']) as $solKey) {
+                        if (!isset($keptSolIds[$solKey])) {
+                            unset($details['sol'][$solKey]);
+                        }
+                    }
+                }
+                if (isset($details['oc']) && is_array($details['oc'])) {
+                    foreach (array_keys($details['oc']) as $ocKey) {
+                        if (!isset($keptOcIds[$ocKey])) {
+                            unset($details['oc'][$ocKey]);
+                        }
+                    }
+                }
+                file_put_contents($this->detailsCachePath, json_encode($details, JSON_UNESCAPED_UNICODE), LOCK_EX);
+            }
+        }
+
+        return max(0, $beforeRecords - count($cache['records']));
+    }
+
+    private function rebuildFiltersFromCache(array &$cache): void
+    {
+        $meses = [];
+        $soc   = [];
+        $comp  = [];
+        $sol   = [];
+        $prov  = [];
+
+        foreach (($cache['records'] ?? []) as $r) {
+            if (!empty($r['ym'])) $meses[(string)$r['ym']] = true;
+            if (!empty($r['sociedad'])) $soc[(string)$r['sociedad']] = true;
+            if (!empty($r['comprador'])) $comp[(string)$r['comprador']] = true;
+            if (!empty($r['solicitado_por'])) $sol[(string)$r['solicitado_por']] = true;
+        }
+
+        foreach (($cache['spend_records'] ?? []) as $sr) {
+            if (!empty($sr['ym'])) $meses[(string)$sr['ym']] = true;
+            if (!empty($sr['sociedad'])) $soc[(string)$sr['sociedad']] = true;
+            if (!empty($sr['comprador'])) $comp[(string)$sr['comprador']] = true;
+            if (!empty($sr['solicitado_por'])) $sol[(string)$sr['solicitado_por']] = true;
+            if (!empty($sr['proveedor']) && $sr['proveedor'] !== 'Sin proveedor') {
+                $prov[(string)$sr['proveedor']] = true;
+            }
+        }
+
+        $mList = array_keys($meses);
+        $sList = array_keys($soc);
+        $cList = array_keys($comp);
+        $pList = array_keys($prov);
+        $lList = array_keys($sol);
+        sort($mList);
+        sort($sList);
+        sort($cList);
+        sort($pList);
+        sort($lList);
+
+        $cache['filters'] = [
+            'meses'        => $mList,
+            'sociedades'   => $sList,
+            'compradores'  => $cList,
+            'proveedores'  => $pList,
+            'solicitantes' => $lList,
+        ];
+    }
+
+    // =========================================================================
+    // SECCIÓN 3: CONEXIÓN JSON-RPC Y UTILIDADES DE FECHA
+    // =========================================================================
     public function isConfigured(): bool
     {
         if (!file_exists($this->configPath)) {
@@ -45,9 +266,6 @@ class OdooConnector
         return is_array($data) ? $data : null;
     }
 
-    // =========================================================================
-    // CLIENTE JSON-RPC NATIVO DE ODOO 17
-    // =========================================================================
     private function rpc(string $url, string $service, string $method, array $args): mixed
     {
         $payload = json_encode([
@@ -127,9 +345,18 @@ class OdooConnector
         return $all;
     }
 
-    // =========================================================================
-    // UTILIDADES DE CONVERSIÓN UTC -> GUATEMALA Y NORMALIZACIÓN
-    // =========================================================================
+    private function localDateToUtcStart(string $ymd): string
+    {
+        $dt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $ymd . ' 00:00:00', new DateTimeZone('America/Guatemala'));
+        return $dt ? $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s') : ($ymd . ' 00:00:00');
+    }
+
+    private function localDateToUtcEnd(string $ymd): string
+    {
+        $dt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $ymd . ' 23:59:59', new DateTimeZone('America/Guatemala'));
+        return $dt ? $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s') : ($ymd . ' 23:59:59');
+    }
+
     private function odooDateToLocalTs(mixed $val): ?int
     {
         if ($val === false || $val === null || $val === '') {
@@ -140,13 +367,11 @@ class OdooConnector
             return null;
         }
 
-        // Si viene solo fecha YYYY-MM-DD (como date_start), mantener día local a mediodía
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $str)) {
             $dt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $str . ' 12:00:00', new DateTimeZone('America/Guatemala'));
             return $dt ? $dt->getTimestamp() : null;
         }
 
-        // Odoo almacena todos los datetime en UTC
         $dtUtc = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $str, new DateTimeZone('UTC'));
         if ($dtUtc) {
             return $dtUtc->setTimezone(new DateTimeZone('America/Guatemala'))->getTimestamp();
@@ -234,7 +459,7 @@ class OdooConnector
     }
 
     // =========================================================================
-    // SINCRONIZACIÓN COMPLETA DESDE ODOO HACIA CACHE.JSON Y DETAILS_CACHE.JSON
+    // SECCIÓN 4: SINCRONIZACIÓN POR RANGO E INCREMENTAL POR CAMBIOS
     // =========================================================================
     public function syncFromOdoo(): array
     {
@@ -251,48 +476,156 @@ class OdooConnector
         $user   = (string)$cfg['username'];
         $apiKey = (string)$cfg['api_key'];
 
+        $syncCfg  = $this->getSyncConfig();
+        $dateFrom = (string)$syncCfg['date_from'];
+        $dateTo   = (string)$syncCfg['date_to'];
+
+        // 1. Si ya hay datos previos en caché, purgar cualquier registro anterior a date_from
+        $this->purgeRecordsBeforeDate($dateFrom);
+
         $uid = $this->rpc($url, 'common', 'authenticate', [$db, $user, $apiKey, []]);
         if (!$uid || !is_int($uid)) {
             throw new RuntimeException('No se pudo autenticar en Odoo. Verifica data/odoo.config.php.');
         }
 
-        // 1. Descargar Solicitudes de Compra (purchase.request)
-        $prList = $this->searchReadAll($url, $db, $uid, $apiKey, 'purchase.request', [], [
+        $utcStart = $this->localDateToUtcStart($dateFrom);
+        $utcEnd   = $this->localDateToUtcEnd($dateTo);
+
+        // Marca de agua incremental: solo jalar registros modificados o creados desde la última sync
+        $hasExistingCache = file_exists($this->cachePath) && file_exists($this->detailsCachePath);
+        $watermark = (!empty($syncCfg['incremental']) && $hasExistingCache && !empty($syncCfg['last_watermark']))
+            ? (string)$syncCfg['last_watermark']
+            : null;
+
+        // Ventana efectiva de consulta en Odoo:
+        // - Fecha de creación dentro del rango configurado [dateFrom .. dateTo]
+        // - Si existe watermark incremental, se traen los modificados/creados desde (watermark - 15 min margen)
+        $prDomain = [
+            ['create_date', '>=', $utcStart],
+            ['create_date', '<=', $utcEnd],
+        ];
+        $poDomain = [
+            ['create_date', '>=', $utcStart],
+            ['create_date', '<=', $utcEnd],
+        ];
+
+        if ($watermark !== null) {
+            $incFrom = gmdate('Y-m-d H:i:s', max(0, strtotime($watermark . ' UTC') - 900));
+            $effectiveIncFrom = max($utcStart, $incFrom);
+            $prDomain[] = ['write_date', '>=', $effectiveIncFrom];
+            $poDomain[] = ['write_date', '>=', $effectiveIncFrom];
+        }
+
+        // Consultar cabeceras cambiadas/nuevas en el rango
+        $changedPrList = $this->searchReadAll($url, $db, $uid, $apiKey, 'purchase.request', $prDomain, [
             'id', 'name', 'state', 'requested_by', 'assigned_to', 'follower_id',
-            'date_start', 'create_date', 'approval_date', 'company_select', 'company_id'
+            'date_start', 'create_date', 'write_date', 'approval_date', 'company_select', 'company_id'
         ]);
 
-        // 2. Descargar Líneas de Solicitud (purchase.request.line)
-        $prLinesRaw = $this->searchReadAll($url, $db, $uid, $apiKey, 'purchase.request.line', [], [
-            'id', 'request_id', 'product_id', 'name', 'product_qty'
-        ]);
-
-        // 3. Descargar Órdenes de Compra (purchase.order)
-        $poList = $this->searchReadAll($url, $db, $uid, $apiKey, 'purchase.order', [], [
+        $changedPoList = $this->searchReadAll($url, $db, $uid, $apiKey, 'purchase.order', $poDomain, [
             'id', 'name', 'state', 'request_id', 'partner_id', 'currency_id',
-            'amount_total', 'create_date', 'date_approve', 'autorizador_1',
+            'amount_total', 'create_date', 'write_date', 'date_approve', 'autorizador_1',
             'autorizador_2', 'doc_num', 'sap_date', 'follower_id', 'user_id',
             'company_select', 'company_id'
         ]);
 
-        // 4. Descargar Líneas de Órdenes de Compra (purchase.order.line)
-        $poLinesRaw = $this->searchReadAll($url, $db, $uid, $apiKey, 'purchase.order.line', [
-            ['display_type', '=', false]
-        ], [
-            'id', 'order_id', 'product_id', 'name', 'product_qty',
-            'price_unit', 'price_total', 'price_subtotal'
-        ]);
+        // Si en modo incremental no hubo cambios en PR ni PO, actualizar timestamp y no tocar datos
+        if ($watermark !== null && empty($changedPrList) && empty($changedPoList)) {
+            $nowStr = date('Y-m-d H:i:s');
+            $syncCfg['last_watermark'] = gmdate('Y-m-d H:i:s');
+            file_put_contents($this->syncConfigPath, json_encode($syncCfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
 
-        // Indexar cabeceras de PR por ID para enlace directo con PO
-        $prById = [];
-        foreach ($prList as $pr) {
-            $prById[(int)$pr['id']] = $pr;
+            $prevMeta = $this->getLastSyncInfo() ?? [];
+            $meta = array_merge($prevMeta, [
+                'last_sync'     => $nowStr,
+                'date_from'     => $dateFrom,
+                'date_to'       => $dateTo,
+                'changed_pr'    => 0,
+                'changed_po'    => 0,
+                'mode'          => 'incremental_no_changes',
+            ]);
+            file_put_contents($this->syncMetaPath, json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+
+            return [
+                'ok'      => true,
+                'message' => "Sin cambios nuevos en Odoo ({$dateFrom} al {$dateTo}). Datos intactos.",
+                'meta'    => $meta,
+            ];
         }
 
-        // Indexar cabeceras de PO por ID para detalle de líneas
+        // Si es sincronización incremental con cambios, necesitamos también las PR/PO ya cacheadas
+        // que no cambiaron para reconstruir el payload consolidado sin perder ni alterar lo no modificado.
+        $existingCache = $hasExistingCache
+            ? json_decode((string)file_get_contents($this->cachePath), true)
+            : [];
+        $existingDetails = file_exists($this->detailsCachePath)
+            ? json_decode((string)file_get_contents($this->detailsCachePath), true)
+            : [];
+
+        $changedPrIds = array_map(fn($x) => (int)$x['id'], $changedPrList);
+        $changedPoIds = array_map(fn($x) => (int)$x['id'], $changedPoList);
+
+        // Descargar líneas únicamente de las PR y PO cambiadas/nuevas
+        $prLinesRaw = !empty($changedPrIds)
+            ? $this->searchReadAll($url, $db, $uid, $apiKey, 'purchase.request.line', [
+                ['request_id', 'in', $changedPrIds]
+            ], [
+                'id', 'request_id', 'product_id', 'name', 'product_qty'
+            ])
+            : [];
+
+        $poLinesRaw = !empty($changedPoIds)
+            ? $this->searchReadAll($url, $db, $uid, $apiKey, 'purchase.order.line', [
+                ['order_id', 'in', $changedPoIds],
+                ['display_type', '=', false]
+            ], [
+                'id', 'order_id', 'product_id', 'name', 'product_qty',
+                'price_unit', 'price_total', 'price_subtotal'
+            ])
+            : [];
+
+        // Si venimos de una carga anterior, mantener intactos los registros cuyo ID/documento no cambió
+        // y reemplazar/actualizar únicamente los modificados o creados.
+        $mergedRawRows = [];
+        $changedSolNames = [];
+        $changedOcNames  = [];
+
+        foreach ($changedPrList as $pr) {
+            $sName = trim((string)($pr['name'] ?? ''));
+            if ($sName !== '') $changedSolNames[$sName] = true;
+        }
+        foreach ($changedPoList as $po) {
+            $oName = trim((string)($po['name'] ?? ''));
+            if ($oName !== '') $changedOcNames[$oName] = true;
+        }
+
+        // Reconstruir detalles combinando los conservados + los actualizados
+        $solDetails = is_array($existingDetails['sol'] ?? null) ? $existingDetails['sol'] : [];
+        foreach (array_keys($changedSolNames) as $sName) {
+            unset($solDetails[$sName]);
+        }
+        foreach ($prLinesRaw as $ln) {
+            $solName = $this->m2oName($ln['request_id'] ?? null);
+            if ($solName === '') continue;
+            $prodName = $this->m2oName($ln['product_id'] ?? null);
+            if ($prodName === '') {
+                $prodName = trim((string)($ln['name'] ?? ''));
+            }
+            $qty = is_numeric($ln['product_qty'] ?? null) ? round((float)$ln['product_qty'], 4) : 0.0;
+            if ($prodName === '' && $qty === 0.0) continue;
+            $solDetails[$solName][] = [
+                'producto' => $prodName !== '' ? $prodName : '(Sin descripción)',
+                'cantidad' => $qty,
+            ];
+        }
+
+        $ocDetails = is_array($existingDetails['oc'] ?? null) ? $existingDetails['oc'] : [];
+        foreach (array_keys($changedOcNames) as $oName) {
+            unset($ocDetails[$oName]);
+        }
         $poById = [];
         $posByPrId = [];
-        foreach ($poList as $po) {
+        foreach ($changedPoList as $po) {
             $poId = (int)$po['id'];
             $poById[$poId] = $po;
             $reqId = $this->m2oId($po['request_id'] ?? null);
@@ -301,41 +634,13 @@ class OdooConnector
             }
         }
 
-        // Construir details_cache['sol']
-        $solDetails = [];
-        foreach ($prLinesRaw as $ln) {
-            $solName = $this->m2oName($ln['request_id'] ?? null);
-            if ($solName === '') {
-                continue;
-            }
-            $prodName = $this->m2oName($ln['product_id'] ?? null);
-            if ($prodName === '') {
-                $prodName = trim((string)($ln['name'] ?? ''));
-            }
-            $qty = is_numeric($ln['product_qty'] ?? null) ? round((float)$ln['product_qty'], 4) : 0.0;
-            if ($prodName === '' && $qty === 0.0) {
-                continue;
-            }
-            $solDetails[$solName][] = [
-                'producto' => $prodName !== '' ? $prodName : '(Sin descripción)',
-                'cantidad' => $qty,
-            ];
-        }
-
-        // Construir details_cache['oc']
-        $ocDetails = [];
         foreach ($poLinesRaw as $ln) {
             $poId = $this->m2oId($ln['order_id'] ?? null);
             $ocName = $this->m2oName($ln['order_id'] ?? null);
-            if ($ocName === '') {
-                continue;
-            }
+            if ($ocName === '') continue;
             $poHead = ($poId !== null && isset($poById[$poId])) ? $poById[$poId] : [];
             $prov = $this->m2oName($poHead['partner_id'] ?? null, 'Sin proveedor');
-            $div  = strtoupper($this->m2oName($poHead['currency_id'] ?? null, 'GTQ'));
-            if ($div === '') {
-                $div = 'GTQ';
-            }
+            $div  = strtoupper($this->m2oName($poHead['currency_id'] ?? null, 'GTQ')) ?: 'GTQ';
 
             $prodDesc = trim((string)($ln['name'] ?? ''));
             if ($prodDesc === '') {
@@ -348,14 +653,9 @@ class OdooConnector
                 ? round((float)$ln['price_total'], 2)
                 : (is_numeric($ln['price_subtotal'] ?? null) ? round((float)$ln['price_subtotal'], 2) : round($qty * $pu, 2));
 
-            if (!isset($ocDetails[$ocName])) {
-                $ocDetails[$ocName] = [
-                    'proveedor' => $prov,
-                    'divisa'    => $div,
-                    'lineas'    => [],
-                ];
-            }
-            $ocDetails[$ocName]['lineas'][] = [
+            $ocDetails[$ocName]['proveedor'] = $prov;
+            $ocDetails[$ocName]['divisa']    = $div;
+            $ocDetails[$ocName]['lineas'][]  = [
                 'producto'        => $prodDesc !== '' ? $prodDesc : '(Sin descripción)',
                 'cantidad'        => $qty,
                 'precio_unitario' => $pu,
@@ -363,28 +663,21 @@ class OdooConnector
             ];
         }
 
-        // Construir filas normalizadas equivalentes a DB.xlsx
-        $normalizedRows = [];
+        // Construir filas nuevas/actualizadas de PR y PO cambiadas
         $maxDateTs = 0;
-
-        foreach ($prList as $pr) {
+        foreach ($changedPrList as $pr) {
             $prId   = (int)$pr['id'];
             $solRef = trim((string)($pr['name'] ?? ''));
-            if ($solRef === '') {
-                continue;
-            }
+            if ($solRef === '') continue;
 
-            $estadoSol = $this->mapPrState((string)($pr['state'] ?? ''));
-            $solicitante = $this->m2oName($pr['requested_by'] ?? null, 'Sin solicitante');
+            $estadoSol      = $this->mapPrState((string)($pr['state'] ?? ''));
+            $solicitante    = $this->m2oName($pr['requested_by'] ?? null, 'Sin solicitante');
             $autorizadorSol = $this->m2oName($pr['assigned_to'] ?? null, '');
-            $comprador = $this->m2oName($pr['follower_id'] ?? null, 'Sin asignar');
-            $sociedad = $this->m2oName($pr['company_select'] ?? null);
-            if ($sociedad === '') {
-                $sociedad = $this->m2oName($pr['company_id'] ?? null, 'Sin sociedad');
-            }
+            $comprador      = $this->m2oName($pr['follower_id'] ?? null, 'Sin asignar');
+            $sociedad       = $this->m2oName($pr['company_select'] ?? null)
+                ?: $this->m2oName($pr['company_id'] ?? null, 'Sin sociedad');
 
-            // Usar create_date si existe (tiene hora exacta) o date_start
-            $tsCreacionSol = $this->odooDateToLocalTs($pr['create_date'] ?? null)
+            $tsCreacionSol   = $this->odooDateToLocalTs($pr['create_date'] ?? null)
                 ?? $this->odooDateToLocalTs($pr['date_start'] ?? null);
             $tsAprobacionSol = $this->odooDateToLocalTs($pr['approval_date'] ?? null);
 
@@ -394,7 +687,7 @@ class OdooConnector
 
             $linkedPos = $posByPrId[$prId] ?? [];
             if (empty($linkedPos)) {
-                $normalizedRows[] = [
+                $mergedRawRows[] = [
                     'solicitud'         => $solRef,
                     'estado_sol'        => $estadoSol,
                     'solicitado_por'    => $solicitante,
@@ -419,10 +712,7 @@ class OdooConnector
                     $noOcOdoo = trim((string)($po['name'] ?? ''));
                     $estadoOc = $this->mapPoState((string)($po['state'] ?? ''));
                     $prov     = $this->m2oName($po['partner_id'] ?? null, 'Sin proveedor');
-                    $divisa   = strtoupper($this->m2oName($po['currency_id'] ?? null, 'GTQ'));
-                    if ($divisa === '') {
-                        $divisa = 'GTQ';
-                    }
+                    $divisa   = strtoupper($this->m2oName($po['currency_id'] ?? null, 'GTQ')) ?: 'GTQ';
                     $totalOc  = is_numeric($po['amount_total'] ?? null) ? round((float)$po['amount_total'], 2) : 0.0;
                     $autOc1   = trim((string)($po['autorizador_1'] ?? ''));
                     $docSap   = trim((string)($po['doc_num'] ?? ''));
@@ -430,21 +720,19 @@ class OdooConnector
                         $docSap = (string)(int)round((float)$docSap);
                     }
 
-                    $tsCreOc  = $this->odooDateToLocalTs($po['create_date'] ?? null);
-                    $tsAprOc  = $this->odooDateToLocalTs($po['date_approve'] ?? null);
-                    $tsSapOc  = $this->odooDateToLocalTs($po['sap_date'] ?? null);
+                    $tsCreOc = $this->odooDateToLocalTs($po['create_date'] ?? null);
+                    $tsAprOc = $this->odooDateToLocalTs($po['date_approve'] ?? null);
+                    $tsSapOc = $this->odooDateToLocalTs($po['sap_date'] ?? null);
 
                     if ($tsCreOc && $tsCreOc > $maxDateTs) {
                         $maxDateTs = $tsCreOc;
                     }
 
-                    $poComp = $comprador;
-                    if ($poComp === '' || $poComp === 'Sin asignar') {
-                        $poComp = $this->m2oName($po['follower_id'] ?? null)
-                            ?: $this->m2oName($po['user_id'] ?? null, 'Sin asignar');
-                    }
+                    $poComp = ($comprador !== '' && $comprador !== 'Sin asignar')
+                        ? $comprador
+                        : ($this->m2oName($po['follower_id'] ?? null) ?: $this->m2oName($po['user_id'] ?? null, 'Sin asignar'));
 
-                    $normalizedRows[] = [
+                    $mergedRawRows[] = [
                         'solicitud'         => $solRef,
                         'estado_sol'        => $estadoSol,
                         'solicitado_por'    => $solicitante,
@@ -468,19 +756,15 @@ class OdooConnector
             }
         }
 
-        // Incluir también OCs directas sin solicitud vinculada (request_id vacío) para gasto completo
-        foreach ($poList as $po) {
+        // OCs directas cambiadas/nuevas (sin solicitud vinculada)
+        foreach ($changedPoList as $po) {
             if ($this->m2oId($po['request_id'] ?? null) !== null) {
                 continue;
             }
             $noOcOdoo = trim((string)($po['name'] ?? ''));
-            if ($noOcOdoo === '') {
-                continue;
-            }
+            if ($noOcOdoo === '') continue;
             $tsCreOc = $this->odooDateToLocalTs($po['create_date'] ?? null);
-            if (!$tsCreOc) {
-                continue;
-            }
+            if (!$tsCreOc) continue;
             if ($tsCreOc > $maxDateTs) {
                 $maxDateTs = $tsCreOc;
             }
@@ -494,9 +778,9 @@ class OdooConnector
                 $docSap = (string)(int)round((float)$docSap);
             }
 
-            $normalizedRows[] = [
+            $mergedRawRows[] = [
                 'solicitud'         => 'SIN-SOL-' . $noOcOdoo,
-                'estado_sol'        => 'Borrador', // Excluida del conteo de solicitudes, incluida en spend_records
+                'estado_sol'        => 'Borrador',
                 'solicitado_por'    => 'Sin solicitante',
                 'autorizador_sol'   => '',
                 'autorizador_oc_1'  => trim((string)($po['autorizador_1'] ?? '')),
@@ -516,7 +800,135 @@ class OdooConnector
             ];
         }
 
-        // Construir indicadores consolidados (misma lógica exacta de DataProcessor)
+        // Calcular métricas sobre los registros cambiados y fusionar con los registros no modificados
+        $newBatch = $this->buildNormalizedStructures($mergedRawRows, $solDetails, $maxDateTs);
+
+        $finalRecords = [];
+        foreach (($existingCache['records'] ?? []) as $oldR) {
+            $rId = (string)($oldR['id'] ?? '');
+            $rFecha = (string)($oldR['fecha'] ?? '');
+            if ($rFecha !== '' && $rFecha < $dateFrom) continue;
+            if (isset($changedSolNames[$rId])) continue;
+            $finalRecords[] = $oldR;
+        }
+        foreach ($newBatch['records'] as $updR) {
+            $finalRecords[] = $updR;
+        }
+
+        $finalSpend = [];
+        foreach (($existingCache['spend_records'] ?? []) as $oldSr) {
+            $srFecha = (string)($oldSr['fecha'] ?? '');
+            $ocCode  = (string)($oldSr['oc_odoo'] ?? '');
+            $solCode = (string)($oldSr['solicitud'] ?? '');
+            if ($srFecha !== '' && $srFecha < $dateFrom) continue;
+            if ($ocCode !== '' && isset($changedOcNames[$ocCode])) continue;
+            if ($solCode !== '' && isset($changedSolNames[$solCode])) continue;
+            $finalSpend[] = $oldSr;
+        }
+        foreach ($newBatch['spend_records'] as $updSr) {
+            $finalSpend[] = $updSr;
+        }
+
+        $finalOcRecords = [];
+        $minYm = substr($dateFrom, 0, 7);
+        foreach (($existingCache['oc_records'] ?? []) as $oldOcr) {
+            $ym = (string)($oldOcr['ym'] ?? '');
+            $ocCode = (string)($oldOcr['oc_odoo'] ?? '');
+            $solCode = (string)($oldOcr['solicitud'] ?? '');
+            if ($ym !== '' && $ym < $minYm) continue;
+            if ($ocCode !== '' && isset($changedOcNames[$ocCode])) continue;
+            if ($solCode !== '' && isset($changedSolNames[$solCode])) continue;
+            $finalOcRecords[] = $oldOcr;
+        }
+        foreach ($newBatch['oc_records'] as $updOcr) {
+            $finalOcRecords[] = $updOcr;
+        }
+
+        // Recalcular oc_stats desde finalSpend para mantener consistencia exacta
+        $finalOcStats = [];
+        foreach ($finalSpend as $sr) {
+            if (empty($sr['solicitud'])) continue;
+            $ym = (string)($sr['ym'] ?? '');
+            if ($ym === '') continue;
+            if (!isset($finalOcStats[$ym])) {
+                $finalOcStats[$ym] = ['total' => 0, 'canceladas' => 0];
+            }
+            $finalOcStats[$ym]['total']++;
+            if (!empty($sr['is_cancelada'])) {
+                $finalOcStats[$ym]['canceladas']++;
+            }
+        }
+
+        $syncTs = time();
+        $nowStr = date('Y-m-d H:i:s', $syncTs);
+        $cutoffTs = max((int)($existingCache['excel_mtime'] ?? 0), $maxDateTs > 0 ? $maxDateTs : $syncTs);
+
+        $detailsPayload = [
+            'schema_v'  => 3,
+            'source'    => 'odoo_api',
+            'sol_mtime' => $syncTs,
+            'oc_mtime'  => $syncTs,
+            'sol'       => $solDetails,
+            'oc'        => $ocDetails,
+        ];
+        file_put_contents($this->detailsCachePath, json_encode($detailsPayload, JSON_UNESCAPED_UNICODE), LOCK_EX);
+
+        $output = [
+            'schema_v'      => 17,
+            'source'        => 'odoo_api',
+            'date_from'     => $dateFrom,
+            'date_to'       => $dateTo,
+            'excel_mtime'   => $syncTs,
+            'sol_mtime'     => $syncTs,
+            'oc_mtime'      => $syncTs,
+            'generated_at'  => $nowStr,
+            'cutoff_date'   => date('Y-m-d', $cutoffTs),
+            'filters'       => [
+                'meses'        => [],
+                'sociedades'   => [],
+                'compradores'  => [],
+                'proveedores'  => [],
+                'solicitantes' => [],
+            ],
+            'oc_stats'      => $finalOcStats,
+            'records'       => $finalRecords,
+            'oc_records'    => $finalOcRecords,
+            'spend_records' => $finalSpend,
+        ];
+        $this->rebuildFiltersFromCache($output);
+        file_put_contents($this->cachePath, json_encode($output, JSON_UNESCAPED_UNICODE), LOCK_EX);
+
+        // Guardar nueva marca de agua UTC
+        $syncCfg['last_watermark'] = gmdate('Y-m-d H:i:s');
+        file_put_contents($this->syncConfigPath, json_encode($syncCfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+
+        $meta = [
+            'last_sync'  => $nowStr,
+            'date_from'  => $dateFrom,
+            'date_to'    => $dateTo,
+            'changed_pr' => count($changedPrList),
+            'changed_po' => count($changedPoList),
+            'pr_count'   => count($finalRecords),
+            'po_count'   => count($finalSpend),
+            'mode'       => $watermark !== null ? 'incremental_updated' : 'full_window',
+        ];
+        file_put_contents($this->syncMetaPath, json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+
+        return [
+            'ok'      => true,
+            'message' => sprintf(
+                'Odoo sincronizado (%s a %s): %s PR y %s OC actualizados.',
+                $dateFrom,
+                $dateTo,
+                count($changedPrList),
+                count($changedPoList)
+            ),
+            'meta'    => $meta,
+        ];
+    }
+
+    private function buildNormalizedStructures(array $normalizedRows, array $solDetails, int $maxDateTs): array
+    {
         $buyerNamesNorm = [];
         foreach ($normalizedRows as $row) {
             if ($row['comprador'] !== '' && $row['comprador'] !== 'Sin asignar') {
@@ -525,13 +937,9 @@ class OdooConnector
         }
 
         $cutoffTs = $maxDateTs > 0 ? $maxDateTs : time();
-
-        $solicitudesMap  = [];
-        $ocStats         = [];
-        $ocRecords       = [];
-        $spendRecords    = [];
-        $proveedoresSet  = [];
-        $solicitantesSet = [];
+        $solicitudesMap = [];
+        $ocRecords = [];
+        $spendRecords = [];
 
         foreach ($normalizedRows as $row) {
             $solId = $row['solicitud'];
@@ -540,10 +948,6 @@ class OdooConnector
             }
 
             $isDirectPo = str_starts_with($solId, 'SIN-SOL-');
-            if (!$isDirectPo) {
-                $solicitantesSet[$row['solicitado_por']] = true;
-            }
-
             $estadoSolLower = mb_strtolower($row['estado_sol']);
             $isSolRechazada = ($estadoSolLower === 'rechazado');
             $isSolBorrador  = ($estadoSolLower === 'borrador' || $estadoSolLower === 'draft');
@@ -551,17 +955,6 @@ class OdooConnector
             $isOcCancelada  = ($estadoOcLower === 'cancelado');
 
             if ($row['no_oc_odoo'] !== '') {
-                if (!$isDirectPo) {
-                    $ym = date('Y-m', $row['ts_creacion_sol']);
-                    if (!isset($ocStats[$ym])) {
-                        $ocStats[$ym] = ['total' => 0, 'canceladas' => 0];
-                    }
-                    $ocStats[$ym]['total']++;
-                    if ($isOcCancelada) {
-                        $ocStats[$ym]['canceladas']++;
-                    }
-                }
-
                 if (!$isDirectPo && !$isSolRechazada && !$isSolBorrador && !$isOcCancelada && $row['ts_creacion_oc'] !== null && $row['ts_aprobacion_oc'] !== null) {
                     $diasAprobOc = round(max(0, ($row['ts_aprobacion_oc'] - $row['ts_creacion_oc']) / 86400), 2);
                     $aprobOcName = $row['autorizador_oc_1'] !== '' ? $row['autorizador_oc_1'] : 'Sin asignar';
@@ -590,10 +983,6 @@ class OdooConnector
                 $allowSpend = $isDirectPo ? !$isOcCancelada : (!$isSolRechazada && !$isSolBorrador);
                 $isFirm = in_array($estadoOcLower, ['orden de compra', 'para aprobar 1', 'para aprobar 2'], true) && $allowSpend;
                 $isRfq  = ($estadoOcLower === 'solicitud de cotización' || $estadoOcLower === 'solicitud de cotizacion') && $allowSpend;
-
-                if ($provName !== 'Sin proveedor') {
-                    $proveedoresSet[$provName] = true;
-                }
 
                 $dAprobSolOc = (!$isDirectPo && $row['ts_aprobacion_sol'] && $row['ts_aprobacion_sol'] >= $row['ts_creacion_sol'])
                     ? round(($row['ts_aprobacion_sol'] - $row['ts_creacion_sol']) / 86400, 2)
@@ -678,10 +1067,6 @@ class OdooConnector
         }
 
         $records = [];
-        $sociedades = [];
-        $compradores = [];
-        $meses = [];
-
         foreach ($solicitudesMap as $sol) {
             $solId           = $sol['solicitud'];
             $tsCreacionSol   = $sol['ts_creacion_sol'];
@@ -689,10 +1074,6 @@ class OdooConnector
             $ym              = date('Y-m', $tsCreacionSol);
             $dayOfMonth      = (int)date('d', $tsCreacionSol);
             $quincena        = $dayOfMonth <= 15 ? "{$ym}-Q1" : "{$ym}-Q2";
-
-            $sociedades[$sol['sociedad']]   = true;
-            $compradores[$sol['comprador']] = true;
-            $meses[$ym]                     = true;
 
             $excluida = $sol['is_rechazada'] || $sol['is_borrador'] || ($sol['has_any_oc'] && $sol['all_ocs_canceled']);
 
@@ -706,10 +1087,9 @@ class OdooConnector
                 }
             }
 
-            $diasAprobSol = null;
-            if ($tsAprobacionSol && $tsAprobacionSol >= $tsCreacionSol) {
-                $diasAprobSol = round(($tsAprobacionSol - $tsCreacionSol) / 86400, 2);
-            }
+            $diasAprobSol = ($tsAprobacionSol && $tsAprobacionSol >= $tsCreacionSol)
+                ? round(($tsAprobacionSol - $tsCreacionSol) / 86400, 2)
+                : null;
 
             $firstOcOdooTs = null;
             $firstSapTs    = null;
@@ -717,47 +1097,33 @@ class OdooConnector
             $ocStates      = [];
 
             foreach ($sol['valid_ocs'] as $oc) {
-                if ($oc['no_oc_odoo'] !== '') {
-                    $ocCodes[] = $oc['no_oc_odoo'];
+                if ($oc['no_oc_odoo'] !== '') $ocCodes[] = $oc['no_oc_odoo'];
+                if ($oc['estado_oc'] !== '') $ocStates[] = $oc['estado_oc'];
+                if ($oc['ts_creacion_oc'] !== null && ($firstOcOdooTs === null || $oc['ts_creacion_oc'] < $firstOcOdooTs)) {
+                    $firstOcOdooTs = $oc['ts_creacion_oc'];
                 }
-                if ($oc['estado_oc'] !== '') {
-                    $ocStates[] = $oc['estado_oc'];
-                }
-                if ($oc['ts_creacion_oc'] !== null) {
-                    if ($firstOcOdooTs === null || $oc['ts_creacion_oc'] < $firstOcOdooTs) {
-                        $firstOcOdooTs = $oc['ts_creacion_oc'];
-                    }
-                }
-                if ($oc['ts_creacion_sap'] !== null) {
-                    if ($firstSapTs === null || $oc['ts_creacion_sap'] < $firstSapTs) {
-                        $firstSapTs = $oc['ts_creacion_sap'];
-                    }
+                if ($oc['ts_creacion_sap'] !== null && ($firstSapTs === null || $oc['ts_creacion_sap'] < $firstSapTs)) {
+                    $firstSapTs = $oc['ts_creacion_sap'];
                 }
             }
 
-            $diasGestionComprador = null;
             $tieneOcOdoo = ($firstOcOdooTs !== null);
-            if (!$excluida && $tsAprobacionSol !== null) {
-                $endTs = $tieneOcOdoo ? $firstOcOdooTs : $cutoffTs;
-                $diasGestionComprador = round(max(0, ($endTs - $tsAprobacionSol) / 86400), 2);
-            }
+            $diasGestionComprador = (!$excluida && $tsAprobacionSol !== null)
+                ? round(max(0, (($tieneOcOdoo ? $firstOcOdooTs : $cutoffTs) - $tsAprobacionSol) / 86400), 2)
+                : null;
 
-            $diasAprobSap = null;
             $tieneOcSap = ($firstSapTs !== null);
-            if (!$excluida && $tieneOcOdoo && $tieneOcSap) {
-                $diasAprobSap = round(max(0, ($firstSapTs - $firstOcOdooTs) / 86400), 2);
-            }
+            $diasAprobSap = (!$excluida && $tieneOcOdoo && $tieneOcSap)
+                ? round(max(0, ($firstSapTs - $firstOcOdooTs) / 86400), 2)
+                : null;
 
-            $diasAprobToSap = null;
-            if (!$excluida && $tsAprobacionSol !== null) {
-                $endSapTs = $tieneOcSap ? $firstSapTs : $cutoffTs;
-                $diasAprobToSap = round(max(0, ($endSapTs - $tsAprobacionSol) / 86400), 2);
-            }
+            $diasAprobToSap = (!$excluida && $tsAprobacionSol !== null)
+                ? round(max(0, (($tieneOcSap ? $firstSapTs : $cutoffTs) - $tsAprobacionSol) / 86400), 2)
+                : null;
 
-            $diasCicloTotal = null;
-            if (!$excluida && $tieneOcSap) {
-                $diasCicloTotal = round(max(0, ($firstSapTs - $tsCreacionSol) / 86400), 2);
-            }
+            $diasCicloTotal = (!$excluida && $tieneOcSap)
+                ? round(max(0, ($firstSapTs - $tsCreacionSol) / 86400), 2)
+                : null;
 
             $edadDias = round(($cutoffTs - $tsCreacionSol) / 86400, 1);
 
@@ -795,71 +1161,10 @@ class OdooConnector
             ];
         }
 
-        ksort($meses);
-        $listSociedades   = array_keys($sociedades);
-        $listCompradores  = array_keys($compradores);
-        $listProveedores  = array_keys($proveedoresSet);
-        $listSolicitantes = array_keys($solicitantesSet);
-        sort($listSociedades);
-        sort($listCompradores);
-        sort($listProveedores);
-        sort($listSolicitantes);
-
-        $syncTs = time();
-        $nowStr = date('Y-m-d H:i:s', $syncTs);
-
-        // Guardar details_cache.json
-        $detailsPayload = [
-            'schema_v'  => 3,
-            'source'    => 'odoo_api',
-            'sol_mtime' => $syncTs,
-            'oc_mtime'  => $syncTs,
-            'sol'       => $solDetails,
-            'oc'        => $ocDetails,
-        ];
-        file_put_contents($this->detailsCachePath, json_encode($detailsPayload, JSON_UNESCAPED_UNICODE));
-
-        // Guardar cache.json
-        $output = [
-            'schema_v'      => 17,
-            'source'        => 'odoo_api',
-            'excel_mtime'   => $syncTs,
-            'sol_mtime'     => $syncTs,
-            'oc_mtime'      => $syncTs,
-            'generated_at'  => $nowStr,
-            'cutoff_date'   => date('Y-m-d', $cutoffTs),
-            'filters'       => [
-                'meses'        => array_keys($meses),
-                'sociedades'   => $listSociedades,
-                'compradores'  => $listCompradores,
-                'proveedores'  => $listProveedores,
-                'solicitantes' => $listSolicitantes,
-            ],
-            'oc_stats'      => $ocStats,
+        return [
             'records'       => $records,
             'oc_records'    => $ocRecords,
             'spend_records' => $spendRecords,
-        ];
-        file_put_contents($this->cachePath, json_encode($output, JSON_UNESCAPED_UNICODE));
-
-        // Guardar metadatos de sincronización
-        $meta = [
-            'last_sync'  => $nowStr,
-            'pr_count'   => count($prList),
-            'po_count'   => count($poList),
-            'sol_lines'  => count($prLinesRaw),
-            'po_lines'   => count($poLinesRaw),
-        ];
-        file_put_contents($this->syncMetaPath, json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-        return [
-            'ok'      => true,
-            'message' => sprintf(
-                'Sincronización directa con Odoo completada (%s solicitudes y %s OCs actualizadas).',
-                number_format(count($prList)),
-                number_format(count($poList))
-            ),
-            'meta'    => $meta,
         ];
     }
 }

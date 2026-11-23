@@ -37,92 +37,95 @@
                         👤 <?= htmlspecialchars((string)($currentUser['display_name'] ?? '')) ?>
                         <span class="opacity-75">(<?= !empty($isManager) ? 'Manager' : 'Comprador' ?>)</span>
                     </span>
-                    <?php if (!empty($uploadFeedback) && !empty($uploadFeedback['ok'])): ?>
-                        <span id="headerSyncBanner" class="inline-flex items-center gap-1 px-2 py-0.2 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 text-[10px] font-semibold">
-                            ✓ <?= htmlspecialchars((string)$uploadFeedback['message']) ?>
-                            <button type="button" onclick="this.parentElement.remove()" class="ml-1 opacity-70 hover:opacity-100 font-bold" title="Ocultar aviso">✕</button>
-                        </span>
-                    <?php endif; ?>
                 </div>
             </div>
 
-            <!-- Bloque Derecho: Módulos + Buscador + Herramientas Compactas -->
-            <div class="flex flex-wrap items-center gap-1.5 text-xs shrink-0">
+            <!-- Bloque Derecho: Notificación en una línea arriba + Módulos y Botones -->
+            <div class="flex flex-col lg:items-end gap-1 shrink-0">
 
-                <!-- Selector Principal de 3 Módulos -->
-                <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-0.5 border border-slate-200 dark:border-gray-700">
-                    <button id="btnTabCycle" type="button" onclick="setMainTab('cycle')"
-                        class="px-2.5 py-1 rounded-md text-[11px] font-bold text-white bg-cresta-navy dark:bg-cresta-red transition whitespace-nowrap">
-                        Ciclo SLA
-                    </button>
-                    <button id="btnTabSpend" type="button" onclick="setMainTab('spend')"
-                        class="px-2.5 py-1 rounded-md text-[11px] font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">
-                        Gasto y Productos
-                    </button>
-                    <button id="btnTabSupplier" type="button" onclick="setMainTab('supplier')"
-                        class="px-2.5 py-1 rounded-md text-[11px] font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">
-                        Proveedor 360°
-                    </button>
-                </div>
+                <?php if (!empty($uploadFeedback) && !empty($uploadFeedback['ok'])): ?>
+                    <div id="headerSyncBanner" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 text-[10px] font-semibold whitespace-nowrap max-w-full overflow-x-auto">
+                        <span>✓ <?= htmlspecialchars((string)$uploadFeedback['message']) ?></span>
+                        <button type="button" onclick="document.getElementById('headerSyncBanner').remove()" class="ml-1 opacity-70 hover:opacity-100 font-bold" title="Ocultar aviso">✕</button>
+                    </div>
+                <?php endif; ?>
 
-                <!-- Buscador Global Compacto -->
-                <form onsubmit="handleQuickDocLookup(event)" class="inline-flex items-center">
-                    <input id="quickDocInput" type="text" placeholder="PR, OC, SKU..."
-                        title="Busca por Solicitud (SV2396), OC (P17177), SKU (M017675) o descripción"
-                        class="bg-slate-50 dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-l-lg px-2 py-1 text-[11px] w-28 sm:w-36 focus:w-44 transition-all focus:border-cresta-navy">
-                    <button type="submit" title="Buscar en solicitudes, OCs y líneas de artículos"
-                        class="px-2 py-1 rounded-r-lg bg-slate-200 hover:bg-slate-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-cresta-navy dark:text-white text-[11px] font-bold border border-l-0 border-slate-300 dark:border-gray-700">
-                        🔍
-                    </button>
-                </form>
+                <div class="flex flex-wrap items-center gap-1.5 text-xs">
+                    <!-- Selector Principal de 3 Módulos -->
+                    <div class="inline-flex rounded-lg bg-slate-100 dark:bg-gray-800 p-0.5 border border-slate-200 dark:border-gray-700">
+                        <button id="btnTabCycle" type="button" onclick="setMainTab('cycle')"
+                            class="px-2.5 py-1 rounded-md text-[11px] font-bold text-white bg-cresta-navy dark:bg-cresta-red transition whitespace-nowrap">
+                            Ciclo SLA
+                        </button>
+                        <button id="btnTabSpend" type="button" onclick="setMainTab('spend')"
+                            class="px-2.5 py-1 rounded-md text-[11px] font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">
+                            Gasto y Productos
+                        </button>
+                        <button id="btnTabSupplier" type="button" onclick="setMainTab('supplier')"
+                            class="px-2.5 py-1 rounded-md text-[11px] font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition whitespace-nowrap">
+                            Proveedor 360°
+                        </button>
+                    </div>
 
-                <!-- Barra de Acciones Compactas en una sola línea -->
-                <div class="inline-flex items-center gap-1">
-                    <!-- Descargar PDF -->
-                    <button id="btnExportTabPDF" type="button" onclick="exportActiveTabPDF()" title="Descargar informe gráfico en PDF"
-                        class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-cresta-red hover:opacity-90 text-white text-[11px] font-bold transition">
-                        <span>📄</span>
-                        <span class="hidden xl:inline">PDF</span>
-                    </button>
+                    <!-- Buscador Global Compacto -->
+                    <form onsubmit="handleQuickDocLookup(event)" class="inline-flex items-center">
+                        <input id="quickDocInput" type="text" placeholder="PR, OC, SKU..."
+                            title="Busca por Solicitud (SV2396), OC (P17177), SKU (M017675) o descripción"
+                            class="bg-slate-50 dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-l-lg px-2 py-1 text-[11px] w-28 sm:w-36 focus:w-44 transition-all focus:border-cresta-navy">
+                        <button type="submit" title="Buscar en solicitudes, OCs y líneas de artículos"
+                            class="px-2 py-1 rounded-r-lg bg-slate-200 hover:bg-slate-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-cresta-navy dark:text-white text-[11px] font-bold border border-l-0 border-slate-300 dark:border-gray-700">
+                            🔍
+                        </button>
+                    </form>
 
-                    <?php if (!empty($isManager)): ?>
-                        <!-- Sincronizar Odoo -->
-                        <form method="POST" class="inline" onsubmit="const b=this.querySelector('button'); b.disabled=true; b.innerHTML='<span>⏳</span><span class=\'hidden xl:inline\'>Sinc...</span>';">
-                            <input type="hidden" name="action" value="sync_odoo_api">
-                            <button type="submit" title="Sincronizar directamente con Odoo 17"
-                                class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition">
-                                <span>🔄</span>
-                                <span class="hidden xl:inline">Sincronizar</span>
+                    <!-- Barra de Acciones Compactas en una sola línea -->
+                    <div class="inline-flex items-center gap-1">
+                        <!-- Descargar PDF -->
+                        <button id="btnExportTabPDF" type="button" onclick="exportActiveTabPDF()" title="Descargar informe gráfico en PDF"
+                            class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-cresta-red hover:opacity-90 text-white text-[11px] font-bold transition">
+                            <span>📄</span>
+                            <span class="hidden xl:inline">PDF</span>
+                        </button>
+
+                        <?php if (!empty($isManager)): ?>
+                            <!-- Sincronizar Odoo -->
+                            <form method="POST" class="inline" onsubmit="const b=this.querySelector('button'); b.disabled=true; b.innerHTML='<span>⏳</span><span class=\'hidden xl:inline\'>Sinc...</span>';">
+                                <input type="hidden" name="action" value="sync_odoo_api">
+                                <button type="submit" title="Sincronizar directamente con Odoo 17"
+                                    class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition">
+                                    <span>🔄</span>
+                                    <span class="hidden xl:inline">Sincronizar</span>
+                                </button>
+                            </form>
+
+                            <!-- Respaldo Excel -->
+                            <button type="button" onclick="openAdminUploadModal()" title="Respaldo: Cargar archivos Excel de Odoo"
+                                class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 text-[11px] font-bold transition">
+                                <span>📊</span>
+                                <span class="hidden 2xl:inline">Excel</span>
                             </button>
-                        </form>
 
-                        <!-- Respaldo Excel -->
-                        <button type="button" onclick="openAdminUploadModal()" title="Respaldo: Cargar archivos Excel de Odoo"
-                            class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 text-[11px] font-bold transition">
-                            <span>📊</span>
-                            <span class="hidden 2xl:inline">Excel</span>
+                            <!-- Configuración -->
+                            <button type="button" onclick="openAdminUsersModal()" title="Configuración de usuarios, fechas y estatus"
+                                class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 text-[11px] font-bold transition">
+                                <span>⚙️</span>
+                                <span class="hidden xl:inline">Config</span>
+                            </button>
+                        <?php endif; ?>
+
+                        <!-- Modo Claro / Oscuro -->
+                        <button id="btnThemeToggle" type="button" onclick="toggleTheme()" title="Alternar modo claro / oscuro"
+                            class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-300 dark:border-gray-700 bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-200 text-[11px] font-bold transition">
+                            <span id="themeIcon">🌙</span>
+                            <span id="themeLabel" class="hidden">Oscuro</span>
                         </button>
 
-                        <!-- Configuración -->
-                        <button type="button" onclick="openAdminUsersModal()" title="Configuración de usuarios, fechas y estatus"
-                            class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 text-[11px] font-bold transition">
-                            <span>⚙️</span>
-                            <span class="hidden xl:inline">Config</span>
-                        </button>
-                    <?php endif; ?>
-
-                    <!-- Modo Claro / Oscuro -->
-                    <button id="btnThemeToggle" type="button" onclick="toggleTheme()" title="Alternar modo claro / oscuro"
-                        class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-300 dark:border-gray-700 bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-200 text-[11px] font-bold transition">
-                        <span id="themeIcon">🌙</span>
-                        <span id="themeLabel" class="hidden">Oscuro</span>
-                    </button>
-
-                    <!-- Salir -->
-                    <a href="?logout=1" title="Cerrar sesión"
-                        class="inline-flex items-center px-2 py-1 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 hover:bg-red-100 dark:bg-red-950/60 dark:hover:bg-red-900 text-cresta-red dark:text-red-300 text-[11px] font-bold transition">
-                        Salir
-                    </a>
+                        <!-- Salir -->
+                        <a href="?logout=1" title="Cerrar sesión"
+                            class="inline-flex items-center px-2 py-1 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 hover:bg-red-100 dark:bg-red-950/60 dark:hover:bg-red-900 text-cresta-red dark:text-red-300 text-[11px] font-bold transition">
+                            Salir
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>

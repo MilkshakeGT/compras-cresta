@@ -11,9 +11,9 @@
                     <span class="text-xs text-slate-500 dark:text-gray-400">
                         Corte: <strong class="text-slate-800 dark:text-gray-200"><?= htmlspecialchars($payload['cutoff_date']) ?></strong>
                     </span>
-                    <?php if ($forceSync && !empty($syncInfo['message'])): ?>
+                    <?php if ($uploadFeedback !== null && !empty($uploadFeedback['ok'])): ?>
                         <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 font-semibold">
-                            <?= htmlspecialchars($syncInfo['message']) ?>
+                            ✓ Datos actualizados
                         </span>
                     <?php endif; ?>
                 </div>
@@ -57,12 +57,12 @@
                     <span>Descargar PDF</span>
                 </button>
 
-                <!-- Botón Sincronizar OneDrive -->
-                <a href="?sync=1" title="Forzar actualización desde OneDrive"
-                    class="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
-                    <span>↻</span>
-                    <span class="hidden md:inline">Sincronizar</span>
-                </a>
+                <!-- Botón Admin: Cargar Reportes Crudos de Odoo -->
+                <button type="button" onclick="openAdminUploadModal()" title="Cargar archivos Excel exportados de Odoo"
+                    class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
+                    <span>⚙️</span>
+                    <span class="hidden md:inline">Cargar Datos</span>
+                </button>
 
                 <!-- Toggle Modo Claro / Oscuro -->
                 <button id="btnThemeToggle" type="button" onclick="toggleTheme()" title="Alternar modo claro / oscuro"

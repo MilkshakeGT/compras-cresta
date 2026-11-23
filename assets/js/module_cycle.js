@@ -1,1115 +1,261 @@
-/* =========================================================================
- * MÓDULO 1: CICLO OPERATIVO Y SLA (assets/js/module_cycle.js)
- * ========================================================================= */
+/* ==========================================================================
+   MÓDULO 1: CICLO OPERATIVO Y SLA DE COMPRAS (assets/js/module_cycle.js)
+   ========================================================================== */
 
-let quincenaChartMode = 'cumulative'; // 'cumulative' | 'buckets'
+let chartCycleTrendInstance = null;
+let chartSapBacklogInstance = null;
+let chartBuyerSlaInstance   = null;
 
-function setQuincenaChartMode(mode) {
-    quincenaChartMode = mode;
-    const btnCum  = document.getElementById('btnQuincenaCum');
-    const btnDist = document.getElementById('btnQuincenaDist');
+// ==========================================================================
+// SECCIÓN 1: REGLA ÚNICA DE EXCLUSIÓN Y ELEGIBILIDAD DE REZAGO SIN SAP
+// ==========================================================================
+function isRecordExcludedFromCycle(r) {
+    if (!r) return true;
+    if (r.excluida || r.is_rechazada || r.is_borrador) return true;
 
-    const activeCls   = 'px-2.5 py-1 rounded-md font-bold text-white bg-cresta-navy dark:bg-cresta-red transition';
-    const inactiveCls = 'px-2.5 py-1 rounded-md font-bold text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition';
-
-    if (btnCum && btnDist) {
-        btnCum.className  = mode === 'cumulative' ? activeCls : inactiveCls;
-        btnDist.className = mode === 'buckets'    ? activeCls : inactiveCls;
+    const st = String(r.estado_sol || '').trim().toLowerCase();
+    if (st === 'rechazado' || st === 'rechazada' || st === 'rejected' || st === 'borrador' || st === 'draft') {
+        return true;
     }
 
-    const entityRecords = filterByEntity(RAW_DATA.records);
-    const maxYm = getMaxYmForCurrentSelection();
-    renderChartQuincenas(entityRecords, maxYm);
-}
+    const hasOcOdoo = Boolean(r.tiene_oc_odoo) || String(r.oc_odoo || '').trim() !== '';
+    const hasOcSap  = Boolean(r.tiene_oc_sap) || Boolean(r.f_creacion_sap);
 
-function getPreviousQuarterRecords(entityRecords, year, qId) {
-    const order = ['Q1', 'Q2', 'Q3', 'Q4'];
-    const idx = order.indexOf(qId);
-    let prevYear = year;
-    let prevQId = null;
-
-    if (idx > 0) {
-        prevQId = order[idx - 1];
-    } else {
-        prevYear = String(Number(year) - 1);
-        prevQId = 'Q4';
+    // Excluir solicitudes "hecho" sin OC en Odoo ni en SAP (dualidad ERP histórica)
+    if ((st === 'hecho' || st === 'done') && !hasOcOdoo && !hasOcSap) {
+        return true;
     }
 
-    const prevYq = `${prevYear}-${prevQId}`;
-    const prevRows = filterRecordsByYearQuarter(entityRecords, prevYq);
-    if (!prevRows.length) return null;
-
-    return {
-        label: `${prevQId} ${prevYear !== year ? prevYear : ''}`.trim(),
-        rows: prevRows,
-        stats: calcKpiStats(prevRows)
-    };
+    return false;
 }
 
-function calcKpiStats(records) {
-    const validas = records.filter(r => !r.excluida);
-    const aprobadas = validas.filter(r => r.aprobada);
-
-    const conOcOdoo = aprobadas.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
-    const diasCompArr = conOcOdoo.map(r => r.d_comprador);
-    const avgDiasComp = diasCompArr.length ? avg(diasCompArr) : null;
-    const medDiasComp = diasCompArr.length ? median(diasCompArr) : null;
-
-    const aprobSolArr = validas.map(r => r.d_aprob_sol).filter(v => v !== null);
-    const avgDiasAprobSol = aprobSolArr.length ? avg(aprobSolArr) : null;
-
-    const matureComp = aprobadas.filter(r => r.edad_dias >= 14);
-    const isCompPartial = (matureComp.length === 0 && conOcOdoo.length > 0);
-    const compEvaluables = matureComp.length > 0 ? matureComp : conOcOdoo;
-    const comp14 = compEvaluables.filter(r => r.tiene_oc_odoo && r.d_comprador !== null && r.d_comprador <= 14);
-    const pctComp14 = compEvaluables.length ? Math.round((comp14.length / compEvaluables.length) * 100) : null;
-
-    const conOcSap = aprobadas.filter(r => r.tiene_oc_sap && r.d_to_sap !== null);
-    const matureSap = aprobadas.filter(r => r.edad_dias >= 14);
-    const isSapPartial = (matureSap.length === 0 && conOcSap.length > 0);
-    const sapEvaluables = matureSap.length > 0 ? matureSap : conOcSap;
-    const sap14 = sapEvaluables.filter(r => r.tiene_oc_sap && r.d_to_sap !== null && r.d_to_sap <= 14);
-    const pctSap14 = sapEvaluables.length ? Math.round((sap14.length / sapEvaluables.length) * 100) : null;
-
-    return {
-        validasList: validas,
-        conOcOdooList: conOcOdoo,
-        compEvaluablesList: compEvaluables,
-        sapEvaluablesList: sapEvaluables,
-        isCompPartial,
-        isSapPartial,
-        totalValidas: validas.length,
-        avgDiasComp,
-        medDiasComp,
-        avgDiasAprobSol,
-        pctComp14,
-        pctSap14
-    };
+function isRecordPendingSap(r) {
+    if (typeof isValidForSapBacklog === 'function') {
+        return isValidForSapBacklog(r);
+    }
+    if (isRecordExcludedFromCycle(r)) return false;
+    const hasOcSap = Boolean(r.tiene_oc_sap) || Boolean(r.f_creacion_sap);
+    return Boolean(r.aprobada) && !hasOcSap;
 }
 
-function renderCycleView() {
-    const selectedYear = document.getElementById('filterYear').value;
-    const selectedYm = document.getElementById('filterMes').value;
-    const selectedQ = document.getElementById('filterQuarter').value;
-    const selectedComp = document.getElementById('filterComprador').value;
+// ==========================================================================
+// SECCIÓN 2: RENDERIZADO PRINCIPAL DEL MÓDULO DE CICLO OPERATIVO (SLA)
+// ==========================================================================
+function renderCycleModule(records) {
+    const validRecords      = records.filter(r => !isRecordExcludedFromCycle(r));
+    const approvedRecords   = validRecords.filter(r => Boolean(r.aprobada));
+    const withSapRecords    = approvedRecords.filter(r => Boolean(r.tiene_oc_sap) && r.d_ciclo_total !== null);
+    const pendingSapRecords = records.filter(isRecordPendingSap);
 
-    const entityRecords = filterByEntity(RAW_DATA.records);
-    const currentRecords = filterByActivePeriod(entityRecords);
-    const currentStats = calcKpiStats(currentRecords);
-    const maxYm = getMaxYmForCurrentSelection();
+    // 1. KPI: Tiempo Ciclo Total (Creación PR -> SAP)
+    const avgCycleTotal = withSapRecords.length
+        ? (withSapRecords.reduce((acc, r) => acc + Number(r.d_ciclo_total || 0), 0) / withSapRecords.length)
+        : 0;
 
-    let prevCompData = null;
-    if (periodMode === 'compare_q') {
-        const yq1 = document.getElementById('filterCompareQ1').value;
-        const yq2 = document.getElementById('filterCompareQ2').value;
-        const rowsQ2 = filterRecordsByYearQuarter(entityRecords, yq2);
-        const statsQ2 = calcKpiStats(rowsQ2);
-        prevCompData = {
-            label: formatYearQuarterShort(yq2),
-            stats: statsQ2
-        };
-        renderQuarterComparisonPanel(yq1, yq2, currentStats, statsQ2);
-    } else if (periodMode === 'month') {
-        const allMeses = RAW_DATA.filters.meses;
-        const idxYm = allMeses.indexOf(selectedYm);
-        if (idxYm > 0) {
-            const prevYm = allMeses[idxYm - 1];
-            prevCompData = {
-                label: MONTH_NAMES[prevYm.split('-')[1]],
-                stats: calcKpiStats(entityRecords.filter(r => r.ym === prevYm))
-            };
+    // 2. KPI: Gestión Comprador (Aprobación PR -> Creación OC Odoo)
+    const buyerManaged = approvedRecords.filter(r => r.d_comprador !== null);
+    const avgBuyerDays = buyerManaged.length
+        ? (buyerManaged.reduce((acc, r) => acc + Number(r.d_comprador || 0), 0) / buyerManaged.length)
+        : 0;
+
+    // 3. KPI: Cumplimiento Meta <= 14 días (sobre solicitudes válidas aprobadas con ciclo cerrado o en curso)
+    const slaEvaluated = approvedRecords.filter(r => Boolean(r.tiene_oc_sap) || Boolean(r.tiene_oc_odoo));
+    const slaWithin14  = slaEvaluated.filter(r => {
+        const d = r.tiene_oc_sap ? Number(r.d_ciclo_total ?? 999) : Number(r.d_to_sap ?? r.edad_dias ?? 999);
+        return d <= 14;
+    });
+    const slaPct = slaEvaluated.length ? ((slaWithin14.length / slaEvaluated.length) * 100) : 0;
+
+    // 4. KPI: Rezago sin SAP (idéntico al modal AUDITORÍA · REZAGO SIN SAP)
+    const pendingSapCount = pendingSapRecords.length;
+    const criticalSapCount = pendingSapRecords.filter(r => Number(r.d_to_sap ?? r.edad_dias ?? 0) > 30).length;
+
+    setTextSafe('kpiCycleTotalDays', `${avgCycleTotal.toFixed(1)} d`);
+    setTextSafe('kpiCycleTotalSub', `${withSapRecords.length} solicitudes cerradas en SAP`);
+
+    setTextSafe('kpiBuyerDays', `${avgBuyerDays.toFixed(1)} d`);
+    setTextSafe('kpiBuyerSub', `${buyerManaged.length} solicitudes gestionadas`);
+
+    setTextSafe('kpiSla14Pct', `${slaPct.toFixed(1)}%`);
+    setTextSafe('kpiSla14Sub', `${slaWithin14.length} de ${slaEvaluated.length} en meta (≤ 14 d)`);
+
+    setTextSafe('kpiPendingSapCount', String(pendingSapCount));
+    setTextSafe('kpiPendingSapSub', `${criticalSapCount} críticas (> 30 días) · Clic para auditar`);
+
+    renderCycleTrendChart(validRecords);
+    renderSapBacklogChart(pendingSapRecords);
+    renderBuyerSlaTableAndChart(approvedRecords);
+}
+
+// ==========================================================================
+// SECCIÓN 3: GRÁFICA DE TENDENCIA MENSUAL DEL CICLO (ETAPAS SLA)
+// ==========================================================================
+function renderCycleTrendChart(validRecords) {
+    const el = document.getElementById('chartCycleTrend');
+    if (!el || typeof ApexCharts === 'undefined') return;
+
+    const byYm = {};
+    validRecords.forEach(r => {
+        const ym = r.ym || '';
+        if (!ym) return;
+        if (!byYm[ym]) {
+            byYm[ym] = { aprobSol: [], comp: [], aprobSap: [], total: [] };
         }
-    } else if (periodMode === 'quarter') {
-        prevCompData = getPreviousQuarterRecords(entityRecords, selectedYear, selectedQ);
+        if (r.d_aprob_sol !== null) byYm[ym].aprobSol.push(Number(r.d_aprob_sol));
+        if (r.d_comprador !== null) byYm[ym].comp.push(Number(r.d_comprador));
+        if (r.d_aprob_sap !== null) byYm[ym].aprobSap.push(Number(r.d_aprob_sap));
+        if (r.d_ciclo_total !== null) byYm[ym].total.push(Number(r.d_ciclo_total));
+    });
+
+    const months = Object.keys(byYm).sort();
+    const avg = arr => arr.length ? Number((arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1)) : 0;
+
+    const sAprobSol = months.map(m => avg(byYm[m].aprobSol));
+    const sComp     = months.map(m => avg(byYm[m].comp));
+    const sAprobSap = months.map(m => avg(byYm[m].aprobSap));
+    const sTotal    = months.map(m => avg(byYm[m].total));
+
+    const isDark = document.documentElement.classList.contains('dark');
+    const options = {
+        chart: { type: 'line', height: 290, toolbar: { show: false }, background: 'transparent' },
+        theme: { mode: isDark ? 'dark' : 'light' },
+        stroke: { width: [2, 3, 2, 3], curve: 'smooth', dashArray: [0, 0, 0, 5] },
+        colors: ['#64748B', '#264073', '#0EA5E9', '#C8102E'],
+        series: [
+            { name: 'Aprobación PR (d)', data: sAprobSol },
+            { name: 'Gestión Comprador (d)', data: sComp },
+            { name: 'Odoo → SAP (d)', data: sAprobSap },
+            { name: 'Ciclo Total SAP (d)', data: sTotal },
+        ],
+        xaxis: { categories: months },
+        yaxis: { title: { text: 'Días promedio' }, min: 0 },
+        legend: { position: 'top' },
+        dataLabels: { enabled: false },
+    };
+
+    if (chartCycleTrendInstance) {
+        chartCycleTrendInstance.destroy();
     }
-
-    document.getElementById('kpi1Value').textContent = currentStats.totalValidas.toLocaleString();
-    if (periodMode === 'compare_q') {
-        const yq1 = document.getElementById('filterCompareQ1').value;
-        const diffVol = currentStats.totalValidas - prevCompData.stats.totalValidas;
-        document.getElementById('kpi1Badge').textContent = `${formatYearQuarterShort(yq1)} (${diffVol >= 0 ? '+' : ''}${diffVol})`;
-    } else if (periodMode === 'ytd') {
-        document.getElementById('kpi1Badge').textContent = `YTD ${selectedYear}`;
-    } else if (periodMode === 'quarter') {
-        document.getElementById('kpi1Badge').textContent = `${selectedQ} ${selectedYear}`;
-    } else {
-        document.getElementById('kpi1Badge').textContent = formatYm(selectedYm);
-    }
-
-    document.getElementById('kpiTimeValue').textContent = currentStats.avgDiasComp !== null ? currentStats.avgDiasComp.toFixed(1) : 'N/D';
-    document.getElementById('kpiTimeSub').textContent = currentStats.medDiasComp !== null
-        ? `Mediana: ${currentStats.medDiasComp.toFixed(1)} d · ${currentStats.conOcOdooList.length} OC`
-        : 'Sin OC generadas aún';
-
-    const bTime = document.getElementById('kpiTimeBadge');
-    if (prevCompData && currentStats.avgDiasComp !== null && prevCompData.stats.avgDiasComp !== null) {
-        const diffDays = Number((currentStats.avgDiasComp - prevCompData.stats.avgDiasComp).toFixed(1));
-        const improved = diffDays <= 0;
-        bTime.textContent = `${diffDays > 0 ? '+' : ''}${diffDays.toFixed(1)}d vs ${prevCompData.label}`;
-        bTime.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${improved
-            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
-            : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
-    } else {
-        bTime.textContent = periodMode === 'ytd' ? `YTD ${selectedYear}` : 'Base';
-        bTime.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
-    }
-
-    document.getElementById('kpi2Value').textContent = currentStats.pctComp14 !== null ? `${currentStats.pctComp14}%` : 'N/D';
-    const b2 = document.getElementById('kpi2Badge');
-    const sub2 = document.getElementById('kpi2Sub');
-    if (currentStats.isCompPartial) {
-        b2.textContent = 'Avance parcial';
-        b2.className = 'text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800';
-        sub2.textContent = `Sobre ${currentStats.compEvaluablesList.length} OC generadas (en curso)`;
-    } else if (prevCompData && currentStats.pctComp14 !== null && prevCompData.stats.pctComp14 !== null && !prevCompData.stats.isCompPartial) {
-        const diff2 = currentStats.pctComp14 - prevCompData.stats.pctComp14;
-        b2.textContent = `${diff2 >= 0 ? '+' : ''}${diff2} pts vs ${prevCompData.label}`;
-        b2.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${diff2 >= 0
-            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
-            : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
-        sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
-    } else {
-        b2.textContent = periodMode === 'ytd' ? `YTD ${selectedYear}` : 'Madurez';
-        b2.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
-        sub2.textContent = 'Solicitudes maduras ≥14d (Odoo)';
-    }
-
-    document.getElementById('kpi3Value').textContent = currentStats.pctSap14 !== null ? `${currentStats.pctSap14}%` : 'N/D';
-    const b3 = document.getElementById('kpi3Badge');
-    const sub3 = document.getElementById('kpi3Sub');
-    if (currentStats.isSapPartial) {
-        b3.textContent = 'Avance parcial';
-        b3.className = 'text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800';
-        sub3.textContent = `Sobre ${currentStats.sapEvaluablesList.length} cerradas en SAP (en curso)`;
-    } else if (prevCompData && currentStats.pctSap14 !== null && prevCompData.stats.pctSap14 !== null && !prevCompData.stats.isSapPartial) {
-        const diff3 = currentStats.pctSap14 - prevCompData.stats.pctSap14;
-        b3.textContent = `${diff3 >= 0 ? '+' : ''}${diff3} pts vs ${prevCompData.label}`;
-        b3.className = `text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${diff3 >= 0
-            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800'
-            : 'bg-red-50 text-cresta-red border border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800'}`;
-        sub3.textContent = 'Ciclo desde aprobación (≥14d)';
-    } else {
-        b3.textContent = periodMode === 'ytd' ? `YTD ${selectedYear}` : 'Madurez';
-        b3.className = 'text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 shrink-0';
-        sub3.textContent = 'Ciclo desde aprobación (≥14d)';
-    }
-
-    const rezagoList = entityRecords
-        .filter(r => r.ym <= maxYm && !r.excluida && r.aprobada && !r.tiene_oc_sap)
-        .sort((a, b) => (b.d_to_sap || 0) - (a.d_to_sap || 0));
-
-    cachedUniverses.VALIDAS = [...currentStats.validasList].sort((a, b) => b.fecha.localeCompare(a.fecha));
-    cachedUniverses.TIEMPO_COMP = [...currentStats.conOcOdooList].sort((a, b) => (b.d_comprador || 0) - (a.d_comprador || 0));
-    cachedUniverses.SLA_COMP = [...currentStats.compEvaluablesList].sort((a, b) => (b.d_comprador ?? 9999) - (a.d_comprador ?? 9999));
-    cachedUniverses.SAP_14 = [...currentStats.sapEvaluablesList].sort((a, b) => (b.d_to_sap ?? 9999) - (a.d_to_sap ?? 9999));
-    cachedUniverses.REZAGO = rezagoList;
-
-    const upToSelected30 = rezagoList.filter(r => r.d_to_sap !== null && r.d_to_sap > 30);
-    document.getElementById('kpi4Value').textContent = rezagoList.length.toLocaleString();
-    document.getElementById('kpi4Badge').textContent = `${upToSelected30.length} > 30d`;
-
-    const tableYear = periodMode === 'compare_q'
-        ? document.getElementById('filterCompareQ1').value.split('-')[0]
-        : selectedYear;
-
-    renderChartQuincenas(entityRecords, maxYm);
-    renderChartCiclo(entityRecords, maxYm);
-    renderChartCompradores(currentRecords);
-    renderChartRezago(rezagoList);
-    renderBuyerWorkloadSection(currentRecords);
-    renderChartAprobadoresSol(currentRecords);
-    renderChartAprobadoresOc();
-    renderChartCompradorTrend(maxYm, selectedComp, tableYear);
-    renderChartTopSolicitantesReqs(currentRecords);
-    renderMonthlyTable(entityRecords, tableYear);
+    chartCycleTrendInstance = new ApexCharts(el, options);
+    chartCycleTrendInstance.render();
 }
 
-function renderQuarterComparisonPanel(yq1, yq2, stats1, stats2) {
-    const lbl1 = formatYearQuarterShort(yq1);
-    const lbl2 = formatYearQuarterShort(yq2);
-    document.getElementById('compareQTitle').textContent = `${lbl1} vs ${lbl2}`;
+// ==========================================================================
+// SECCIÓN 4: GRÁFICA DE REZAGO DIARIO SIN SAP POR MES DE ORIGEN
+// ==========================================================================
+function renderSapBacklogChart(pendingSapRecords) {
+    const el = document.getElementById('chartSapBacklog');
+    if (!el || typeof ApexCharts === 'undefined') return;
 
-    const entityOc = filterByEntity(RAW_DATA.oc_records || []);
-    const oc1 = filterRecordsByYearQuarter(entityOc, yq1).map(r => r.d_aprob_oc);
-    const oc2 = filterRecordsByYearQuarter(entityOc, yq2).map(r => r.d_aprob_oc);
-    const avgOc1 = oc1.length ? Number(avg(oc1).toFixed(1)) : 0;
-    const avgOc2 = oc2.length ? Number(avg(oc2).toFixed(1)) : 0;
-
-    const dSol1 = stats1.avgDiasAprobSol !== null ? Number(stats1.avgDiasAprobSol.toFixed(1)) : 0;
-    const dSol2 = stats2.avgDiasAprobSol !== null ? Number(stats2.avgDiasAprobSol.toFixed(1)) : 0;
-
-    const dComp1 = stats1.avgDiasComp !== null ? Number(stats1.avgDiasComp.toFixed(1)) : 0;
-    const dComp2 = stats2.avgDiasComp !== null ? Number(stats2.avgDiasComp.toFixed(1)) : 0;
-
-    const themeCfg = getChartThemeConfig();
-    const options = {
-        chart: { type: 'bar', height: 270, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-        theme: { mode: themeCfg.mode },
-        colors: isDark ? ['#6366F1', '#9CA3AF'] : ['#1B2A4A', '#94A3B8'],
-        plotOptions: { bar: { horizontal: false, columnWidth: '52%', borderRadius: 4 } },
-        series: [
-            { name: `${lbl1} (Base)`, data: [dSol1, dComp1, avgOc1] },
-            { name: `${lbl2} (Comparar)`, data: [dSol2, dComp2, avgOc2] }
-        ],
-        xaxis: {
-            categories: ['Aprob. Solicitud', 'Gestión Comprador', 'Aprob. OC (Aut. 1)'],
-            labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } }
-        },
-        yaxis: {
-            title: { text: 'Días promedio', style: { fontSize: '10px', color: themeCfg.labelColor } },
-            labels: { formatter: v => v.toFixed(1) + ' d', style: { colors: themeCfg.labelColor } }
-        },
-        dataLabels: { enabled: true, formatter: v => v.toFixed(1) + 'd', style: { fontSize: '9px' } },
-        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
-        legend: { position: 'top', fontSize: '11px' }
-    };
-
-    if (charts.compareQ) charts.compareQ.destroy();
-    charts.compareQ = new ApexCharts(document.querySelector('#chartCompareQ'), options);
-    charts.compareQ.render();
-
-    document.getElementById('compareQTableHead').innerHTML = `<tr>
-        <th class="py-2.5 px-3 font-bold rounded-tl-lg">Métrica</th>
-        <th class="py-2.5 px-3 text-right font-bold">${lbl1}</th>
-        <th class="py-2.5 px-3 text-right font-bold">${lbl2}</th>
-        <th class="py-2.5 px-3 text-right font-bold rounded-tr-lg">Variación</th>
-    </tr>`;
-
-    const fmtDelta = (v1, v2, unit, lowerIsBetter) => {
-        if (v1 === null || v2 === null) return `<span class="text-slate-400">N/D</span>`;
-        const diff = Number((v1 - v2).toFixed(1));
-        if (diff === 0) return `<span class="text-slate-500 font-bold">0${unit}</span>`;
-        const good = lowerIsBetter ? (diff < 0) : (diff > 0);
-        const cls = good ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-cresta-red dark:text-red-400 font-bold';
-        return `<span class="${cls}">${diff > 0 ? '+' : ''}${diff}${unit}</span>`;
-    };
-
-    const rows = [
-        {
-            name: 'Solicitudes válidas',
-            v1: stats1.totalValidas.toLocaleString(),
-            v2: stats2.totalValidas.toLocaleString(),
-            delta: `<span class="font-bold text-slate-600 dark:text-gray-300">${stats1.totalValidas - stats2.totalValidas >= 0 ? '+' : ''}${stats1.totalValidas - stats2.totalValidas}</span>`
-        },
-        {
-            name: 'Días prom. gestión comprador',
-            v1: stats1.avgDiasComp !== null ? `${dComp1.toFixed(1)} d` : 'N/D',
-            v2: stats2.avgDiasComp !== null ? `${dComp2.toFixed(1)} d` : 'N/D',
-            delta: fmtDelta(stats1.avgDiasComp, stats2.avgDiasComp, ' d', true)
-        },
-        {
-            name: 'Mediana gestión comprador',
-            v1: stats1.medDiasComp !== null ? `${stats1.medDiasComp.toFixed(1)} d` : 'N/D',
-            v2: stats2.medDiasComp !== null ? `${stats2.medDiasComp.toFixed(1)} d` : 'N/D',
-            delta: fmtDelta(stats1.medDiasComp, stats2.medDiasComp, ' d', true)
-        },
-        {
-            name: 'SLA Comprador ≤14 días',
-            v1: stats1.pctComp14 !== null ? `${stats1.pctComp14}%` : 'N/D',
-            v2: stats2.pctComp14 !== null ? `${stats2.pctComp14}%` : 'N/D',
-            delta: fmtDelta(stats1.pctComp14, stats2.pctComp14, ' pts', false)
-        },
-        {
-            name: 'Enviadas a SAP ≤14 días',
-            v1: stats1.pctSap14 !== null ? `${stats1.pctSap14}%` : 'N/D',
-            v2: stats2.pctSap14 !== null ? `${stats2.pctSap14}%` : 'N/D',
-            delta: fmtDelta(stats1.pctSap14, stats2.pctSap14, ' pts', false)
-        },
-        {
-            name: 'Días prom. aprobación OC',
-            v1: `${avgOc1.toFixed(1)} d`,
-            v2: `${avgOc2.toFixed(1)} d`,
-            delta: fmtDelta(avgOc1, avgOc2, ' d', true)
+    const byYm = {};
+    pendingSapRecords.forEach(r => {
+        const ym = r.ym || 'Sin mes';
+        if (!byYm[ym]) {
+            byYm[ym] = { count: 0, sumDays: 0 };
         }
-    ];
-
-    document.getElementById('compareQTableBody').innerHTML = rows.map(r => `
-        <tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40">
-            <td class="py-2 px-3 font-medium text-slate-700 dark:text-gray-200">${r.name}</td>
-            <td class="py-2 px-3 text-right font-bold text-cresta-navy dark:text-white">${r.v1}</td>
-            <td class="py-2 px-3 text-right text-slate-600 dark:text-gray-300">${r.v2}</td>
-            <td class="py-2 px-3 text-right">${r.delta}</td>
-        </tr>
-    `).join('');
-}
-
-function renderChartQuincenas(entityRecords, maxYm) {
-    const validas = entityRecords.filter(r => !r.excluida && r.aprobada && r.ym <= maxYm);
-    const quincenasSet = [...new Set(validas.map(r => r.quincena))].sort();
-    const recentQ = quincenasSet.slice(-8);
-    const themeCfg = getChartThemeConfig();
-
-    const titleEl = document.getElementById('chartQuincenasTitle');
-    const subEl   = document.getElementById('chartQuincenasSub');
-
-    if (charts.quincenas) charts.quincenas.destroy();
-
-    if (quincenaChartMode === 'buckets') {
-        if (titleEl) titleEl.textContent = 'Distribución de Tiempos a SAP por Rangos Excluyentes (100%)';
-        if (subEl) subEl.textContent = 'Cada barra suma 100% del total de solicitudes de la quincena (0-7d, 8-14d, 15-30d y >30d/pendientes)';
-
-        const labels = [];
-        const b0_7 = [], b8_14 = [], b15_30 = [], bGt30 = [];
-
-        recentQ.forEach(q => {
-            const rows = validas.filter(r => r.quincena === q);
-            const [ym, half] = q.split('-Q');
-            labels.push(`${half === '1' ? '1ª Q' : '2ª Q'} ${formatYm(ym)}`);
-
-            const tot = rows.length;
-            if (!tot) {
-                b0_7.push(0); b8_14.push(0); b15_30.push(0); bGt30.push(0);
-                return;
-            }
-
-            let c0_7 = 0, c8_14 = 0, c15_30 = 0;
-            rows.forEach(r => {
-                if (r.tiene_oc_sap && r.d_to_sap !== null) {
-                    if (r.d_to_sap <= 7) c0_7++;
-                    else if (r.d_to_sap <= 14) c8_14++;
-                    else if (r.d_to_sap <= 30) c15_30++;
-                }
-            });
-
-            const p0_7   = Math.round((c0_7 / tot) * 100);
-            const p8_14  = Math.round((c8_14 / tot) * 100);
-            const p15_30 = Math.round((c15_30 / tot) * 100);
-            const pGt30  = Math.max(0, 100 - (p0_7 + p8_14 + p15_30));
-
-            b0_7.push(p0_7);
-            b8_14.push(p8_14);
-            b15_30.push(p15_30);
-            bGt30.push(pGt30);
-        });
-
-        const options = {
-            chart: { type: 'bar', stacked: true, stackType: '100%', height: 280, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-            theme: { mode: themeCfg.mode },
-            colors: ['#15803D', '#1B2A4A', '#D97706', '#C8102E'],
-            series: [
-                { name: '0–7 días', data: b0_7 },
-                { name: '8–14 días', data: b8_14 },
-                { name: '15–30 días', data: b15_30 },
-                { name: '> 30d / Pendientes', data: bGt30 }
-            ],
-            xaxis: { categories: labels, labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
-            yaxis: { min: 0, max: 100, labels: { formatter: v => Math.round(v) + '%', style: { colors: themeCfg.labelColor } } },
-            plotOptions: { bar: { borderRadius: 3, columnWidth: '58%' } },
-            dataLabels: {
-                enabled: true,
-                formatter: v => v >= 6 ? Math.round(v) + '%' : '',
-                style: { fontSize: '9px', colors: ['#FFFFFF'] }
-            },
-            tooltip: {
-                y: { formatter: val => `${val}%` }
-            },
-            grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
-            legend: { position: 'top', fontSize: '10px' }
-        };
-
-        charts.quincenas = new ApexCharts(document.querySelector('#chartQuincenas'), options);
-        charts.quincenas.render();
-        return;
-    }
-
-    if (titleEl) titleEl.textContent = '% Solicitudes en SAP dentro de plazo (por Quincena)';
-    if (subEl) subEl.textContent = 'Umbrales acumulados sobre solicitudes que ya cumplieron la ventana de 7, 14 o 30 días';
-
-    const s7 = [], s14 = [], s30 = [], labels = [];
-
-    recentQ.forEach(q => {
-        const rows = validas.filter(r => r.quincena === q);
-        const [ym, half] = q.split('-Q');
-        labels.push(`${half === '1' ? '1ª Q' : '2ª Q'} ${formatYm(ym)}`);
-
-        const eval7 = rows.filter(r => r.edad_dias >= 7);
-        const ok7 = eval7.filter(r => r.tiene_oc_sap && r.d_to_sap <= 7);
-        s7.push(eval7.length >= 10 ? Math.round((ok7.length / eval7.length) * 100) : null);
-
-        const eval14 = rows.filter(r => r.edad_dias >= 14);
-        const ok14 = eval14.filter(r => r.tiene_oc_sap && r.d_to_sap <= 14);
-        s14.push(eval14.length >= 10 ? Math.round((ok14.length / eval14.length) * 100) : null);
-
-        const eval30 = rows.filter(r => r.edad_dias >= 30);
-        const ok30 = eval30.filter(r => r.tiene_oc_sap && r.d_to_sap <= 30);
-        s30.push(eval30.length >= 10 ? Math.round((ok30.length / eval30.length) * 100) : null);
+        byYm[ym].count += 1;
+        byYm[ym].sumDays += Number(r.d_to_sap ?? r.edad_dias ?? 0);
     });
 
+    const months = Object.keys(byYm).sort();
+    const counts = months.map(m => byYm[m].count);
+    const avgDays = months.map(m => byYm[m].count ? Number((byYm[m].sumDays / byYm[m].count).toFixed(1)) : 0);
+
+    const isDark = document.documentElement.classList.contains('dark');
     const options = {
-        chart: { type: 'line', height: 280, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-        theme: { mode: themeCfg.mode },
-        stroke: { width: [2.5, 3.5, 2.5], curve: 'smooth' },
-        colors: ['#64748B', '#1B2A4A', '#C8102E'],
-        series: [
-            { name: '≤ 7 días', data: s7 },
-            { name: '≤ 14 días (KPI)', data: s14 },
-            { name: '≤ 30 días', data: s30 }
-        ],
-        xaxis: { categories: labels, labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
-        yaxis: { min: 0, max: 100, labels: { formatter: v => v !== null ? v + '%' : '', style: { colors: themeCfg.labelColor } } },
-        markers: { size: 4 },
-        dataLabels: { enabled: true, formatter: v => v !== null ? v + '%' : '', style: { fontSize: '9px' } },
-        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
-        legend: { position: 'top', fontSize: '11px' }
-    };
-
-    if (isDark) {
-        options.colors = ['#38BDF8', '#818CF8', '#F87171'];
-    }
-
-    charts.quincenas = new ApexCharts(document.querySelector('#chartQuincenas'), options);
-    charts.quincenas.render();
-}
-
-function renderChartCiclo(entityRecords, maxYm) {
-    const meses = RAW_DATA.filters.meses.filter(m => m <= maxYm).slice(-6);
-    const labels = meses.map(formatYm);
-    const dAprobSol = [], dComprador = [], dAprobSap = [];
-
-    meses.forEach(m => {
-        const cerradas = entityRecords.filter(r => r.ym === m && !r.excluida && r.tiene_oc_sap);
-        dAprobSol.push(Number(avg(cerradas.map(r => r.d_aprob_sol || 0)).toFixed(1)));
-        dComprador.push(Number(avg(cerradas.map(r => r.d_comprador || 0)).toFixed(1)));
-        dAprobSap.push(Number(avg(cerradas.map(r => r.d_aprob_sap || 0)).toFixed(1)));
-    });
-
-    const themeCfg = getChartThemeConfig();
-    const options = {
-        chart: { type: 'bar', stacked: true, height: 280, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-        theme: { mode: themeCfg.mode },
-        colors: ['#94A3B8', '#1B2A4A', '#C8102E'],
-        series: [
-            { name: '1. Aprob. Solicitud', data: dAprobSol },
-            { name: '2. Gestión Comprador (Odoo)', data: dComprador },
-            { name: '3. Aprob. OC y Envío SAP', data: dAprobSap }
-        ],
-        xaxis: { categories: labels, labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
-        yaxis: { title: { text: 'Días promedio', style: { fontSize: '10px', color: themeCfg.labelColor } }, labels: { style: { colors: themeCfg.labelColor } } },
-        plotOptions: { bar: { borderRadius: 4, columnWidth: '55%' } },
-        dataLabels: { enabled: true, formatter: v => v > 0.5 ? v : '', style: { fontSize: '9px' } },
-        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
-        legend: { position: 'top', fontSize: '10px' }
-    };
-
-    if (isDark) {
-        options.colors = ['#6B7280', '#6366F1', '#F59E0B'];
-    }
-
-    if (charts.ciclo) charts.ciclo.destroy();
-    charts.ciclo = new ApexCharts(document.querySelector('#chartCiclo'), options);
-    charts.ciclo.render();
-}
-
-function buildBuyerWorkloadSummary(currentRecords) {
-    const validas = currentRecords.filter(r => !r.excluida && r.aprobada);
-    const mapComp = {};
-
-    validas.forEach(r => {
-        if (!mapComp[r.comprador]) {
-            mapComp[r.comprador] = {
-                rows: [],
-                lineas: 0,
-                skusSet: new Set()
-            };
-        }
-        mapComp[r.comprador].rows.push(r);
-        mapComp[r.comprador].lineas += Number(r.lineas_count || 0);
-        (r.skus || []).forEach(sku => mapComp[r.comprador].skusSet.add(sku));
-    });
-
-    return Object.entries(mapComp).map(([name, info]) => {
-        const rows = info.rows;
-        const matureRows = rows.filter(r => r.edad_dias >= 14);
-        const evalRows = matureRows.length > 0
-            ? matureRows
-            : rows.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
-
-        const okRows = evalRows.filter(r => r.tiene_oc_odoo && r.d_comprador <= 14);
-        const pct = evalRows.length ? Math.round((okRows.length / evalRows.length) * 100) : 0;
-
-        return {
-            name,
-            total: rows.length,
-            evalCount: evalRows.length,
-            pct,
-            lineas: info.lineas,
-            skus: info.skusSet.size,
-            skusSet: info.skusSet,
-            linesPerSol: rows.length > 0 ? (info.lineas / rows.length).toFixed(1) : '0.0'
-        };
-    });
-}
-
-function renderChartCompradores(currentRecords) {
-    const validas = currentRecords.filter(r => !r.excluida && r.aprobada);
-    const hasMatureAny = validas.some(r => r.edad_dias >= 14);
-    const badgePartial = document.getElementById('badgeCompradoresPartial');
-
-    if (!hasMatureAny && validas.length > 0) {
-        badgePartial.classList.remove('hidden');
-    } else {
-        badgePartial.classList.add('hidden');
-    }
-
-    const summary = buildBuyerWorkloadSummary(currentRecords)
-        .filter(item => item.total >= 3 && item.evalCount > 0)
-        .sort((a, b) => b.pct - a.pct);
-
-    const themeCfg = getChartThemeConfig();
-    const options = {
-        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-        theme: { mode: themeCfg.mode },
-        plotOptions: {
-            bar: {
-                horizontal: true,
-                borderRadius: 5,
-                barHeight: '60%',
-                distributed: true
-            }
-        },
-        colors: summary.map(s => s.pct >= 70 ? '#15803D' : (s.pct >= 55 ? '#1B2A4A' : '#C8102E')),
-        series: [{ name: '% SLA ≤14 días', data: summary.map(s => s.pct) }],
-        xaxis: {
-            categories: summary.map(s => `${shortName(s.name)} (${s.total} sol · ${s.lineas} lín · ${s.skus} SKUs)`),
-            min: 0,
-            max: 100,
-            labels: { formatter: v => v + '%', style: { colors: themeCfg.labelColor } }
-        },
-        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '9.5px' } } },
-        annotations: {
-            xaxis: [{
-                x: 70,
-                borderColor: '#C8102E',
-                strokeDashArray: 4,
-                label: { text: 'Meta 70%', style: { color: '#FFFFFF', background: '#C8102E', fontSize: '10px' } }
-            }]
-        },
-        dataLabels: { enabled: true, formatter: v => v + '%', style: { fontSize: '10px' } },
-        tooltip: {
-            y: {
-                formatter: (val, { dataPointIndex }) => {
-                    const item = summary[dataPointIndex];
-                    return `${val}% SLA · ${item.total} solicitudes · ${item.lineas.toLocaleString()} líneas · ${item.skus.toLocaleString()} SKUs`;
-                }
-            }
-        },
-        legend: { show: false },
-        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
-    };
-
-    if (charts.compradores) charts.compradores.destroy();
-    charts.compradores = new ApexCharts(document.querySelector('#chartCompradores'), options);
-    charts.compradores.render();
-}
-
-function renderBuyerWorkloadSection(currentRecords) {
-    const workload = buildBuyerWorkloadSummary(currentRecords)
-        .filter(item => item.total >= 1)
-        .sort((a, b) => b.lineas - a.lineas);
-
-    const totalLineas = workload.reduce((s, x) => s + x.lineas, 0);
-    const globalSkusSet = new Set();
-    workload.forEach(w => w.skusSet.forEach(sku => globalSkusSet.add(sku)));
-
-    document.getElementById('badgeTotalLineasComp').textContent = `${totalLineas.toLocaleString()} Líneas`;
-    document.getElementById('badgeTotalSkusComp').textContent   = `${globalSkusSet.size.toLocaleString()} SKUs únicos`;
-
-    const themeCfg = getChartThemeConfig();
-    const options = {
-        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-        theme: { mode: themeCfg.mode },
-        plotOptions: {
-            bar: {
-                horizontal: true,
-                borderRadius: 4,
-                barHeight: '68%',
-                dataLabels: { position: 'top' }
-            }
-        },
-        colors: isDark ? ['#6366F1', '#10B981'] : ['#1B2A4A', '#15803D'],
-        series: [
-            { name: 'Líneas Atendidas', data: workload.map(w => w.lineas) },
-            { name: 'SKUs Individuales Atendidos', data: workload.map(w => w.skus) }
-        ],
-        xaxis: {
-            categories: workload.map(w => shortName(w.name)),
-            labels: { style: { colors: themeCfg.labelColor } }
-        },
-        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
-        dataLabels: {
-            enabled: true,
-            offsetX: 16,
-            style: { fontSize: '9px', colors: [themeCfg.labelColor] }
-        },
-        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
-        legend: { position: 'top', fontSize: '10px' }
-    };
-
-    if (charts.buyerWorkload) charts.buyerWorkload.destroy();
-    charts.buyerWorkload = new ApexCharts(document.querySelector('#chartBuyerWorkload'), options);
-    charts.buyerWorkload.render();
-
-    const tbody = document.getElementById('buyerWorkloadTableBody');
-    if (!workload.length) {
-        tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-slate-400">Sin datos en el periodo seleccionado.</td></tr>`;
-        return;
-    }
-
-    tbody.innerHTML = workload.map(w => {
-        const slaCls = w.pct >= 70
-            ? 'text-emerald-700 dark:text-emerald-400 font-bold'
-            : (w.pct >= 55 ? 'text-cresta-navy dark:text-sky-400 font-bold' : 'text-cresta-red dark:text-red-400 font-bold');
-
-        return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40">
-            <td class="py-2 px-3 font-bold text-slate-800 dark:text-gray-200">${escapeHtml(shortName(w.name))}</td>
-            <td class="py-2 px-2.5 text-right text-slate-600 dark:text-gray-300">${w.total.toLocaleString()}</td>
-            <td class="py-2 px-2.5 text-right font-bold text-cresta-navy dark:text-indigo-300">${w.lineas.toLocaleString()}</td>
-            <td class="py-2 px-2.5 text-right font-bold text-emerald-700 dark:text-emerald-400">${w.skus.toLocaleString()}</td>
-            <td class="py-2 px-2.5 text-right text-slate-500 dark:text-gray-400">${w.linesPerSol}</td>
-            <td class="py-2 px-2.5 text-right ${slaCls}">${w.evalCount > 0 ? w.pct + '%' : 'N/D'}</td>
-        </tr>`;
-    }).join('');
-}
-
-function renderChartRezago(rezagoRecords) {
-    const byMonth = {};
-    rezagoRecords.forEach(r => {
-        if (!byMonth[r.ym]) byMonth[r.ym] = { le30: 0, gt30: 0 };
-        if (r.d_to_sap !== null && r.d_to_sap > 30) {
-            byMonth[r.ym].gt30++;
-        } else {
-            byMonth[r.ym].le30++;
-        }
-    });
-
-    const meses = Object.keys(byMonth).sort();
-    const themeCfg = getChartThemeConfig();
-    const options = {
-        chart: { type: 'bar', stacked: true, height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-        theme: { mode: themeCfg.mode },
+        chart: { type: 'bar', height: 290, toolbar: { show: false }, background: 'transparent' },
+        theme: { mode: isDark ? 'dark' : 'light' },
         colors: ['#1B2A4A', '#C8102E'],
         series: [
-            { name: '≤ 30 días abiertas', data: meses.map(m => byMonth[m].le30) },
-            { name: '> 30 días (Crítico)', data: meses.map(m => byMonth[m].gt30) }
+            { name: 'Solicitudes Pendientes', type: 'column', data: counts },
+            { name: 'Antigüedad Promedio (d)', type: 'line', data: avgDays },
         ],
-        xaxis: { categories: meses.map(formatYm), labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
-        yaxis: { labels: { style: { colors: themeCfg.labelColor } } },
-        plotOptions: { bar: { borderRadius: 4, columnWidth: '55%' } },
-        dataLabels: { enabled: true, formatter: v => v > 0 ? v : '', style: { fontSize: '9px' } },
-        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
-        legend: { position: 'top', fontSize: '10px' }
+        stroke: { width: [0, 3], curve: 'smooth' },
+        xaxis: { categories: months },
+        yaxis: [
+            { title: { text: 'Solicitudes' }, min: 0 },
+            { opposite: true, title: { text: 'Días promedio' }, min: 0 },
+        ],
+        legend: { position: 'top' },
     };
 
-    if (isDark) {
-        options.colors = ['#F59E0B', '#EF4444'];
+    if (chartSapBacklogInstance) {
+        chartSapBacklogInstance.destroy();
     }
-
-    if (charts.rezago) charts.rezago.destroy();
-    charts.rezago = new ApexCharts(document.querySelector('#chartRezago'), options);
-    charts.rezago.render();
+    chartSapBacklogInstance = new ApexCharts(el, options);
+    chartSapBacklogInstance.render();
 }
 
-function renderChartAprobadoresSol(currentRecords) {
-    const validas = currentRecords.filter(r =>
-        !r.excluida &&
-        r.aprobada &&
-        r.d_aprob_sol !== null &&
-        !r.aprob_sol_excluido
-    );
+// ==========================================================================
+// SECCIÓN 5: DESEMPEÑO POR COMPRADOR (% OC EN ODOO <= 14 DÍAS)
+// ==========================================================================
+function renderBuyerSlaTableAndChart(approvedRecords) {
+    const tbody = document.getElementById('buyerSlaTableBody');
+    const elChart = document.getElementById('chartBuyerSla');
 
-    const mapAprob = {};
-    validas.forEach(r => {
-        if (!mapAprob[r.autorizador_sol]) mapAprob[r.autorizador_sol] = [];
-        mapAprob[r.autorizador_sol].push(r.d_aprob_sol);
-    });
-
-    const minSample = periodMode === 'month' ? 3 : 5;
-    const summary = Object.entries(mapAprob)
-        .map(([name, days]) => ({
-            name,
-            count: days.length,
-            avgDays: Number(avg(days).toFixed(2))
-        }))
-        .filter(item => item.count >= minSample)
-        .sort((a, b) => a.avgDays - b.avgDays);
-
-    const activeDays = summary.flatMap(s => mapAprob[s.name]);
-    const overallAvg = activeDays.length ? avg(activeDays) : 0;
-    document.getElementById('badgeAprobSolAvg').textContent = `Prom: ${overallAvg.toFixed(1)} d`;
-
-    const themeCfg = getChartThemeConfig();
-    const options = {
-        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-        theme: { mode: themeCfg.mode },
-        plotOptions: {
-            bar: {
-                horizontal: true,
-                borderRadius: 5,
-                barHeight: '60%',
-                distributed: true
-            }
-        },
-        colors: summary.map(s => s.avgDays <= 2 ? '#15803D' : (s.avgDays <= 5 ? '#1B2A4A' : '#C8102E')),
-        series: [{ name: 'Días promedio aprobación', data: summary.map(s => s.avgDays) }],
-        xaxis: {
-            categories: summary.map(s => `${shortName(s.name)} (${s.count})`),
-            labels: { formatter: v => v.toFixed(1) + ' d', style: { colors: themeCfg.labelColor } }
-        },
-        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
-        dataLabels: { enabled: true, formatter: v => v.toFixed(1) + ' d', style: { fontSize: '10px' } },
-        legend: { show: false },
-        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
-    };
-
-    if (charts.aprobSol) charts.aprobSol.destroy();
-    charts.aprobSol = new ApexCharts(document.querySelector('#chartAprobadoresSol'), options);
-    charts.aprobSol.render();
-}
-
-function renderChartAprobadoresOc() {
-    const ocList = filterByActivePeriod(filterByEntity(RAW_DATA.oc_records || []))
-        .filter(r => r.d_aprob_oc !== null && !r.aprob_oc_excluido);
-
-    const mapAprob = {};
-    ocList.forEach(r => {
-        if (!mapAprob[r.aprobador_oc]) mapAprob[r.aprobador_oc] = [];
-        mapAprob[r.aprobador_oc].push(r.d_aprob_oc);
-    });
-
-    const minSample = periodMode === 'month' ? 2 : 5;
-    const summary = Object.entries(mapAprob)
-        .map(([name, days]) => ({
-            name,
-            count: days.length,
-            avgDays: Number(avg(days).toFixed(2))
-        }))
-        .filter(item => item.count >= minSample)
-        .sort((a, b) => a.avgDays - b.avgDays);
-
-    const activeDays = summary.flatMap(s => mapAprob[s.name]);
-    const overallAvg = activeDays.length ? avg(activeDays) : 0;
-    document.getElementById('badgeAprobOcAvg').textContent = `Prom: ${overallAvg.toFixed(1)} d`;
-
-    const subEl = document.getElementById('subAprobOc');
-    if (summary.length === 0) {
-        subEl.textContent = 'Sin OCs con Autorizador 1 registrado en este periodo';
-    } else {
-        subEl.textContent = 'Creación OC → Aprobación OC (Autorizador 1) · Ordenado de más ágil a más lento';
-    }
-
-    const themeCfg = getChartThemeConfig();
-    const options = {
-        chart: { type: 'bar', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-        theme: { mode: themeCfg.mode },
-        noData: {
-            text: 'Sin datos de Autorizador 1 en este filtro',
-            style: { color: themeCfg.labelColor, fontSize: '12px', fontFamily: 'Verdana' }
-        },
-        plotOptions: {
-            bar: {
-                horizontal: true,
-                borderRadius: 5,
-                barHeight: '60%',
-                distributed: true
-            }
-        },
-        colors: summary.map(s => s.avgDays <= 2 ? '#15803D' : (s.avgDays <= 5 ? '#264073' : '#C8102E')),
-        series: [{ name: 'Días promedio aprobación OC', data: summary.map(s => s.avgDays) }],
-        xaxis: {
-            categories: summary.map(s => `${shortName(s.name)} (${s.count})`),
-            labels: { formatter: v => v.toFixed(1) + ' d', style: { colors: themeCfg.labelColor } }
-        },
-        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
-        dataLabels: { enabled: true, formatter: v => v.toFixed(1) + ' d', style: { fontSize: '10px' } },
-        legend: { show: false },
-        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
-    };
-
-    if (charts.aprobOc) charts.aprobOc.destroy();
-    charts.aprobOc = new ApexCharts(document.querySelector('#chartAprobadoresOc'), options);
-    charts.aprobOc.render();
-}
-
-function renderChartCompradorTrend(maxYm, selectedComp, selectedYear) {
-    const selectedSoc = document.getElementById('filterSociedad').value;
-    const socRecords = filterBySociedadOnly(RAW_DATA.records)
-        .filter(r => !r.excluida && r.aprobada && r.tiene_oc_odoo && r.d_comprador !== null);
-
-    const allMesesUpTo = RAW_DATA.filters.meses.filter(m => m <= maxYm);
-    const meses = (periodMode === 'ytd' || periodMode === 'quarter' || periodMode === 'compare_q')
-        ? allMesesUpTo.filter(m => m.startsWith(`${selectedYear}-`))
-        : allMesesUpTo.slice(-6);
-
-    const labels = meses.map(formatYm);
-    const themeCfg = getChartThemeConfig();
-
-    const titleEl = document.getElementById('chartCompTrendTitle');
-    const subEl = document.getElementById('chartCompTrendSub');
-    const badgeEl = document.getElementById('chartCompTrendBadge');
-
-    if (charts.compTrend) charts.compTrend.destroy();
-
-    const getTeamBenchmarkForMonth = (m) => {
-        if (RAW_DATA.team_avg_by_month) {
-            const socBucket = RAW_DATA.team_avg_by_month[selectedSoc] || RAW_DATA.team_avg_by_month['ALL'] || {};
-            return socBucket[m] !== undefined ? socBucket[m] : null;
+    const byBuyer = {};
+    approvedRecords.forEach(r => {
+        const b = r.comprador || 'Sin asignar';
+        if (b === 'Sin asignar') return;
+        if (!byBuyer[b]) {
+            byBuyer[b] = { total: 0, withOc: 0, within14: 0, daysSum: 0, daysCnt: 0, pendingSap: 0 };
         }
-        const vals = socRecords.filter(r => r.ym === m).map(r => r.d_comprador);
-        return vals.length ? Number(avg(vals).toFixed(1)) : null;
-    };
+        byBuyer[b].total += 1;
+        if (r.tiene_oc_odoo) {
+            byBuyer[b].withOc += 1;
+        }
+        if (r.d_comprador !== null) {
+            const d = Number(r.d_comprador);
+            byBuyer[b].daysSum += d;
+            byBuyer[b].daysCnt += 1;
+            if (d <= 14) {
+                byBuyer[b].within14 += 1;
+            }
+        }
+        if (isRecordPendingSap(r)) {
+            byBuyer[b].pendingSap += 1;
+        }
+    });
 
-    if (selectedComp !== 'ALL') {
-        titleEl.textContent = `Evolución Mensual de Gestión: ${shortName(selectedComp)}`;
-        subEl.textContent = 'Barras = Días promedio a OC en Odoo · Línea = Mediana (sin sesgo de casos atípicos)';
-        badgeEl.textContent = 'Progreso Individual';
+    const rows = Object.entries(byBuyer).map(([buyer, st]) => {
+        const avgD = st.daysCnt ? (st.daysSum / st.daysCnt) : 0;
+        const pct14 = st.daysCnt ? ((st.within14 / st.daysCnt) * 100) : 0;
+        return { buyer, ...st, avgD, pct14 };
+    }).sort((a, b) => b.pct14 - a.pct14);
 
-        const compRows = socRecords.filter(r => r.comprador === selectedComp);
-        const avgSeries = [];
-        const medSeries = [];
-        const teamAvgSeries = [];
+    if (tbody) {
+        tbody.innerHTML = rows.length ? rows.map(row => `
+            <tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40 border-b border-slate-100 dark:border-gray-800">
+                <td class="py-2.5 px-3 font-bold text-cresta-navy dark:text-white">${escapeHtml(row.buyer)}</td>
+                <td class="py-2.5 px-3 text-right">${row.total}</td>
+                <td class="py-2.5 px-3 text-right">${row.withOc}</td>
+                <td class="py-2.5 px-3 text-right font-semibold">${row.avgD.toFixed(1)} d</td>
+                <td class="py-2.5 px-3 text-right font-bold ${row.pct14 >= 70 ? 'text-emerald-600' : 'text-cresta-red'}">${row.pct14.toFixed(1)}%</td>
+                <td class="py-2.5 px-3 text-right font-semibold">${row.pendingSap}</td>
+            </tr>
+        `).join('') : `<tr><td colspan="6" class="py-4 text-center text-slate-400">Sin datos de compradores en el período.</td></tr>`;
+    }
 
-        meses.forEach(m => {
-            const mComp = compRows.filter(r => r.ym === m).map(r => r.d_comprador);
-            avgSeries.push(mComp.length ? Number(avg(mComp).toFixed(1)) : null);
-            medSeries.push(mComp.length ? Number(median(mComp).toFixed(1)) : null);
-            teamAvgSeries.push(getTeamBenchmarkForMonth(m));
-        });
-
+    if (elChart && typeof ApexCharts !== 'undefined') {
+        const isDark = document.documentElement.classList.contains('dark');
         const options = {
-            chart: { type: 'line', height: 310, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-            theme: { mode: themeCfg.mode },
-            stroke: { width: [0, 3, 2], curve: 'smooth', dashArray: [0, 0, 5] },
-            colors: isDark ? ['#6366F1', '#10B981', '#9CA3AF'] : ['#1B2A4A', '#C8102E', '#64748B'],
-            plotOptions: { bar: { borderRadius: 5, columnWidth: '45%' } },
-            series: [
-                { name: 'Promedio Comprador (días)', type: 'column', data: avgSeries },
-                { name: 'Mediana Comprador (días)', type: 'line', data: medSeries },
-                { name: 'Promedio Equipo (Ref.)', type: 'line', data: teamAvgSeries }
-            ],
-            xaxis: { categories: labels, labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
-            yaxis: {
-                min: 0,
-                title: { text: 'Días de gestión', style: { fontSize: '10px', color: themeCfg.labelColor } },
-                labels: { formatter: v => v !== null ? v.toFixed(1) + ' d' : '', style: { colors: themeCfg.labelColor } }
-            },
-            markers: { size: 4 },
-            dataLabels: {
-                enabled: true,
-                enabledOnSeries: [0, 1],
-                formatter: v => v !== null ? v.toFixed(1) : '',
-                style: { fontSize: '9px' }
-            },
-            grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
-            legend: { position: 'top', fontSize: '11px' }
+            chart: { type: 'bar', height: 280, toolbar: { show: false }, background: 'transparent' },
+            theme: { mode: isDark ? 'dark' : 'light' },
+            plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
+            colors: ['#264073'],
+            series: [{ name: '% Gestión ≤ 14 días', data: rows.map(r => Number(r.pct14.toFixed(1))) }],
+            xaxis: { categories: rows.map(r => r.buyer), max: 100 },
         };
 
-        charts.compTrend = new ApexCharts(document.querySelector('#chartCompradorTrend'), options);
-        charts.compTrend.render();
-    } else {
-        titleEl.textContent = 'Evolución Mensual: Días Promedio de Gestión por Comprador';
-        subEl.textContent = 'Comparativa mensual de velocidad (Aprobación Solicitud → OC en Odoo) · Menos días = mayor agilidad';
-        badgeEl.textContent = 'Comparativa Equipo';
-
-        const compCounts = {};
-        socRecords.filter(r => meses.includes(r.ym)).forEach(r => {
-            compCounts[r.comprador] = (compCounts[r.comprador] || 0) + 1;
-        });
-
-        const activeComps = Object.keys(compCounts)
-            .filter(c => compCounts[c] >= 10)
-            .sort((a, b) => compCounts[b] - compCounts[a]);
-
-        const palette = isDark
-            ? ['#38BDF8', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6', '#FB923C']
-            : ['#1B2A4A', '#C8102E', '#15803D', '#D97706', '#2563EB', '#7C3AED', '#0D9488'];
-
-        const series = activeComps.map(compName => {
-            const data = meses.map(m => {
-                const vals = socRecords
-                    .filter(r => r.comprador === compName && r.ym === m)
-                    .map(r => r.d_comprador);
-                return vals.length >= 3 ? Number(avg(vals).toFixed(1)) : null;
-            });
-            return { name: shortName(compName), data };
-        });
-
-        const teamData = meses.map(m => getTeamBenchmarkForMonth(m));
-        series.push({ name: 'Promedio Equipo', data: teamData });
-
-        const colors = [...palette.slice(0, activeComps.length), isDark ? '#E5E7EB' : '#64748B'];
-        const widths = [...activeComps.map(() => 2.5), 3];
-        const dashes = [...activeComps.map(() => 0), 6];
-
-        const options = {
-            chart: { type: 'line', height: 320, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-            theme: { mode: themeCfg.mode },
-            stroke: { width: widths, curve: 'smooth', dashArray: dashes },
-            colors: colors,
-            series: series,
-            xaxis: { categories: labels, labels: { style: { fontSize: '10px', colors: themeCfg.labelColor } } },
-            yaxis: {
-                min: 0,
-                title: { text: 'Días promedio a OC', style: { fontSize: '10px', color: themeCfg.labelColor } },
-                labels: { formatter: v => v !== null ? v.toFixed(1) + ' d' : '', style: { colors: themeCfg.labelColor } }
-            },
-            markers: { size: 4 },
-            tooltip: {
-                y: { formatter: v => v !== null ? `${v.toFixed(1)} días` : 'Sin muestra suficiente' }
-            },
-            grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 },
-            legend: { position: 'top', fontSize: '11px' }
-        };
-
-        charts.compTrend = new ApexCharts(document.querySelector('#chartCompradorTrend'), options);
-        charts.compTrend.render();
+        if (chartBuyerSlaInstance) {
+            chartBuyerSlaInstance.destroy();
+        }
+        chartBuyerSlaInstance = new ApexCharts(elChart, options);
+        chartBuyerSlaInstance.render();
     }
 }
 
-function renderChartTopSolicitantesReqs(currentRecords) {
-    const mapSol = {};
-    currentRecords.forEach(r => {
-        if (r.is_borrador) return;
-        const name = r.solicitado_por || 'Sin solicitante';
-        if (!mapSol[name]) mapSol[name] = { validas: 0, rechazadas: 0, total: 0 };
-        mapSol[name].total += 1;
-        if (r.is_rechazada) mapSol[name].rechazadas += 1;
-        else if (!r.excluida) mapSol[name].validas += 1;
-    });
-
-    const top10 = Object.entries(mapSol)
-        .map(([name, info]) => ({
-            name,
-            validas: info.validas,
-            rechazadas: info.rechazadas,
-            pctRech: info.total > 0 ? ((info.rechazadas / info.total) * 100).toFixed(1) : '0.0'
-        }))
-        .filter(x => x.validas > 0)
-        .sort((a, b) => b.validas - a.validas)
-        .slice(0, 10);
-
-    const themeCfg = getChartThemeConfig();
-    const options = {
-        chart: { type: 'bar', height: 320, toolbar: { show: false }, background: 'transparent', fontFamily: 'Verdana' },
-        theme: { mode: themeCfg.mode },
-        plotOptions: { bar: { horizontal: true, borderRadius: 4, barHeight: '62%' } },
-        colors: isDark ? ['#38BDF8'] : ['#264073'],
-        series: [{ name: 'Solicitudes válidas', data: top10.map(s => s.validas) }],
-        xaxis: {
-            categories: top10.map(s => shortName(s.name)),
-            labels: { style: { colors: themeCfg.labelColor } }
-        },
-        yaxis: { labels: { style: { colors: themeCfg.labelColor, fontSize: '10px' } } },
-        dataLabels: { enabled: true, style: { fontSize: '9px' } },
-        tooltip: {
-            y: {
-                formatter: (val, { dataPointIndex }) => `${val} válidas · ${top10[dataPointIndex].rechazadas} rechazadas (${top10[dataPointIndex].pctRech}%)`
-            }
-        },
-        grid: { borderColor: themeCfg.gridColor, strokeDashArray: 4 }
-    };
-
-    if (charts.topSolReqs) charts.topSolReqs.destroy();
-    charts.topSolReqs = new ApexCharts(document.querySelector('#chartTopSolicitantesReqs'), options);
-    charts.topSolReqs.render();
-}
-
-function renderMonthlyTable(entityRecords, selectedYear) {
-    const meses = RAW_DATA.filters.meses.filter(m => m.startsWith(`${selectedYear}-`));
-    const thead = document.getElementById('monthlyTableHead');
-    const tbody = document.getElementById('monthlyTableBody');
-    document.getElementById('monthlyTableTitle').textContent = `Indicadores Mensuales Consolidados · Año ${selectedYear}`;
-
-    thead.innerHTML = `<tr>
-        <th class="py-3 px-4 font-bold rounded-tl-lg">Indicador</th>
-        ${meses.map((m, idx) => `<th class="py-3 px-3 text-right font-bold ${idx === meses.length - 1 ? 'rounded-tr-lg' : ''}">${formatMonthOnly(m)} ${selectedYear}</th>`).join('')}
-    </tr>`;
-
-    const metricsByMonth = meses.map(m => {
-        const allM = entityRecords.filter(r => r.ym === m);
-        const validas = allM.filter(r => !r.excluida);
-        const aprobadas = validas.filter(r => r.aprobada);
-        const rechazadas = allM.filter(r => r.is_rechazada);
-
-        const conOc = aprobadas.filter(r => r.tiene_oc_odoo && r.d_comprador !== null);
-        const avgComp = conOc.length ? Number(avg(conOc.map(r => r.d_comprador)).toFixed(1)) : null;
-
-        const e7 = aprobadas.filter(r => r.edad_dias >= 7);
-        const p7 = e7.length >= 10 ? Math.round((e7.filter(r => r.tiene_oc_sap && r.d_to_sap <= 7).length / e7.length) * 100) : null;
-
-        const e14 = aprobadas.filter(r => r.edad_dias >= 14);
-        const p14 = e14.length >= 10 ? Math.round((e14.filter(r => r.tiene_oc_sap && r.d_to_sap <= 14).length / e14.length) * 100) : null;
-
-        const e30 = aprobadas.filter(r => r.edad_dias >= 30);
-        const p30 = e30.length >= 10 ? Math.round((e30.filter(r => r.tiene_oc_sap && r.d_to_sap <= 30).length / e30.length) * 100) : null;
-
-        const medAprob = median(validas.map(r => r.d_aprob_sol).filter(v => v !== null));
-        const pctRech = allM.length ? ((rechazadas.length / allM.length) * 100).toFixed(1) : '0.0';
-
-        const ocStat = RAW_DATA.oc_stats[m] || { total: 0, canceladas: 0 };
-        const pctCanc = ocStat.total ? ((ocStat.canceladas / ocStat.total) * 100).toFixed(1) : '0.0';
-
-        return {
-            creadas: validas.length,
-            avgComp,
-            p7, p14, p30,
-            medAprob: medAprob.toFixed(2),
-            pctRech, pctCanc
-        };
-    });
-
-    const minAvgComp = Math.min(...metricsByMonth.map(x => x.avgComp ?? 9999));
-    const maxP7 = Math.max(...metricsByMonth.map(x => x.p7 ?? -1));
-    const maxP14 = Math.max(...metricsByMonth.map(x => x.p14 ?? -1));
-    const maxP30 = Math.max(...metricsByMonth.map(x => x.p30 ?? -1));
-
-    const fmtCell = (val, maxVal) => {
-        if (val === null) return `<td class="py-2.5 px-3 text-right text-slate-400 dark:text-gray-500 italic">En curso</td>`;
-        const cls = val === maxVal
-            ? 'text-cresta-red dark:text-emerald-400 font-bold bg-red-50/60 dark:bg-emerald-950/30'
-            : 'text-slate-700 dark:text-gray-300';
-        return `<td class="py-2.5 px-3 text-right ${cls}">${val}%</td>`;
-    };
-
-    const rowsHtml = [
-        {
-            label: 'Solicitudes válidas creadas',
-            vals: metricsByMonth.map(x => `<td class="py-2.5 px-3 text-right font-bold text-cresta-navy dark:text-white">${x.creadas}</td>`)
-        },
-        {
-            label: 'Promedio días gestión comprador (Odoo)',
-            vals: metricsByMonth.map(x => {
-                if (x.avgComp === null) return `<td class="py-2.5 px-3 text-right text-slate-400">N/D</td>`;
-                const cls = x.avgComp === minAvgComp
-                    ? 'text-cresta-red dark:text-emerald-400 font-bold bg-red-50/60 dark:bg-emerald-950/30'
-                    : 'text-cresta-blue dark:text-sky-400 font-semibold';
-                return `<td class="py-2.5 px-3 text-right ${cls}">${x.avgComp.toFixed(1)} d</td>`;
-            })
-        },
-        {
-            label: 'Enviadas a SAP en ≤ 7 días',
-            vals: metricsByMonth.map(x => fmtCell(x.p7, maxP7))
-        },
-        {
-            label: 'Enviadas a SAP en ≤ 14 días',
-            vals: metricsByMonth.map(x => fmtCell(x.p14, maxP14))
-        },
-        {
-            label: 'Enviadas a SAP en ≤ 30 días',
-            vals: metricsByMonth.map(x => fmtCell(x.p30, maxP30))
-        },
-        {
-            label: 'Mediana días aprobar solicitud',
-            vals: metricsByMonth.map(x => `<td class="py-2.5 px-3 text-right text-slate-700 dark:text-gray-300">${x.medAprob}</td>`)
-        },
-        {
-            label: '% Solicitudes rechazadas',
-            vals: metricsByMonth.map(x => `<td class="py-2.5 px-3 text-right text-slate-500 dark:text-gray-400">${x.pctRech}%</td>`)
-        },
-        {
-            label: '% Órdenes de compra canceladas',
-            vals: metricsByMonth.map(x => `<td class="py-2.5 px-3 text-right text-slate-500 dark:text-gray-400">${x.pctCanc}%</td>`)
-        }
-    ];
-
-    tbody.innerHTML = rowsHtml.map(r => `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40"><td class="py-2.5 px-4 text-slate-800 dark:text-gray-200 font-medium">${r.label}</td>${r.vals.join('')}</tr>`).join('');
+function setTextSafe(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
 }

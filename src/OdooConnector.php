@@ -481,7 +481,6 @@ class OdooConnector
         $dateFrom = (string)$syncCfg['date_from'];
         $dateTo   = (string)$syncCfg['date_to'];
 
-        // Purga previa si existen registros anteriores a date_from
         $this->purgeRecordsBeforeDate($dateFrom);
 
         $uid = $this->rpc($url, 'common', 'authenticate', [$db, $user, $apiKey, []]);
@@ -948,12 +947,12 @@ class OdooConnector
                 continue;
             }
 
-            $isDirectPo = str_starts_with($solId, 'SIN-SOL-');
-            $estadoSolLower = mb_strtolower($row['estado_sol']);
-            $isSolRechazada = ($estadoSolLower === 'rechazado');
-            $isSolBorrador  = ($estadoSolLower === 'borrador' || $estadoSolLower === 'draft');
-            $estadoOcLower  = mb_strtolower($row['estado_oc']);
-            $isOcCancelada  = ($estadoOcLower === 'cancelado');
+            $isDirectPo     = str_starts_with($solId, 'SIN-SOL-');
+            $estadoSolLower = mb_strtolower(trim($row['estado_sol']));
+            $isSolRechazada = in_array($estadoSolLower, ['rechazado', 'rechazada', 'rejected'], true);
+            $isSolBorrador  = in_array($estadoSolLower, ['borrador', 'draft'], true);
+            $estadoOcLower  = mb_strtolower(trim($row['estado_oc']));
+            $isOcCancelada  = in_array($estadoOcLower, ['cancelado', 'cancelled'], true);
 
             if ($row['no_oc_odoo'] !== '') {
                 if (!$isDirectPo && !$isSolRechazada && !$isSolBorrador && !$isOcCancelada && $row['ts_creacion_oc'] !== null && $row['ts_aprobacion_oc'] !== null) {
@@ -1076,8 +1075,6 @@ class OdooConnector
             $dayOfMonth      = (int)date('d', $tsCreacionSol);
             $quincena        = $dayOfMonth <= 15 ? "{$ym}-Q1" : "{$ym}-Q2";
 
-            $excluida = $sol['is_rechazada'] || $sol['is_borrador'] || ($sol['has_any_oc'] && $sol['all_ocs_canceled']);
-
             $linesForSol = $solDetails[$solId] ?? [];
             $lineasCount = count($linesForSol);
             $skusSet = [];
@@ -1108,12 +1105,20 @@ class OdooConnector
                 }
             }
 
-            $tieneOcOdoo = ($firstOcOdooTs !== null);
+            $tieneOcOdoo   = ($firstOcOdooTs !== null);
+            $tieneOcSap    = ($firstSapTs !== null);
+            $solStLow      = mb_strtolower(trim((string)$sol['estado_sol']));
+            $isLegacyDone  = in_array($solStLow, ['hecho', 'done'], true) && !$tieneOcOdoo && !$tieneOcSap;
+
+            $excluida = $sol['is_rechazada']
+                || $sol['is_borrador']
+                || ($sol['has_any_oc'] && $sol['all_ocs_canceled'])
+                || $isLegacyDone;
+
             $diasGestionComprador = (!$excluida && $tsAprobacionSol !== null)
                 ? round(max(0, (($tieneOcOdoo ? $firstOcOdooTs : $cutoffTs) - $tsAprobacionSol) / 86400), 2)
                 : null;
 
-            $tieneOcSap = ($firstSapTs !== null);
             $diasAprobSap = (!$excluida && $tieneOcOdoo && $tieneOcSap)
                 ? round(max(0, ($firstSapTs - $firstOcOdooTs) / 86400), 2)
                 : null;
@@ -1148,7 +1153,7 @@ class OdooConnector
                 'is_rechazada'       => $sol['is_rechazada'],
                 'is_borrador'        => $sol['is_borrador'],
                 'excluida'           => $excluida,
-                'aprobada'           => ($tsAprobacionSol !== null),
+                'aprobada'           => (!$excluida && $tsAprobacionSol !== null),
                 'tiene_oc_odoo'      => $tieneOcOdoo,
                 'tiene_oc_sap'       => $tieneOcSap,
                 'd_aprob_sol'        => $diasAprobSol,

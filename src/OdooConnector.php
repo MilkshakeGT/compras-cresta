@@ -20,6 +20,8 @@ class OdooConnector
 
     public function __construct(string $configPath, string $cachePath, string $detailsCachePath)
     {
+        date_default_timezone_set('America/Guatemala');
+
         $dataDir = dirname($cachePath);
         if (!is_dir($dataDir)) {
             mkdir($dataDir, 0755, true);
@@ -585,7 +587,6 @@ class OdooConnector
             if ($oName !== '') $changedOcNames[$oName] = true;
         }
 
-        // Reconstruir detalles de PR cambiadas
         $solDetails = is_array($existingDetails['sol'] ?? null) ? $existingDetails['sol'] : [];
         foreach (array_keys($changedSolNames) as $sName) {
             unset($solDetails[$sName]);
@@ -605,7 +606,6 @@ class OdooConnector
             ];
         }
 
-        // Reconstruir detalles de PO cambiadas (inicializando estructura limpia antes de acumular líneas)
         $ocDetails = is_array($existingDetails['oc'] ?? null) ? $existingDetails['oc'] : [];
         foreach (array_keys($changedOcNames) as $oName) {
             unset($ocDetails[$oName]);

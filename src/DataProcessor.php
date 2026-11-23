@@ -7,7 +7,6 @@ class DataProcessor
 {
     private string $excelPath;
     private string $cachePath;
-    private string $configPath;
     private string $solExcelPath;
     private string $ocExcelPath;
     private string $detailsCachePath;
@@ -18,142 +17,19 @@ class DataProcessor
         'maría isabel',
     ];
 
-    public function __construct(string $excelPath, string $cachePath, ?string $configPath = null)
+    public function __construct(string $excelPath, string $cachePath)
     {
         $dataDir = dirname($excelPath);
         $this->excelPath        = $excelPath;
         $this->cachePath        = $cachePath;
-        $this->configPath       = $configPath ?? $dataDir . '/onedrive.config.php';
         $this->solExcelPath     = $dataDir . '/Solicitudes.xlsx';
         $this->ocExcelPath      = $dataDir . '/OC.xlsx';
         $this->detailsCachePath = $dataDir . '/details_cache.json';
     }
 
-    private function downloadSingleOneDriveFile(string $rawUrl, string $targetPath, int $ttl, bool $force): array
-    {
-        if ($rawUrl === '' || str_contains($rawUrl, 'PEGA_AQUI')) {
-            return ['synced' => false, 'source' => 'local', 'message' => 'URL pendiente'];
-        }
-
-        if (!$force && file_exists($targetPath)) {
-            $age = time() - filemtime($targetPath);
-            if ($age < $ttl) {
-                return ['synced' => false, 'source' => 'onedrive_cached', 'message' => 'Caché reciente'];
-            }
-        }
-
-        $downloadUrl = $this->buildDirectDownloadUrl($rawUrl);
-        $tmpFile = $targetPath . '.tmp.' . uniqid();
-
-        $ch = curl_init($downloadUrl);
-        $fp = fopen($tmpFile, 'wb');
-        curl_setopt_array($ch, [
-            CURLOPT_FILE           => $fp,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS      => 15,
-            CURLOPT_TIMEOUT        => 45,
-            CURLOPT_CONNECTTIMEOUT => 12,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_COOKIEFILE     => '',
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        ]);
-
-        $ok = curl_exec($ch);
-        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlErr  = curl_error($ch);
-        curl_close($ch);
-        fclose($fp);
-
-        if (!$ok || $httpCode >= 400 || !file_exists($tmpFile) || filesize($tmpFile) < 1024) {
-            @unlink($tmpFile);
-            return [
-                'synced'  => false,
-                'source'  => 'local_fallback',
-                'message' => "Error HTTP {$httpCode} {$curlErr}"
-            ];
-        }
-
-        $zip = new ZipArchive();
-        $openResult = $zip->open($tmpFile);
-        $isValidXlsx = false;
-
-        if ($openResult === true) {
-            $isValidXlsx = ($zip->locateName('xl/worksheets/sheet1.xml') !== false);
-            $zip->close();
-        }
-
-        if (!$isValidXlsx) {
-            @unlink($tmpFile);
-            return [
-                'synced'  => false,
-                'source'  => 'local_fallback',
-                'message' => 'Respuesta no es un .xlsx válido'
-            ];
-        }
-
-        $newHash = md5_file($tmpFile);
-        $oldHash = file_exists($targetPath) ? md5_file($targetPath) : '';
-
-        if ($newHash !== $oldHash) {
-            rename($tmpFile, $targetPath);
-            touch($targetPath);
-            return ['synced' => true, 'source' => 'onedrive', 'message' => 'Actualizado'];
-        }
-
-        @unlink($tmpFile);
-        touch($targetPath);
-        return ['synced' => true, 'source' => 'onedrive', 'message' => 'Sin cambios'];
-    }
-
-    public function syncFromOneDrive(bool $force = false): array
-    {
-        if (!file_exists($this->configPath)) {
-            return ['synced' => false, 'source' => 'local', 'message' => 'Modo local (sin onedrive.config.php)'];
-        }
-
-        $cfg = require $this->configPath;
-        $ttl = (int)($cfg['sync_ttl_seconds'] ?? 1800);
-
-        $urlDb  = trim((string)($cfg['onedrive_url'] ?? ''));
-        $urlSol = trim((string)($cfg['onedrive_solicitudes_url'] ?? ''));
-        $urlOc  = trim((string)($cfg['onedrive_oc_url'] ?? ''));
-
-        $resDb  = $this->downloadSingleOneDriveFile($urlDb, $this->excelPath, $ttl, $force);
-        $resSol = $this->downloadSingleOneDriveFile($urlSol, $this->solExcelPath, $ttl, $force);
-        $resOc  = $this->downloadSingleOneDriveFile($urlOc, $this->ocExcelPath, $ttl, $force);
-
-        $msgs = ["DB: {$resDb['message']}"];
-        if ($urlSol !== '' && !str_contains($urlSol, 'PEGA_AQUI')) {
-            $msgs[] = "Solicitudes: {$resSol['message']}";
-        }
-        if ($urlOc !== '' && !str_contains($urlOc, 'PEGA_AQUI')) {
-            $msgs[] = "OC: {$resOc['message']}";
-        }
-
-        return [
-            'synced'  => ($resDb['synced'] || $resSol['synced'] || $resOc['synced']),
-            'source'  => $resDb['source'],
-            'message' => implode(' · ', $msgs)
-        ];
-    }
-
-    private function buildDirectDownloadUrl(string $url): string
-    {
-        if (str_contains($url, 'sharepoint.com')) {
-            $parts = parse_url($url);
-            $query = [];
-            if (!empty($parts['query'])) {
-                parse_str($parts['query'], $query);
-            }
-            $query['download'] = '1';
-            $base = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '') . ($parts['path'] ?? '');
-            return $base . '?' . http_build_query($query);
-        }
-
-        $base64 = rtrim(strtr(base64_encode($url), '+/', '-_'), '=');
-        return "https://api.onedrive.com/v1.0/shares/u!{$base64}/root/content";
-    }
-
+    // =========================================================================
+    // UTILIDADES DE NORMALIZACIÓN Y LIMPIEZA
+    // =========================================================================
     private function isExcludedApprover(string $name): bool
     {
         $norm = mb_strtolower(trim($name));
@@ -191,6 +67,20 @@ class DataProcessor
         return mb_strtoupper($clean);
     }
 
+    private function findColumnIndex(array $colMap, array $aliases): ?int
+    {
+        foreach ($aliases as $alias) {
+            $key = mb_strtolower(trim($alias));
+            if (isset($colMap[$key])) {
+                return (int)$colMap[$key];
+            }
+        }
+        return null;
+    }
+
+    // =========================================================================
+    // INDEXACIÓN DE LÍNEAS CRUDAS DE SOLICITUDES Y ÓRDENES DE COMPRA (ODOO)
+    // =========================================================================
     private function rebuildDetailsCacheIfNeeded(bool $force = false): void
     {
         $solMtime = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
@@ -199,7 +89,7 @@ class DataProcessor
         if (!$force && file_exists($this->detailsCachePath)) {
             $existing = json_decode(file_get_contents($this->detailsCachePath), true);
             if (is_array($existing)
-                && ($existing['schema_v'] ?? 0) === 2
+                && ($existing['schema_v'] ?? 0) === 3
                 && ($existing['sol_mtime'] ?? -1) === $solMtime
                 && ($existing['oc_mtime'] ?? -1) === $ocMtime
             ) {
@@ -207,22 +97,29 @@ class DataProcessor
             }
         }
 
+        // 1. Parseo de Líneas de Solicitud (purchase.request.line) con forward-fill
         $solDetails = [];
         if ($solMtime > 0) {
             $rows = SimpleXLSX::parse($this->solExcelPath);
             if (count($rows) > 1) {
                 $headers = array_map(fn($h) => mb_strtolower(trim((string)$h)), $rows[0]);
                 $colMap  = array_flip($headers);
-                $idxId   = $colMap['solicitud'] ?? 0;
-                $idxProd = $colMap['producto solicitado'] ?? 1;
-                $idxQty  = $colMap['cantidad solicitada'] ?? 2;
 
+                $idxId   = $this->findColumnIndex($colMap, ['referencia de solicitud', 'solicitud']) ?? 0;
+                $idxProd = $this->findColumnIndex($colMap, ['productos para comprar/producto', 'producto solicitado', 'producto']) ?? 1;
+                $idxQty  = $this->findColumnIndex($colMap, ['productos para comprar/cantidad', 'cantidad solicitada', 'cantidad']) ?? 2;
+
+                $lastSolId = '';
                 for ($i = 1; $i < count($rows); $i++) {
                     $r = $rows[$i];
-                    $id = trim((string)($r[$idxId] ?? ''));
-                    if ($id === '') {
+                    $rawId = trim((string)($r[$idxId] ?? ''));
+                    if ($rawId !== '') {
+                        $lastSolId = $rawId;
+                    }
+                    if ($lastSolId === '') {
                         continue;
                     }
+
                     $prod = trim((string)($r[$idxProd] ?? ''));
                     $qtyRaw = $r[$idxQty] ?? null;
                     $qty = is_numeric($qtyRaw) ? round((float)$qtyRaw, 4) : 0.0;
@@ -230,10 +127,10 @@ class DataProcessor
                     if ($prod === '' && $qty === 0.0) {
                         continue;
                     }
-                    if (!isset($solDetails[$id])) {
-                        $solDetails[$id] = [];
+                    if (!isset($solDetails[$lastSolId])) {
+                        $solDetails[$lastSolId] = [];
                     }
-                    $solDetails[$id][] = [
+                    $solDetails[$lastSolId][] = [
                         'producto' => $prod !== '' ? $prod : '(Sin descripción)',
                         'cantidad' => $qty,
                     ];
@@ -241,27 +138,37 @@ class DataProcessor
             }
         }
 
+        // 2. Parseo de Líneas de Órdenes de Compra (purchase.order.line) con forward-fill
         $ocDetails = [];
         if ($ocMtime > 0) {
             $rows = SimpleXLSX::parse($this->ocExcelPath);
             if (count($rows) > 1) {
                 $headers = array_map(fn($h) => mb_strtolower(trim((string)$h)), $rows[0]);
                 $colMap  = array_flip($headers);
-                $idxId   = $colMap['no. oc'] ?? 0;
-                $idxProv = $colMap['proveedor'] ?? 1;
-                $idxProd = $colMap['producto'] ?? 2;
-                $idxQty  = $colMap['cantidad comprada'] ?? 3;
-                $idxDiv  = $colMap['divisa'] ?? 4;
-                $idxPu   = $colMap['precio unitario'] ?? 5;
-                $idxTot  = $colMap['total oc'] ?? 6;
+
+                $idxId   = $this->findColumnIndex($colMap, ['referencia de la orden', 'no. oc', 'no. oc odoo']) ?? 0;
+                $idxProv = $this->findColumnIndex($colMap, ['proveedor', 'partner']) ?? 1;
+                $idxProd = $this->findColumnIndex($colMap, ['líneas de la orden/descripción', 'lineas de la orden/descripcion', 'producto', 'descripción']) ?? 2;
+                $idxQty  = $this->findColumnIndex($colMap, ['líneas de la orden/cantidad', 'lineas de la orden/cantidad', 'cantidad comprada', 'cantidad']) ?? 3;
+                $idxDiv  = $this->findColumnIndex($colMap, ['líneas de la orden/divisa', 'lineas de la orden/divisa', 'divisa', 'moneda']) ?? 4;
+                $idxPu   = $this->findColumnIndex($colMap, ['líneas de la orden/precio unitario', 'lineas de la orden/precio unitario', 'precio unitario']) ?? 5;
+                $idxTot  = $this->findColumnIndex($colMap, ['líneas de la orden/total', 'lineas de la orden/total', 'total oc', 'subtotal']) ?? 6;
+
+                $lastOcId = '';
+                $lastProv = 'Sin proveedor';
 
                 for ($i = 1; $i < count($rows); $i++) {
                     $r = $rows[$i];
-                    $id = trim((string)($r[$idxId] ?? ''));
-                    if ($id === '') {
+                    $rawId = trim((string)($r[$idxId] ?? ''));
+                    if ($rawId !== '') {
+                        $lastOcId = $rawId;
+                        $rawProv = trim((string)($r[$idxProv] ?? ''));
+                        $lastProv = $rawProv !== '' ? $rawProv : 'Sin proveedor';
+                    }
+                    if ($lastOcId === '') {
                         continue;
                     }
-                    $prov = trim((string)($r[$idxProv] ?? ''));
+
                     $prod = trim((string)($r[$idxProd] ?? ''));
                     $qty  = is_numeric($r[$idxQty] ?? null) ? round((float)$r[$idxQty], 4) : 0.0;
                     $div  = strtoupper(trim((string)($r[$idxDiv] ?? 'GTQ')));
@@ -271,14 +178,14 @@ class DataProcessor
                     $pu  = is_numeric($r[$idxPu] ?? null) ? round((float)$r[$idxPu], 4) : 0.0;
                     $tot = is_numeric($r[$idxTot] ?? null) ? round((float)$r[$idxTot], 2) : round($qty * $pu, 2);
 
-                    if (!isset($ocDetails[$id])) {
-                        $ocDetails[$id] = [
-                            'proveedor' => $prov !== '' ? $prov : 'Sin proveedor',
+                    if (!isset($ocDetails[$lastOcId])) {
+                        $ocDetails[$lastOcId] = [
+                            'proveedor' => $lastProv,
                             'divisa'    => $div,
                             'lineas'    => [],
                         ];
                     }
-                    $ocDetails[$id]['lineas'][] = [
+                    $ocDetails[$lastOcId]['lineas'][] = [
                         'producto'        => $prod !== '' ? $prod : '(Sin descripción)',
                         'cantidad'        => $qty,
                         'precio_unitario' => $pu,
@@ -289,7 +196,7 @@ class DataProcessor
         }
 
         $detailsPayload = [
-            'schema_v'  => 2,
+            'schema_v'  => 3,
             'sol_mtime' => $solMtime,
             'oc_mtime'  => $ocMtime,
             'sol'       => $solDetails,
@@ -299,6 +206,9 @@ class DataProcessor
         file_put_contents($this->detailsCachePath, json_encode($detailsPayload, JSON_UNESCAPED_UNICODE));
     }
 
+    // =========================================================================
+    // ENDPOINTS AJAX DE DETALLE DOCUMENTAL Y LÍNEAS FIRMES
+    // =========================================================================
     public function getDocumentDetail(string $type, string $id): array
     {
         $this->rebuildDetailsCacheIfNeeded(false);
@@ -440,28 +350,29 @@ class DataProcessor
         ];
     }
 
-    public function getProcessedData(bool $forceSync = false): array
+    // =========================================================================
+    // MOTOR PRINCIPAL ETL DE SOLICITUDES Y OCs (purchase.request)
+    // =========================================================================
+    public function getProcessedData(bool $forceRebuild = false): array
     {
-        $syncStatus = $this->syncFromOneDrive($forceSync);
-        $this->rebuildDetailsCacheIfNeeded($forceSync);
+        $this->rebuildDetailsCacheIfNeeded($forceRebuild);
 
         if (!file_exists($this->excelPath)) {
-            throw new RuntimeException("No se encontró el archivo data/DB.xlsx en el servidor. " . ($syncStatus['message'] ?? ''));
+            throw new RuntimeException("No se encontró el archivo data/DB.xlsx. Usa el botón 'Cargar Datos' para subir los reportes de Odoo.");
         }
 
         $excelMtime = filemtime($this->excelPath);
         $solMtime   = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
         $ocMtime    = file_exists($this->ocExcelPath) ? filemtime($this->ocExcelPath) : 0;
 
-        if (!$forceSync && file_exists($this->cachePath)) {
+        if (!$forceRebuild && file_exists($this->cachePath)) {
             $cached = json_decode(file_get_contents($this->cachePath), true);
             if (is_array($cached)
                 && ($cached['excel_mtime'] ?? 0) === $excelMtime
                 && ($cached['sol_mtime'] ?? -1) === $solMtime
                 && ($cached['oc_mtime'] ?? -1) === $ocMtime
-                && ($cached['schema_v'] ?? 1) === 16
+                && ($cached['schema_v'] ?? 1) === 17
             ) {
-                $cached['sync_info'] = $syncStatus;
                 return $cached;
             }
         }
@@ -472,7 +383,7 @@ class DataProcessor
         $solLinesMap = $detailsData['sol'] ?? [];
         $ocDetailMap = $detailsData['oc'] ?? [];
 
-        // Precalcular totales y proveedor por No. OC desde OC.xlsx como respaldo automático
+        // Precalcular totales, proveedor y divisa por No. OC desde OC.xlsx
         $ocSummaryFromDetail = [];
         foreach ($ocDetailMap as $ocCode => $ocInfo) {
             $sumTot = 0.0;
@@ -488,7 +399,7 @@ class DataProcessor
 
         $rawRows = SimpleXLSX::parse($this->excelPath);
         if (count($rawRows) < 2) {
-            throw new RuntimeException("El archivo Excel no contiene datos suficientes.");
+            throw new RuntimeException("El archivo maestro de solicitudes no contiene datos suficientes.");
         }
 
         $headers = array_map(fn($h) => trim((string)$h), $rawRows[0]);
@@ -508,17 +419,19 @@ class DataProcessor
             return null;
         };
 
-        $lastHeaderData = [
-            'Solicitud'             => null,
-            'Estado Solicitud'      => null,
-            'Solicitado por'        => null,
-            'Autorizador Solicitud' => null,
-            'Comprador'             => null,
-            'Fcreacion Solicitud'   => null,
-            'Aprobacion Solicitud'  => null,
-            'Sociedad'              => null,
+        // Aliases duales: Reporte crudo Odoo (purchase.request) + Formato histórico
+        $headerAliases = [
+            'Solicitud'             => ['Referencia de Solicitud', 'Solicitud'],
+            'Estado Solicitud'      => ['Estado', 'Estado Solicitud'],
+            'Solicitado por'        => ['Solicitado por'],
+            'Autorizador Solicitud' => ['Autorizador', 'Autorizador Solicitud'],
+            'Comprador'             => ['Seguidor', 'Comprador'],
+            'Fcreacion Solicitud'   => ['Fecha de creación', 'Fecha de creacion', 'Fcreacion Solicitud'],
+            'Aprobacion Solicitud'  => ['Approval Date', 'Aprobacion Solicitud'],
+            'Sociedad'              => ['Seleccionar compañía', 'Seleccionar compania', 'Sociedad', 'Compañía'],
         ];
 
+        $lastHeaderData = array_fill_keys(array_keys($headerAliases), null);
         $normalizedRows = [];
         $maxDateTs = 0;
 
@@ -528,10 +441,10 @@ class DataProcessor
                 continue;
             }
 
-            $sol = trim((string)($getCol($r, 'Solicitud') ?? ''));
+            $sol = trim((string)($getCol($r, $headerAliases['Solicitud']) ?? ''));
             if ($sol !== '') {
-                foreach ($lastHeaderData as $k => $_) {
-                    $lastHeaderData[$k] = $getCol($r, $k);
+                foreach ($headerAliases as $k => $aliases) {
+                    $lastHeaderData[$k] = $getCol($r, $aliases);
                 }
             } else {
                 if ($lastHeaderData['Solicitud'] === null) {
@@ -541,15 +454,18 @@ class DataProcessor
 
             $fCreacionSolTs   = SimpleXLSX::excelDateToTimestamp($lastHeaderData['Fcreacion Solicitud']);
             $fAprobacionSolTs = SimpleXLSX::excelDateToTimestamp($lastHeaderData['Aprobacion Solicitud']);
-            $fCreacionOcTs    = SimpleXLSX::excelDateToTimestamp($getCol($r, ['Fcreacion OC Odoo', 'Fecha OC Odoo']));
-            $fAprobacionOcTs  = SimpleXLSX::excelDateToTimestamp($getCol($r, ['Aprobacion OC Odoo']));
-            $fCreacionSapTs   = SimpleXLSX::excelDateToTimestamp($getCol($r, ['Fcreacion OC SAP', 'Fecha OC SAP']));
+            $fCreacionOcTs    = SimpleXLSX::excelDateToTimestamp($getCol($r, ['Purchase Orders/Creado el', 'Fcreacion OC Odoo', 'Fecha OC Odoo']));
+            $fAprobacionOcTs  = SimpleXLSX::excelDateToTimestamp($getCol($r, ['Purchase Orders/Fecha de confirmación', 'Purchase Orders/Fecha de confirmacion', 'Aprobacion OC Odoo']));
+            $fCreacionSapTs   = SimpleXLSX::excelDateToTimestamp($getCol($r, ['Purchase Orders/Fecha SAP', 'Fcreacion OC SAP', 'Fecha OC SAP']));
 
             if ($fCreacionSolTs && $fCreacionSolTs > $maxDateTs) {
                 $maxDateTs = $fCreacionSolTs;
             }
+            if ($fCreacionOcTs && $fCreacionOcTs > $maxDateTs) {
+                $maxDateTs = $fCreacionOcTs;
+            }
 
-            $noOcOdoo = trim((string)($getCol($r, ['NO. OC Odoo', 'No. OC Odoo', 'No. OC']) ?? ''));
+            $noOcOdoo = trim((string)($getCol($r, ['Purchase Orders', 'NO. OC Odoo', 'No. OC Odoo', 'No. OC']) ?? ''));
             $ocFallback = ($noOcOdoo !== '' && isset($ocSummaryFromDetail[$noOcOdoo])) ? $ocSummaryFromDetail[$noOcOdoo] : null;
 
             $rawTotalOc = $getCol($r, ['Total OC', 'Total', 'Monto OC']);
@@ -571,6 +487,12 @@ class DataProcessor
                 $proveedor = $ocFallback['proveedor'];
             }
 
+            // Limpiar DocNum SAP (evitar que "104817.0" aparezca con decimal)
+            $rawSapDoc = trim((string)($getCol($r, ['Purchase Orders/DocNum SAP', 'NO. OC SAP', 'No. OC SAP']) ?? ''));
+            if ($rawSapDoc !== '' && is_numeric($rawSapDoc)) {
+                $rawSapDoc = (string)(int)round((float)$rawSapDoc);
+            }
+
             $solicitanteName = trim((string)($lastHeaderData['Solicitado por'] ?? ''));
             if ($solicitanteName === '') {
                 $solicitanteName = 'Sin solicitante';
@@ -581,12 +503,12 @@ class DataProcessor
                 'estado_sol'         => trim((string)($lastHeaderData['Estado Solicitud'] ?? '')),
                 'solicitado_por'     => $solicitanteName,
                 'autorizador_sol'    => trim((string)($lastHeaderData['Autorizador Solicitud'] ?? '')),
-                'autorizador_oc_1'   => trim((string)($getCol($r, ['Autorizador 1', 'Autorizador OC']) ?? '')),
+                'autorizador_oc_1'   => trim((string)($getCol($r, ['Purchase Orders/Autorizador 1', 'Autorizador 1', 'Autorizador OC']) ?? '')),
                 'comprador'          => trim((string)($lastHeaderData['Comprador'] ?? 'Sin asignar')),
                 'sociedad'           => trim((string)($lastHeaderData['Sociedad'] ?? 'Sin sociedad')),
                 'no_oc_odoo'         => $noOcOdoo,
-                'no_oc_sap'          => trim((string)($getCol($r, ['NO. OC SAP', 'No. OC SAP']) ?? '')),
-                'estado_oc'          => trim((string)($getCol($r, ['Estado OC']) ?? '')),
+                'no_oc_sap'          => $rawSapDoc,
+                'estado_oc'          => trim((string)($getCol($r, ['Purchase Orders/Estado', 'Estado OC']) ?? '')),
                 'proveedor'          => $proveedor,
                 'divisa'             => $divisa,
                 'total_oc'           => $totalOc,
@@ -665,7 +587,8 @@ class DataProcessor
 
                 $isFirm = in_array($estadoOcLower, ['orden de compra', 'para aprobar 1', 'para aprobar 2'], true)
                           && !$isSolRechazada && !$isSolBorrador;
-                $isRfq  = ($estadoOcLower === 'solicitud de cotización') && !$isSolRechazada && !$isSolBorrador;
+                $isRfq  = ($estadoOcLower === 'solicitud de cotización' || $estadoOcLower === 'solicitud de cotizacion')
+                          && !$isSolRechazada && !$isSolBorrador;
 
                 if ($provName !== 'Sin proveedor') {
                     $proveedoresSet[$provName] = true;
@@ -878,13 +801,12 @@ class DataProcessor
         sort($listSolicitantes);
 
         $output = [
-            'schema_v'      => 16,
+            'schema_v'      => 17,
             'excel_mtime'   => $excelMtime,
             'sol_mtime'     => $solMtime,
             'oc_mtime'      => $ocMtime,
             'generated_at'  => date('Y-m-d H:i:s'),
             'cutoff_date'   => date('Y-m-d', $cutoffTs),
-            'sync_info'     => $syncStatus,
             'filters'       => [
                 'meses'        => array_keys($meses),
                 'sociedades'   => $listSociedades,

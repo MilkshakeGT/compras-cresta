@@ -1,30 +1,45 @@
 <?php
-// Espera $isManager, $allUsersList, $allOdooBuyers, $syncConfig, $userAdminFeedback definidos en index.php
+// =========================================================================
+// SECCIÓN 1: PREPARACIÓN DE ESTADO DEL MODAL DE CONFIGURACIÓN (SOLO MANAGER)
+// =========================================================================
 if (empty($isManager)) {
     return;
 }
+
+require_once __DIR__ . '/../src/StatusConfig.php';
+
 $allUsersList      = $allUsersList ?? [];
 $allOdooBuyers     = $allOdooBuyers ?? [];
 $syncConfig        = $syncConfig ?? ['date_from' => date('Y') . '-01-01', 'date_to' => date('Y-m-d'), 'follow_today' => true];
+$statusConfig      = $statusConfig ?? (new StatusConfig(__DIR__ . '/../data'))->getConfig();
 $userAdminFeedback = $userAdminFeedback ?? null;
 
 $defaultTab = 'users';
-if ($userAdminFeedback !== null && !empty($userAdminFeedback['tab']) && $userAdminFeedback['tab'] === 'dates') {
-    $defaultTab = 'dates';
+if ($userAdminFeedback !== null && !empty($userAdminFeedback['tab'])) {
+    if ($userAdminFeedback['tab'] === 'dates') {
+        $defaultTab = 'dates';
+    } elseif ($userAdminFeedback['tab'] === 'statuses') {
+        $defaultTab = 'statuses';
+    }
 }
 $autoOpenConfig = ($userAdminFeedback !== null);
+
+$prIncluded = $statusConfig['pr_included'] ?? [];
+$poIncluded = $statusConfig['po_included'] ?? [];
 ?>
-<!-- Modal Configuración (Pestañas: Usuarios | Fechas y Sincronización) -->
+<!-- =====================================================================
+     SECCIÓN 2: MODAL CONFIGURACIÓN (USUARIOS | FECHAS | ESTATUS PR / OC)
+     ===================================================================== -->
 <div id="adminUsersModal" class="fixed inset-0 z-50 <?= $autoOpenConfig ? '' : 'hidden' ?> bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-white dark:bg-gray-900 border-2 border-cresta-navy dark:border-indigo-500 rounded-2xl max-w-5xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-        <!-- Cabecera + Pestañas -->
+        <!-- Cabecera + 3 Pestañas -->
         <div class="p-5 bg-cresta-navy text-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
                 <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cresta-red tracking-wider uppercase">
                     CONFIGURACIÓN DEL SISTEMA · MANAGER
                 </span>
                 <h3 class="text-base sm:text-lg font-bold mt-1">Configuración General de Compras y Sincronización</h3>
-                <div class="flex items-center gap-2 mt-3">
+                <div class="flex flex-wrap items-center gap-2 mt-3">
                     <button type="button" id="cfgTabBtnUsers" onclick="switchConfigTab('users')"
                         class="px-3 py-1.5 rounded-lg text-xs font-bold transition <?= $defaultTab === 'users' ? 'bg-white text-cresta-navy' : 'bg-white/10 text-slate-200 hover:bg-white/20' ?>">
                         👥 Usuarios y Compradores
@@ -32,6 +47,10 @@ $autoOpenConfig = ($userAdminFeedback !== null);
                     <button type="button" id="cfgTabBtnDates" onclick="switchConfigTab('dates')"
                         class="px-3 py-1.5 rounded-lg text-xs font-bold transition <?= $defaultTab === 'dates' ? 'bg-white text-cresta-navy' : 'bg-white/10 text-slate-200 hover:bg-white/20' ?>">
                         📅 Fechas de Sincronización
+                    </button>
+                    <button type="button" id="cfgTabBtnStatuses" onclick="switchConfigTab('statuses')"
+                        class="px-3 py-1.5 rounded-lg text-xs font-bold transition <?= $defaultTab === 'statuses' ? 'bg-white text-cresta-navy' : 'bg-white/10 text-slate-200 hover:bg-white/20' ?>">
+                        🏷️ Estatus (PR / OC)
                     </button>
                 </div>
             </div>
@@ -50,7 +69,9 @@ $autoOpenConfig = ($userAdminFeedback !== null);
                 </div>
             <?php endif; ?>
 
-            <!-- PESTAÑA 1: USUARIOS -->
+            <!-- =============================================================
+                 PESTAÑA 1: USUARIOS Y COMPRADORES
+                 ============================================================= -->
             <div id="cfgPanelUsers" class="<?= $defaultTab === 'users' ? '' : 'hidden' ?>">
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                     <form method="POST" id="userAdminForm" class="lg:col-span-5 p-4 rounded-xl border border-slate-200 dark:border-gray-700 bg-slate-50/70 dark:bg-gray-800/40 space-y-3">
@@ -215,7 +236,9 @@ $autoOpenConfig = ($userAdminFeedback !== null);
                 </div>
             </div>
 
-            <!-- PESTAÑA 2: FECHAS DE SINCRONIZACIÓN -->
+            <!-- =============================================================
+                 PESTAÑA 2: FECHAS DE SINCRONIZACIÓN
+                 ============================================================= -->
             <div id="cfgPanelDates" class="<?= $defaultTab === 'dates' ? '' : 'hidden' ?>">
                 <form method="POST" class="max-w-2xl p-5 rounded-xl border border-slate-200 dark:border-gray-700 bg-slate-50/70 dark:bg-gray-800/40 space-y-4">
                     <input type="hidden" name="action" value="save_sync_config">
@@ -275,31 +298,99 @@ $autoOpenConfig = ($userAdminFeedback !== null);
                     </div>
                 </form>
             </div>
+
+            <!-- =============================================================
+                 PESTAÑA 3: ESTATUS (INCLUIR / EXCLUIR PR Y OC)
+                 ============================================================= -->
+            <div id="cfgPanelStatuses" class="<?= $defaultTab === 'statuses' ? '' : 'hidden' ?>">
+                <form method="POST" class="p-5 rounded-xl border border-slate-200 dark:border-gray-700 bg-slate-50/70 dark:bg-gray-800/40 space-y-5">
+                    <input type="hidden" name="action" value="save_status_config">
+
+                    <div>
+                        <h4 class="font-bold text-cresta-navy dark:text-white text-sm">Inclusión / Exclusión de Estatus en el Análisis</h4>
+                        <p class="text-[11px] text-slate-500 dark:text-gray-400 mt-1">
+                            Marca los estatus que deseas <strong>incluir</strong> en los cálculos y desmarca los que deseas <strong>excluir</strong>
+                            (por ejemplo borradores, rechazados o cancelados que no quieras considerar en KPIs y gráficas).
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Columna PR -->
+                        <div class="p-4 rounded-xl border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-900 space-y-2.5">
+                            <h5 class="font-bold text-cresta-navy dark:text-indigo-300 text-xs uppercase tracking-wide">
+                                Solicitudes de Compra (purchase.request)
+                            </h5>
+                            <?php foreach (StatusConfig::PR_OPTIONS as $stKey => $stLabel): ?>
+                                <?php $checked = !empty($prIncluded[$stKey]); ?>
+                                <label class="flex items-center justify-between gap-2 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-gray-800/60 cursor-pointer select-none">
+                                    <span class="flex items-center gap-2">
+                                        <input type="checkbox" name="pr_included[<?= htmlspecialchars($stKey) ?>]" value="1" <?= $checked ? 'checked' : '' ?>
+                                            class="rounded text-emerald-600">
+                                        <span class="font-semibold text-slate-800 dark:text-gray-200"><?= htmlspecialchars($stLabel) ?></span>
+                                    </span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full font-bold <?= $checked
+                                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                                        : 'bg-red-50 text-cresta-red dark:bg-red-950 dark:text-red-300' ?>">
+                                        <?= $checked ? 'Incluido' : 'Excluido' ?>
+                                    </span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <!-- Columna PO -->
+                        <div class="p-4 rounded-xl border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-900 space-y-2.5">
+                            <h5 class="font-bold text-cresta-navy dark:text-indigo-300 text-xs uppercase tracking-wide">
+                                Órdenes de Compra (purchase.order)
+                            </h5>
+                            <?php foreach (StatusConfig::PO_OPTIONS as $stKey => $stLabel): ?>
+                                <?php $checked = !empty($poIncluded[$stKey]); ?>
+                                <label class="flex items-center justify-between gap-2 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-gray-800/60 cursor-pointer select-none">
+                                    <span class="flex items-center gap-2">
+                                        <input type="checkbox" name="po_included[<?= htmlspecialchars($stKey) ?>]" value="1" <?= $checked ? 'checked' : '' ?>
+                                            class="rounded text-emerald-600">
+                                        <span class="font-semibold text-slate-800 dark:text-gray-200"><?= htmlspecialchars($stLabel) ?></span>
+                                    </span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full font-bold <?= $checked
+                                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                                        : 'bg-red-50 text-cresta-red dark:bg-red-950 dark:text-red-300' ?>">
+                                        <?= $checked ? 'Incluido' : 'Excluido' ?>
+                                    </span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <div class="pt-1 flex items-center gap-3">
+                        <button type="submit"
+                            class="py-2.5 px-5 rounded-xl bg-cresta-navy hover:bg-cresta-blue text-white font-bold shadow-sm transition">
+                            Guardar Reglas de Estatus
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 </div>
 
+<!-- =====================================================================
+     SECCIÓN 3: SCRIPTS DEL MODAL DE CONFIGURACIÓN
+     ===================================================================== -->
 <script>
 function switchConfigTab(tab) {
-    const btnUsers   = document.getElementById('cfgTabBtnUsers');
-    const btnDates   = document.getElementById('cfgTabBtnDates');
-    const panelUsers = document.getElementById('cfgPanelUsers');
-    const panelDates = document.getElementById('cfgPanelDates');
-
+    const tabs = ['users', 'dates', 'statuses'];
     const activeBtnCls   = 'px-3 py-1.5 rounded-lg text-xs font-bold transition bg-white text-cresta-navy';
     const inactiveBtnCls = 'px-3 py-1.5 rounded-lg text-xs font-bold transition bg-white/10 text-slate-200 hover:bg-white/20';
 
-    if (tab === 'dates') {
-        btnDates.className = activeBtnCls;
-        btnUsers.className = inactiveBtnCls;
-        panelDates.classList.remove('hidden');
-        panelUsers.classList.add('hidden');
-    } else {
-        btnUsers.className = activeBtnCls;
-        btnDates.className = inactiveBtnCls;
-        panelUsers.classList.remove('hidden');
-        panelDates.classList.add('hidden');
-    }
+    const btnMap   = { users: 'cfgTabBtnUsers', dates: 'cfgTabBtnDates', statuses: 'cfgTabBtnStatuses' };
+    const panelMap = { users: 'cfgPanelUsers', dates: 'cfgPanelDates', statuses: 'cfgPanelStatuses' };
+
+    tabs.forEach(t => {
+        const isTarget = (t === tab);
+        const btn = document.getElementById(btnMap[t]);
+        const pnl = document.getElementById(panelMap[t]);
+        if (btn) btn.className = isTarget ? activeBtnCls : inactiveBtnCls;
+        if (pnl) pnl.classList.toggle('hidden', !isTarget);
+    });
 }
 function openAdminUsersModal() {
     document.getElementById('adminUsersModal').classList.remove('hidden');

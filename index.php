@@ -23,13 +23,13 @@ $detailsCachePath = $dataDir . '/details_cache.json';
 $odooConfigPath   = $dataDir . '/odoo.config.php';
 
 $odooConnector = new OdooConnector($odooConfigPath, $cachePath, $detailsCachePath);
+$processor     = new DataProcessor($excelPath, $cachePath);
 
 // =========================================================================
 // SECCIÓN 2: ENDPOINTS AJAX PROTEGIDOS CON AISLAMIENTO POR COMPRADOR
 // =========================================================================
 if (isset($_GET['action'])) {
     header('Content-Type: application/json; charset=utf-8');
-    $processor = new DataProcessor($excelPath, $cachePath);
 
     if ($_GET['action'] === 'detail') {
         $type = (string)($_GET['type'] ?? '');
@@ -124,7 +124,6 @@ $rawPayload = [
 ];
 
 try {
-    $processor  = new DataProcessor($excelPath, $cachePath);
     $rawPayload = $processor->getProcessedData($forceRebuild);
 } catch (Throwable $e) {
     $loadError = $e->getMessage();
@@ -156,7 +155,7 @@ foreach ($assetFiles as $af) {
         }
     }
 }
-$assetVer = '1.14.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
+$assetVer = '1.15.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
 ?>
 <!DOCTYPE html>
 <html lang="es">

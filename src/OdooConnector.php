@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+// =========================================================================
+// SECCIÓN 1: CONECTOR ODOO 17 (VENTANA DE FECHAS, PURGA E INCREMENTAL)
+// =========================================================================
 class OdooConnector
 {
     private string $configPath;
@@ -30,7 +33,7 @@ class OdooConnector
     }
 
     // =========================================================================
-    // SECCIÓN 1: CONFIGURACIÓN DE VENTANA DE FECHAS (data/sync_config.json)
+    // SECCIÓN 2: CONFIGURACIÓN DE FECHAS (data/sync_config.json)
     // =========================================================================
     public function getSyncConfig(): array
     {
@@ -90,8 +93,7 @@ class OdooConnector
             'date_from'      => $rawFrom,
             'date_to'        => $followToday ? $today : $rawTo,
             'follow_today'   => $followToday,
-            'incremental'    => !empty($input['incremental']) || true,
-            // Si la fecha inicial cambió o se modificó la ventana, reiniciar marca de agua incremental
+            'incremental'    => true,
             'last_watermark' => ($prevFrom === $rawFrom && ($prevCfg['date_to'] ?? '') === $rawTo)
                 ? ($prevCfg['last_watermark'] ?? null)
                 : null,
@@ -104,7 +106,6 @@ class OdooConnector
             LOCK_EX
         );
 
-        // Purga inmediata si la fecha de inicio se movió hacia adelante respecto a la anterior
         $purgedInfo = '';
         if ($dateFromAdvanced) {
             $purgedCount = $this->purgeRecordsBeforeDate($rawFrom);
@@ -119,7 +120,7 @@ class OdooConnector
     }
 
     // =========================================================================
-    // SECCIÓN 2: PURGA SELECTIVA DE DATOS FUERA DE VENTANA
+    // SECCIÓN 3: PURGA DE REGISTROS ANTERIORES A LA FECHA DE INICIO
     // =========================================================================
     private function purgeRecordsBeforeDate(string $minDate): int
     {
@@ -154,13 +155,12 @@ class OdooConnector
             return $keep;
         }));
 
-        $cache['oc_records'] = array_values(array_filter($cache['oc_records'] ?? [], function ($ocr) use ($minDate) {
+        $minYm = substr($minDate, 0, 7);
+        $cache['oc_records'] = array_values(array_filter($cache['oc_records'] ?? [], function ($ocr) use ($minYm) {
             $ym = (string)($ocr['ym'] ?? '');
-            $minYm = substr($minDate, 0, 7);
             return ($ym === '' || $ym >= $minYm);
         }));
 
-        $minYm = substr($minDate, 0, 7);
         foreach (array_keys($cache['oc_stats'] ?? []) as $ymKey) {
             if ($ymKey < $minYm) {
                 unset($cache['oc_stats'][$ymKey]);
@@ -170,7 +170,6 @@ class OdooConnector
         $this->rebuildFiltersFromCache($cache);
         file_put_contents($this->cachePath, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
 
-        // Limpiar también detalles de líneas huérfanas anteriores a $minDate
         if (file_exists($this->detailsCachePath)) {
             $details = json_decode((string)file_get_contents($this->detailsCachePath), true);
             if (is_array($details)) {
@@ -241,7 +240,7 @@ class OdooConnector
     }
 
     // =========================================================================
-    // SECCIÓN 3: CONEXIÓN JSON-RPC Y UTILIDADES DE FECHA
+    // SECCIÓN 4: RPC Y UTILIDADES DE FECHA / TEXTO
     // =========================================================================
     public function isConfigured(): bool
     {
@@ -459,7 +458,7 @@ class OdooConnector
     }
 
     // =========================================================================
-    // SECCIÓN 4: SINCRONIZACIÓN POR RANGO E INCREMENTAL POR CAMBIOS
+    // SECCIÓN 5: SINCRONIZACIÓN INCREMENTAL DENTRO DEL RANGO CONFIGURADO
     // =========================================================================
     public function syncFromOdoo(): array
     {
@@ -480,7 +479,7 @@ class OdooConnector
         $dateFrom = (string)$syncCfg['date_from'];
         $dateTo   = (string)$syncCfg['date_to'];
 
-        // 1. Si ya hay datos previos en caché, purgar cualquier registro anterior a date_from
+        // Purga previa si existen registros anteriores a date_from
         $this->purgeRecordsBeforeDate($dateFrom);
 
         $uid = $this->rpc($url, 'common', 'authenticate', [$db, $user, $apiKey, []]);
@@ -491,15 +490,11 @@ class OdooConnector
         $utcStart = $this->localDateToUtcStart($dateFrom);
         $utcEnd   = $this->localDateToUtcEnd($dateTo);
 
-        // Marca de agua incremental: solo jalar registros modificados o creados desde la última sync
         $hasExistingCache = file_exists($this->cachePath) && file_exists($this->detailsCachePath);
         $watermark = (!empty($syncCfg['incremental']) && $hasExistingCache && !empty($syncCfg['last_watermark']))
             ? (string)$syncCfg['last_watermark']
             : null;
 
-        // Ventana efectiva de consulta en Odoo:
-        // - Fecha de creación dentro del rango configurado [dateFrom .. dateTo]
-        // - Si existe watermark incremental, se traen los modificados/creados desde (watermark - 15 min margen)
         $prDomain = [
             ['create_date', '>=', $utcStart],
             ['create_date', '<=', $utcEnd],
@@ -510,13 +505,12 @@ class OdooConnector
         ];
 
         if ($watermark !== null) {
-            $incFrom = gmdate('Y-m-d H:i:s', max(0, strtotime($watermark . ' UTC') - 900));
+            $incFrom = gmdate('Y-m-d H:i:s', max(0, (int)strtotime($watermark . ' UTC') - 900));
             $effectiveIncFrom = max($utcStart, $incFrom);
             $prDomain[] = ['write_date', '>=', $effectiveIncFrom];
             $poDomain[] = ['write_date', '>=', $effectiveIncFrom];
         }
 
-        // Consultar cabeceras cambiadas/nuevas en el rango
         $changedPrList = $this->searchReadAll($url, $db, $uid, $apiKey, 'purchase.request', $prDomain, [
             'id', 'name', 'state', 'requested_by', 'assigned_to', 'follower_id',
             'date_start', 'create_date', 'write_date', 'approval_date', 'company_select', 'company_id'
@@ -529,7 +523,6 @@ class OdooConnector
             'company_select', 'company_id'
         ]);
 
-        // Si en modo incremental no hubo cambios en PR ni PO, actualizar timestamp y no tocar datos
         if ($watermark !== null && empty($changedPrList) && empty($changedPoList)) {
             $nowStr = date('Y-m-d H:i:s');
             $syncCfg['last_watermark'] = gmdate('Y-m-d H:i:s');
@@ -537,12 +530,12 @@ class OdooConnector
 
             $prevMeta = $this->getLastSyncInfo() ?? [];
             $meta = array_merge($prevMeta, [
-                'last_sync'     => $nowStr,
-                'date_from'     => $dateFrom,
-                'date_to'       => $dateTo,
-                'changed_pr'    => 0,
-                'changed_po'    => 0,
-                'mode'          => 'incremental_no_changes',
+                'last_sync'  => $nowStr,
+                'date_from'  => $dateFrom,
+                'date_to'    => $dateTo,
+                'changed_pr' => 0,
+                'changed_po' => 0,
+                'mode'       => 'incremental_no_changes',
             ]);
             file_put_contents($this->syncMetaPath, json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
 
@@ -553,19 +546,16 @@ class OdooConnector
             ];
         }
 
-        // Si es sincronización incremental con cambios, necesitamos también las PR/PO ya cacheadas
-        // que no cambiaron para reconstruir el payload consolidado sin perder ni alterar lo no modificado.
         $existingCache = $hasExistingCache
-            ? json_decode((string)file_get_contents($this->cachePath), true)
+            ? (json_decode((string)file_get_contents($this->cachePath), true) ?: [])
             : [];
         $existingDetails = file_exists($this->detailsCachePath)
-            ? json_decode((string)file_get_contents($this->detailsCachePath), true)
+            ? (json_decode((string)file_get_contents($this->detailsCachePath), true) ?: [])
             : [];
 
         $changedPrIds = array_map(fn($x) => (int)$x['id'], $changedPrList);
         $changedPoIds = array_map(fn($x) => (int)$x['id'], $changedPoList);
 
-        // Descargar líneas únicamente de las PR y PO cambiadas/nuevas
         $prLinesRaw = !empty($changedPrIds)
             ? $this->searchReadAll($url, $db, $uid, $apiKey, 'purchase.request.line', [
                 ['request_id', 'in', $changedPrIds]
@@ -584,12 +574,8 @@ class OdooConnector
             ])
             : [];
 
-        // Si venimos de una carga anterior, mantener intactos los registros cuyo ID/documento no cambió
-        // y reemplazar/actualizar únicamente los modificados o creados.
-        $mergedRawRows = [];
         $changedSolNames = [];
         $changedOcNames  = [];
-
         foreach ($changedPrList as $pr) {
             $sName = trim((string)($pr['name'] ?? ''));
             if ($sName !== '') $changedSolNames[$sName] = true;
@@ -599,7 +585,7 @@ class OdooConnector
             if ($oName !== '') $changedOcNames[$oName] = true;
         }
 
-        // Reconstruir detalles combinando los conservados + los actualizados
+        // Reconstruir detalles de PR cambiadas
         $solDetails = is_array($existingDetails['sol'] ?? null) ? $existingDetails['sol'] : [];
         foreach (array_keys($changedSolNames) as $sName) {
             unset($solDetails[$sName]);
@@ -619,10 +605,12 @@ class OdooConnector
             ];
         }
 
+        // Reconstruir detalles de PO cambiadas (inicializando estructura limpia antes de acumular líneas)
         $ocDetails = is_array($existingDetails['oc'] ?? null) ? $existingDetails['oc'] : [];
         foreach (array_keys($changedOcNames) as $oName) {
             unset($ocDetails[$oName]);
         }
+
         $poById = [];
         $posByPrId = [];
         foreach ($changedPoList as $po) {
@@ -631,6 +619,14 @@ class OdooConnector
             $reqId = $this->m2oId($po['request_id'] ?? null);
             if ($reqId !== null) {
                 $posByPrId[$reqId][] = $po;
+            }
+            $ocName = trim((string)($po['name'] ?? ''));
+            if ($ocName !== '' && !isset($ocDetails[$ocName])) {
+                $ocDetails[$ocName] = [
+                    'proveedor' => $this->m2oName($po['partner_id'] ?? null, 'Sin proveedor'),
+                    'divisa'    => strtoupper($this->m2oName($po['currency_id'] ?? null, 'GTQ')) ?: 'GTQ',
+                    'lineas'    => [],
+                ];
             }
         }
 
@@ -653,9 +649,14 @@ class OdooConnector
                 ? round((float)$ln['price_total'], 2)
                 : (is_numeric($ln['price_subtotal'] ?? null) ? round((float)$ln['price_subtotal'], 2) : round($qty * $pu, 2));
 
-            $ocDetails[$ocName]['proveedor'] = $prov;
-            $ocDetails[$ocName]['divisa']    = $div;
-            $ocDetails[$ocName]['lineas'][]  = [
+            if (!isset($ocDetails[$ocName])) {
+                $ocDetails[$ocName] = [
+                    'proveedor' => $prov,
+                    'divisa'    => $div,
+                    'lineas'    => [],
+                ];
+            }
+            $ocDetails[$ocName]['lineas'][] = [
                 'producto'        => $prodDesc !== '' ? $prodDesc : '(Sin descripción)',
                 'cantidad'        => $qty,
                 'precio_unitario' => $pu,
@@ -663,8 +664,9 @@ class OdooConnector
             ];
         }
 
-        // Construir filas nuevas/actualizadas de PR y PO cambiadas
+        $mergedRawRows = [];
         $maxDateTs = 0;
+
         foreach ($changedPrList as $pr) {
             $prId   = (int)$pr['id'];
             $solRef = trim((string)($pr['name'] ?? ''));
@@ -756,7 +758,6 @@ class OdooConnector
             }
         }
 
-        // OCs directas cambiadas/nuevas (sin solicitud vinculada)
         foreach ($changedPoList as $po) {
             if ($this->m2oId($po['request_id'] ?? null) !== null) {
                 continue;
@@ -800,7 +801,6 @@ class OdooConnector
             ];
         }
 
-        // Calcular métricas sobre los registros cambiados y fusionar con los registros no modificados
         $newBatch = $this->buildNormalizedStructures($mergedRawRows, $solDetails, $maxDateTs);
 
         $finalRecords = [];
@@ -844,7 +844,6 @@ class OdooConnector
             $finalOcRecords[] = $updOcr;
         }
 
-        // Recalcular oc_stats desde finalSpend para mantener consistencia exacta
         $finalOcStats = [];
         foreach ($finalSpend as $sr) {
             if (empty($sr['solicitud'])) continue;
@@ -898,7 +897,6 @@ class OdooConnector
         $this->rebuildFiltersFromCache($output);
         file_put_contents($this->cachePath, json_encode($output, JSON_UNESCAPED_UNICODE), LOCK_EX);
 
-        // Guardar nueva marca de agua UTC
         $syncCfg['last_watermark'] = gmdate('Y-m-d H:i:s');
         file_put_contents($this->syncConfigPath, json_encode($syncCfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
 
@@ -927,6 +925,9 @@ class OdooConnector
         ];
     }
 
+    // =========================================================================
+    // SECCIÓN 6: CONSTRUCCIÓN DE ESTRUCTURAS NORMALIZADAS
+    // =========================================================================
     private function buildNormalizedStructures(array $normalizedRows, array $solDetails, int $maxDateTs): array
     {
         $buyerNamesNorm = [];

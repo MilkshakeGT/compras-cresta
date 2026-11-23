@@ -11,6 +11,11 @@
                     <span class="text-xs text-slate-500 dark:text-gray-400">
                         Corte: <strong class="text-slate-800 dark:text-gray-200"><?= htmlspecialchars($payload['cutoff_date']) ?></strong>
                     </span>
+                    <?php if (!empty($odooSyncInfo['last_sync'])): ?>
+                        <span class="text-[11px] text-slate-400 dark:text-gray-500" title="Última sincronización directa con Odoo">
+                            · Odoo: <?= htmlspecialchars((string)$odooSyncInfo['last_sync']) ?>
+                        </span>
+                    <?php endif; ?>
                     <span class="text-[11px] px-2 py-0.5 rounded-full font-semibold <?= !empty($isManager)
                         ? 'bg-indigo-50 text-cresta-navy border border-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800'
                         : 'bg-sky-50 text-cresta-blue border border-sky-200 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800' ?>">
@@ -18,7 +23,7 @@
                     </span>
                     <?php if ($uploadFeedback !== null && !empty($uploadFeedback['ok'])): ?>
                         <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 font-semibold">
-                            ✓ Datos actualizados
+                            ✓ <?= htmlspecialchars((string)$uploadFeedback['message']) ?>
                         </span>
                     <?php endif; ?>
                 </div>
@@ -63,11 +68,21 @@
                 </button>
 
                 <?php if (!empty($isManager)): ?>
-                    <!-- Botón Admin: Cargar Reportes Crudos de Odoo (Solo Manager) -->
-                    <button type="button" onclick="openAdminUploadModal()" title="Cargar archivos Excel exportados de Odoo"
+                    <!-- Botón Sincronización Directa con Odoo API (Solo Manager) -->
+                    <form method="POST" class="inline" onsubmit="const b=this.querySelector('button'); b.disabled=true; b.innerHTML='<span>⏳</span><span>Sincronizando...</span>';">
+                        <input type="hidden" name="action" value="sync_odoo_api">
+                        <button type="submit" title="Sincronizar directamente con la base de datos de Odoo 17"
+                            class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition shadow-xs">
+                            <span>🔄</span>
+                            <span class="hidden sm:inline">Sincronizar Odoo</span>
+                        </button>
+                    </form>
+
+                    <!-- Botón Respaldo: Cargar Reportes Excel (Solo Manager) -->
+                    <button type="button" onclick="openAdminUploadModal()" title="Respaldo: Cargar archivos Excel exportados de Odoo"
                         class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
                         <span>⚙️</span>
-                        <span class="hidden md:inline">Cargar Datos</span>
+                        <span class="hidden lg:inline">Excel</span>
                     </button>
 
                     <!-- Botón Admin: Gestión de Usuarios y Permisos (Solo Manager) -->

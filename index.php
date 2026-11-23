@@ -2,8 +2,10 @@
 declare(strict_types=1);
 
 // =========================================================================
-// SECCIÓN 1: CARGA DE DEPENDENCIAS Y SESIÓN RBAC
+// SECCIÓN 1: ZONA HORARIA, DEPENDENCIAS Y SESIÓN RBAC
 // =========================================================================
+date_default_timezone_set('America/Guatemala');
+
 require_once __DIR__ . '/src/Auth.php';
 require_once __DIR__ . '/src/DataProcessor.php';
 require_once __DIR__ . '/src/UploadHandler.php';
@@ -155,7 +157,7 @@ foreach ($assetFiles as $af) {
         }
     }
 }
-$assetVer = '1.15.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
+$assetVer = '1.16.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
 ?>
 <!DOCTYPE html>
 <html lang="es">

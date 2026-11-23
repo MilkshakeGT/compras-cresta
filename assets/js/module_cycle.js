@@ -412,7 +412,6 @@ function renderChartQuincenas(entityRecords, maxYm) {
         return;
     }
 
-    // Modo Acumulado (original)
     if (titleEl) titleEl.textContent = '% Solicitudes en SAP dentro de plazo (por Quincena)';
     if (subEl) subEl.textContent = 'Umbrales acumulados sobre solicitudes que ya cumplieron la ventana de 7, 14 o 30 días';
 
@@ -832,6 +831,7 @@ function renderChartAprobadoresOc() {
 }
 
 function renderChartCompradorTrend(maxYm, selectedComp, selectedYear) {
+    const selectedSoc = document.getElementById('filterSociedad').value;
     const socRecords = filterBySociedadOnly(RAW_DATA.records)
         .filter(r => !r.excluida && r.aprobada && r.tiene_oc_odoo && r.d_comprador !== null);
 
@@ -849,8 +849,17 @@ function renderChartCompradorTrend(maxYm, selectedComp, selectedYear) {
 
     if (charts.compTrend) charts.compTrend.destroy();
 
+    const getTeamBenchmarkForMonth = (m) => {
+        if (RAW_DATA.team_avg_by_month) {
+            const socBucket = RAW_DATA.team_avg_by_month[selectedSoc] || RAW_DATA.team_avg_by_month['ALL'] || {};
+            return socBucket[m] !== undefined ? socBucket[m] : null;
+        }
+        const vals = socRecords.filter(r => r.ym === m).map(r => r.d_comprador);
+        return vals.length ? Number(avg(vals).toFixed(1)) : null;
+    };
+
     if (selectedComp !== 'ALL') {
-        titleEl.textContent = `Evolución Mensual de Gestión: ${selectedComp}`;
+        titleEl.textContent = `Evolución Mensual de Gestión: ${shortName(selectedComp)}`;
         subEl.textContent = 'Barras = Días promedio a OC en Odoo · Línea = Mediana (sin sesgo de casos atípicos)';
         badgeEl.textContent = 'Progreso Individual';
 
@@ -861,11 +870,9 @@ function renderChartCompradorTrend(maxYm, selectedComp, selectedYear) {
 
         meses.forEach(m => {
             const mComp = compRows.filter(r => r.ym === m).map(r => r.d_comprador);
-            const mTeam = socRecords.filter(r => r.ym === m).map(r => r.d_comprador);
-
             avgSeries.push(mComp.length ? Number(avg(mComp).toFixed(1)) : null);
             medSeries.push(mComp.length ? Number(median(mComp).toFixed(1)) : null);
-            teamAvgSeries.push(mTeam.length ? Number(avg(mTeam).toFixed(1)) : null);
+            teamAvgSeries.push(getTeamBenchmarkForMonth(m));
         });
 
         const options = {
@@ -926,10 +933,7 @@ function renderChartCompradorTrend(maxYm, selectedComp, selectedYear) {
             return { name: shortName(compName), data };
         });
 
-        const teamData = meses.map(m => {
-            const vals = socRecords.filter(r => r.ym === m).map(r => r.d_comprador);
-            return vals.length ? Number(avg(vals).toFixed(1)) : null;
-        });
+        const teamData = meses.map(m => getTeamBenchmarkForMonth(m));
         series.push({ name: 'Promedio Equipo', data: teamData });
 
         const colors = [...palette.slice(0, activeComps.length), isDark ? '#E5E7EB' : '#64748B'];

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/src/Auth.php';
 require_once __DIR__ . '/src/DataProcessor.php';
 require_once __DIR__ . '/src/UploadHandler.php';
+require_once __DIR__ . '/src/OdooConnector.php';
 
 // 1. Control de acceso y sesión RBAC
 $auth = new Auth(__DIR__ . '/data/auth.config.php');
@@ -13,9 +14,13 @@ $currentUser   = $auth->currentUser();
 $isManager     = $auth->isManager();
 $allowedBuyers = $isManager ? null : $auth->getAllowedBuyers();
 
-$dataDir   = __DIR__ . '/data';
-$excelPath = $dataDir . '/DB.xlsx';
-$cachePath = $dataDir . '/cache.json';
+$dataDir          = __DIR__ . '/data';
+$excelPath        = $dataDir . '/DB.xlsx';
+$cachePath        = $dataDir . '/cache.json';
+$detailsCachePath = $dataDir . '/details_cache.json';
+$odooConfigPath   = $dataDir . '/odoo.config.php';
+
+$odooConnector = new OdooConnector($odooConfigPath, $cachePath, $detailsCachePath);
 
 // 2. Endpoints AJAX protegidos por sesión y aislados por comprador (Row-Level Security)
 if (isset($_GET['action'])) {
@@ -50,7 +55,17 @@ $forceRebuild      = $isManager && isset($_GET['rebuild']) && $_GET['rebuild'] =
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $postAction = (string)($_POST['action'] ?? '');
 
-    if ($postAction === 'upload_odoo_files') {
+    if ($postAction === 'sync_odoo_api') {
+        if (!$isManager) {
+            http_response_code(403);
+            die('Acceso denegado: solo un usuario con perfil Manager puede sincronizar Odoo.');
+        }
+        try {
+            $uploadFeedback = $odooConnector->syncFromOdoo();
+        } catch (Throwable $e) {
+            $uploadFeedback = ['ok' => false, 'message' => 'Error sincronizando con Odoo: ' . $e->getMessage()];
+        }
+    } elseif ($postAction === 'upload_odoo_files') {
         if (!$isManager) {
             http_response_code(403);
             die('Acceso denegado: solo un usuario con perfil Manager puede cargar reportes de Odoo.');
@@ -74,7 +89,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$filesStatus = $isManager ? $uploadHandler->getFilesStatus() : [];
+$filesStatus  = $isManager ? $uploadHandler->getFilesStatus() : [];
+$odooSyncInfo = $odooConnector->getLastSyncInfo();
 
 // 4. Carga de datos principales y aplicación de aislamiento RBAC
 $loadError = null;
@@ -121,7 +137,7 @@ foreach ($assetFiles as $af) {
         }
     }
 }
-$assetVer = '1.12.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
+$assetVer = '1.13.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
 ?>
 <!DOCTYPE html>
 <html lang="es">

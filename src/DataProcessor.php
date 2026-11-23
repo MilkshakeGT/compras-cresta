@@ -24,6 +24,8 @@ class DataProcessor
 
     public function __construct(string $excelPath, string $cachePath)
     {
+        date_default_timezone_set('America/Guatemala');
+
         $dataDir = dirname($excelPath);
         $this->excelPath        = $excelPath;
         $this->cachePath        = $cachePath;
@@ -34,7 +36,7 @@ class DataProcessor
     }
 
     // =========================================================================
-    // SECCIÓN 2: EVALUACIÓN DE ESTATUS Y EXCLUSIÓN DE LEGACY "HECHO" SIN OC/SAP
+    // SECCIÓN 2: EVALUACIÓN DE ESTATUS Y EXCLUSIÓN DE RECHAZADOS / BORRADORES / LEGACY
     // =========================================================================
     private function isPrStatusIncluded(string $estadoSol, array $prIncluded): bool
     {
@@ -76,14 +78,18 @@ class DataProcessor
      */
     private function isLegacyDoneWithoutOcOrSap(array $rec): bool
     {
-        $solStLow   = mb_strtolower(trim((string)($rec['estado_sol'] ?? '')));
-        $isDonePr   = in_array($solStLow, ['hecho', 'done'], true);
-        $hasOcOdoo  = !empty($rec['tiene_oc_odoo']) || trim((string)($rec['oc_odoo'] ?? '')) !== '';
-        $hasOcSap   = !empty($rec['tiene_oc_sap'])  || trim((string)($rec['f_creacion_sap'] ?? '')) !== '';
+        $solStLow  = mb_strtolower(trim((string)($rec['estado_sol'] ?? '')));
+        $isDonePr  = in_array($solStLow, ['hecho', 'done'], true);
+        $hasOcOdoo = !empty($rec['tiene_oc_odoo']) || trim((string)($rec['oc_odoo'] ?? '')) !== '';
+        $hasOcSap  = !empty($rec['tiene_oc_sap']) || trim((string)($rec['f_creacion_sap'] ?? '')) !== '';
 
         return $isDonePr && !$hasOcOdoo && !$hasOcSap;
     }
 
+    /**
+     * Aplica las reglas de inclusión/exclusión de estatus (status_config.json)
+     * y limpia tiempos / rezagos de registros excluidos o rechazados.
+     */
     private function applyStatusRulesToCache(array $cache, array $statusCfg): array
     {
         $prIncluded = is_array($statusCfg['pr_included'] ?? null) ? $statusCfg['pr_included'] : [];
@@ -148,12 +154,15 @@ class DataProcessor
             $allPoExcluded = $hasAnyPo && !$hasActivePo;
             $isLegacyDone  = $this->isLegacyDoneWithoutOcOrSap($rec);
 
-            $rec['is_rechazada'] = ($solStLow === 'rechazado') || (!$included && $solStLow !== 'borrador' && $solStLow !== 'draft');
-            $rec['is_borrador']  = ($solStLow === 'borrador' || $solStLow === 'draft') && !$included;
-            $rec['excluida']     = (!$included) || $allPoExcluded || $isLegacyDone;
+            $isRejected = ($solStLow === 'rechazado') || (!$included && $solStLow !== 'borrador' && $solStLow !== 'draft');
+            $isDraft    = ($solStLow === 'borrador' || $solStLow === 'draft') || (!$included && ($solStLow === 'borrador' || $solStLow === 'draft'));
+            $isExcluded = (!$included) || $isRejected || $isDraft || $allPoExcluded || $isLegacyDone;
 
-            // Evitar que solicitudes cerradas manualmente en SAP sin OC/SAP inflen rezagos o castiguen SLA
-            if ($isLegacyDone) {
+            $rec['is_rechazada'] = $isRejected;
+            $rec['is_borrador']  = $isDraft;
+            $rec['excluida']     = $isExcluded;
+
+            if ($isExcluded) {
                 $rec['d_comprador']   = null;
                 $rec['d_to_sap']      = null;
                 $rec['d_ciclo_total'] = null;

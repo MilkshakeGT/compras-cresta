@@ -1,1015 +1,309 @@
-/* =========================================================================
- * MODALES DE AUDITORÍA, BÚSQUEDA GLOBAL Y DETALLE DE DOCUMENTOS (modals.js)
- * ========================================================================= */
+/* ==========================================================================
+   MÓDULO DE MODALES DE AUDITORÍA Y DETALLE DE DOCUMENTOS (modals.js)
+   ========================================================================== */
 
-let activeModalCategory = 'REZAGO';
-let activeModalSubFilter = 'ALL';
-let cachedUniverses = {
-    VALIDAS: [],
-    TIEMPO_COMP: [],
-    SLA_COMP: [],
-    SAP_14: [],
-    REZAGO: [],
-    SPEND_FIRM: [],
-    SPEND_RFQ: [],
-    SPEND_NO_SAP: []
-};
+let pendingSapCacheRows = [];
+let pendingSapActiveFilter = 'all';
 
-// Estado de Búsqueda Global por Ítem / SKU / Descripción
-let globalSearchResults = [];
-let globalSearchQuery   = '';
-let globalSearchTab     = 'ALL'; // 'ALL' | 'sol' | 'oc'
+function isValidForSapBacklog(r) {
+    if (!r) return false;
+    if (r.excluida || r.is_rechazada || r.is_borrador) return false;
 
-const MODAL_CONFIG = {
-    VALIDAS: {
-        mode: 'cycle',
-        badge: 'AUDITORÍA · SOLICITUDES VÁLIDAS',
-        title: 'Solicitudes Válidas del Periodo Seleccionado',
-        daysField: 'd_ciclo_total',
-        daysLabel: 'Ciclo Total (días)',
-        tabs: [
-            { id: 'ALL', label: 'Todas' },
-            { id: 'IN_SAP', label: 'Completadas en SAP' },
-            { id: 'IN_ODOO', label: 'Con OC Odoo (Sin SAP)' },
-            { id: 'NO_OC', label: 'Sin OC en Odoo' }
-        ]
-    },
-    TIEMPO_COMP: {
-        mode: 'cycle',
-        badge: 'AUDITORÍA · GESTIÓN COMPRADOR (DÍAS)',
-        title: 'Tiempos de Gestión del Comprador (Aprobación Solicitud → Creación OC Odoo)',
-        daysField: 'd_comprador',
-        daysLabel: 'Días Gestión OC',
-        tabs: [
-            { id: 'ALL', label: 'Todas con OC Odoo' },
-            { id: 'FAST', label: 'Ágiles (≤ 7 días)' },
-            { id: 'MED', label: 'Moderadas (8 a 14 días)' },
-            { id: 'SLOW', label: 'Lentas (> 14 días)' }
-        ]
-    },
-    SLA_COMP: {
-        mode: 'cycle',
-        badge: 'AUDITORÍA · SLA COMPRADOR',
-        title: 'Evaluación SLA Comprador (Aprobación Solicitud → Creación OC Odoo)',
-        daysField: 'd_comprador',
-        daysLabel: 'Días Comprador',
-        tabs: [
-            { id: 'ALL', label: 'Todas las Evaluables' },
-            { id: 'OK_14', label: 'Cumplieron (≤ 14 días)' },
-            { id: 'LATE_14', label: 'Fuera de SLA (> 14d / Sin OC)' }
-        ]
-    },
-    SAP_14: {
-        mode: 'cycle',
-        badge: 'AUDITORÍA · EN SAP ≤14 DÍAS',
-        title: 'Evaluación Ciclo a SAP (Aprobación Solicitud → Creación en SAP)',
-        daysField: 'd_to_sap',
-        daysLabel: 'Días hasta SAP',
-        tabs: [
-            { id: 'ALL', label: 'Todas las Evaluables' },
-            { id: 'OK_14', label: 'En SAP ≤ 14 días' },
-            { id: 'LATE_14', label: 'Fuera de Plazo (> 14d / Sin SAP)' }
-        ]
-    },
-    REZAGO: {
-        mode: 'cycle',
-        badge: 'AUDITORÍA · REZAGO SIN SAP',
-        title: 'Solicitudes Aprobadas Pendientes de Llegar a SAP',
-        daysField: 'd_to_sap',
-        daysLabel: 'Días desde Aprob.',
-        tabs: [
-            { id: 'ALL', label: 'Todas' },
-            { id: 'GT30', label: 'Críticas (> 30 días)' },
-            { id: 'NO_OC', label: 'Sin OC en Odoo (Comprador)' },
-            { id: 'PEND_SAP', label: 'Con OC Odoo (Falta Aprob/SAP)' }
-        ]
-    },
-    SPEND_FIRM: {
-        mode: 'spend',
-        badge: 'AUDITORÍA · ÓRDENES DE COMPRA FIRMES',
-        title: 'Detalle de Órdenes de Compra Firmes (Monto y Proveedor)',
-        tabs: [
-            { id: 'ALL', label: 'Todas las OCs Firmes' },
-            { id: 'TOP5_PROV', label: 'Solo Top 5 Proveedores' },
-            { id: 'IN_SAP', label: 'Con OC SAP' },
-            { id: 'NO_SAP', label: 'Pendientes de SAP' }
-        ]
-    },
-    SPEND_RFQ: {
-        mode: 'spend',
-        badge: 'AUDITORÍA · COTIZACIONES ABIERTAS (RFQ)',
-        title: 'Solicitudes de Cotización Pendientes de Conversión a OC',
-        tabs: [
-            { id: 'ALL', label: 'Todas las Cotizaciones' }
-        ]
-    },
-    SPEND_NO_SAP: {
-        mode: 'spend',
-        badge: 'AUDITORÍA · OCs FIRMES SIN SINCRONIZAR EN SAP',
-        title: 'Órdenes de Compra Firmes Pendientes de Integración SAP',
-        tabs: [
-            { id: 'ALL', label: 'Todas sin SAP' }
-        ]
-    }
-};
-
-function renderSolLink(solId) {
-    const clean = String(solId ?? '').trim();
-    if (!clean) return '—';
-    return `<button type="button" onclick="event.stopPropagation(); openDocumentDetail('sol', '${escapeHtml(clean)}')"
-        title="Ver línea de tiempo y productos solicitados en ${escapeHtml(clean)}"
-        class="font-bold text-cresta-navy dark:text-indigo-300 underline decoration-dotted hover:decoration-solid hover:text-cresta-red dark:hover:text-white transition cursor-pointer">
-        ${escapeHtml(clean)}
-    </button>`;
-}
-
-function renderOcLinks(ocListStr) {
-    const raw = String(ocListStr ?? '').trim();
-    if (!raw) return '—';
-    const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
-    return parts.map(code => `
-        <button type="button" onclick="event.stopPropagation(); openDocumentDetail('oc', '${escapeHtml(code)}')"
-            title="Ver línea de tiempo, precios y proveedor de ${escapeHtml(code)}"
-            class="inline-block font-semibold text-cresta-blue dark:text-sky-400 underline decoration-dotted hover:decoration-solid hover:text-cresta-red dark:hover:text-white transition cursor-pointer">
-            ${escapeHtml(code)}
-        </button>
-    `).join(', ');
-}
-
-// =========================================================================
-// BUSCADOR GLOBAL INTELIGENTE (DOCUMENTO EXACTO O ÍTEM / SKU / DESCRIPCIÓN)
-// =========================================================================
-function handleQuickDocLookup(e) {
-    e.preventDefault();
-    const raw = document.getElementById('quickDocInput').value.trim();
-    if (!raw) return;
-
-    const upper = raw.toUpperCase();
-
-    // 1. Verificar si coincide exactamente con un código de OC (ej. P17177) o de Solicitud existente
-    const isExactOc = /^P\d+$/i.test(upper) || (RAW_DATA.spend_records || []).some(r => String(r.oc_odoo || '').toUpperCase() === upper);
-    if (isExactOc) {
-        openDocumentDetail('oc', upper);
-        return;
+    const st = String(r.estado_sol || '').trim().toLowerCase();
+    if (st === 'rechazado' || st === 'rechazada' || st === 'rejected' || st === 'borrador' || st === 'draft') {
+        return false;
     }
 
-    const isExactSol = (RAW_DATA.records || []).some(r => String(r.id || '').toUpperCase() === upper);
-    if (isExactSol) {
-        openDocumentDetail('sol', upper);
-        return;
+    const hasOcOdoo = Boolean(r.tiene_oc_odoo) || String(r.oc_odoo || '').trim() !== '';
+    const hasOcSap  = Boolean(r.tiene_oc_sap) || Boolean(r.f_creacion_sap);
+
+    // Excluir solicitudes "hecho" que no tienen OC en Odoo ni en SAP (dualidad ERP histórica)
+    if ((st === 'hecho' || st === 'done') && !hasOcOdoo && !hasOcSap) {
+        return false;
     }
 
-    // 2. De lo contrario, ejecutar búsqueda profunda en líneas de Solicitudes y Órdenes de Compra
-    openGlobalSearchModal(raw);
+    return Boolean(r.aprobada) && !hasOcSap;
 }
 
-async function openGlobalSearchModal(query) {
-    const modal = document.getElementById('globalSearchModal');
-    const titleEl = document.getElementById('gsTitle');
-    const subEl = document.getElementById('gsSubtitle');
-    const tbody = document.getElementById('gsTableBody');
+function openPendingSapModal(initialFilter = 'all') {
+    const modal = document.getElementById('pendingSapModal');
+    if (!modal) return;
 
-    globalSearchQuery = query;
-    globalSearchResults = [];
-    globalSearchTab = 'ALL';
+    const allFiltered = typeof getFilteredCycleRecords === 'function'
+        ? getFilteredCycleRecords()
+        : (RAW_DATA.records || []);
 
-    titleEl.textContent = `Resultados para "${query}"`;
-    subEl.textContent = 'Buscando en líneas de solicitudes y órdenes de compra...';
-    tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-slate-400">Consultando líneas de productos...</td></tr>`;
-    updateGlobalSearchTabButtons();
+    pendingSapCacheRows = allFiltered
+        .filter(isValidForSapBacklog)
+        .sort((a, b) => (Number(b.d_to_sap ?? b.edad_dias ?? 0) - Number(a.d_to_sap ?? a.edad_dias ?? 0)));
+
+    pendingSapActiveFilter = initialFilter;
+    const searchEl = document.getElementById('pendingSapSearch');
+    if (searchEl) searchEl.value = '';
+
     modal.classList.remove('hidden');
-
-    try {
-        const resp = await fetch(`?action=search&q=${encodeURIComponent(query)}`);
-        const data = await resp.json();
-
-        globalSearchResults = data.results || [];
-        updateGlobalSearchTabButtons();
-        renderGlobalSearchTable();
-    } catch (err) {
-        subEl.textContent = 'Error en la búsqueda';
-        tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-cresta-red font-semibold">Error consultando líneas: ${escapeHtml(err.message)}</td></tr>`;
-    }
+    renderPendingSapTable();
 }
 
-function closeGlobalSearchModal() {
-    document.getElementById('globalSearchModal').classList.add('hidden');
+function closePendingSapModal() {
+    const modal = document.getElementById('pendingSapModal');
+    if (modal) modal.classList.add('hidden');
 }
 
-function setGlobalSearchTab(tab) {
-    globalSearchTab = tab;
-    updateGlobalSearchTabButtons();
-    renderGlobalSearchTable();
+function setPendingSapSubFilter(filterKey) {
+    pendingSapActiveFilter = filterKey;
+    renderPendingSapTable();
 }
 
-function updateGlobalSearchTabButtons() {
-    const solCount = globalSearchResults.filter(r => r.doc_type === 'sol').length;
-    const ocCount  = globalSearchResults.filter(r => r.doc_type === 'oc').length;
+function renderPendingSapTable() {
+    const tbody   = document.getElementById('pendingSapTableBody');
+    const countEl = document.getElementById('pendingSapModalCount');
+    const search  = String(document.getElementById('pendingSapSearch')?.value || '').trim().toLowerCase();
 
-    const btnAll = document.getElementById('gsTabAll');
-    const btnSol = document.getElementById('gsTabSol');
-    const btnOc  = document.getElementById('gsTabOc');
-
-    const activeCls   = 'px-3 py-1 rounded-md font-bold bg-cresta-navy dark:bg-cresta-red text-white transition';
-    const inactiveCls = 'px-3 py-1 rounded-md font-bold text-slate-700 dark:text-gray-300 hover:opacity-80 transition';
-
-    btnAll.textContent = `Todos (${globalSearchResults.length})`;
-    btnSol.textContent = `Líneas de Solicitud (${solCount})`;
-    btnOc.textContent  = `Líneas de OC (${ocCount})`;
-
-    btnAll.className = globalSearchTab === 'ALL' ? activeCls : inactiveCls;
-    btnSol.className = globalSearchTab === 'sol' ? activeCls : inactiveCls;
-    btnOc.className  = globalSearchTab === 'oc'  ? activeCls : inactiveCls;
-}
-
-function getSortedFilteredGlobalSearchRows() {
-    const filtered = globalSearchTab === 'ALL'
-        ? [...globalSearchResults]
-        : globalSearchResults.filter(r => r.doc_type === globalSearchTab);
-
-    const sortMode = document.getElementById('gsSortSelect').value;
-
-    const cmpStr = (a, b) => String(a || '').localeCompare(String(b || ''), 'es', { sensitivity: 'base' });
-
-    filtered.sort((a, b) => {
-        if (sortMode === 'fecha_desc') {
-            return cmpStr(b.fecha, a.fecha);
+    ['all', 'critical', 'no_oc', 'with_oc'].forEach(k => {
+        const btn = document.getElementById('btnSapFilter_' + k);
+        if (!btn) return;
+        if (k === pendingSapActiveFilter) {
+            btn.className = 'px-3 py-1.5 rounded-lg text-xs font-bold bg-cresta-navy text-white dark:bg-cresta-red transition';
+        } else {
+            btn.className = 'px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-gray-800 dark:text-gray-300 transition';
         }
-        if (sortMode === 'fecha_asc') {
-            return cmpStr(a.fecha, b.fecha);
-        }
-        if (sortMode === 'comprador_asc') {
-            return cmpStr(shortName(a.comprador), shortName(b.comprador)) || cmpStr(b.fecha, a.fecha);
-        }
-        if (sortMode === 'comprador_desc') {
-            return cmpStr(shortName(b.comprador), shortName(a.comprador)) || cmpStr(b.fecha, a.fecha);
-        }
-        if (sortMode === 'proveedor_asc') {
-            // Colocar registros con proveedor primero al ordenar A->Z
-            const pa = a.proveedor || 'zzz';
-            const pb = b.proveedor || 'zzz';
-            return cmpStr(pa, pb) || cmpStr(b.fecha, a.fecha);
-        }
-        if (sortMode === 'proveedor_desc') {
-            return cmpStr(b.proveedor, a.proveedor) || cmpStr(b.fecha, a.fecha);
-        }
-        if (sortMode === 'solicitante_asc') {
-            return cmpStr(shortName(a.solicitante), shortName(b.solicitante)) || cmpStr(b.fecha, a.fecha);
-        }
-        if (sortMode === 'solicitante_desc') {
-            return cmpStr(shortName(b.solicitante), shortName(a.solicitante)) || cmpStr(b.fecha, a.fecha);
-        }
-        return 0;
     });
 
-    return filtered;
-}
+    const filtered = pendingSapCacheRows.filter(r => {
+        const days = Number(r.d_to_sap ?? r.edad_dias ?? 0);
+        const hasOc = Boolean(r.tiene_oc_odoo) || String(r.oc_odoo || '').trim() !== '';
 
-function highlightMatchText(text, query) {
-    const safeText = escapeHtml(text);
-    const tokens = String(query || '').trim().split(/\s+/).filter(t => t.length >= 2);
-    if (!tokens.length) return safeText;
+        if (pendingSapActiveFilter === 'critical' && days <= 30) return false;
+        if (pendingSapActiveFilter === 'no_oc' && hasOc) return false;
+        if (pendingSapActiveFilter === 'with_oc' && !hasOc) return false;
 
-    const escapedTokens = tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    const regex = new RegExp(`(${escapedTokens.join('|')})`, 'gi');
-    return safeText.replace(regex, '<mark class="bg-amber-200/80 dark:bg-amber-700/60 text-slate-900 dark:text-white px-0.5 rounded">$1</mark>');
-}
-
-function renderGlobalSearchTable() {
-    const rows = getSortedFilteredGlobalSearchRows();
-    const tbody = document.getElementById('gsTableBody');
-    const subEl = document.getElementById('gsSubtitle');
-
-    subEl.textContent = `${rows.length.toLocaleString()} coincidencia(s) encontrada(s)`;
-
-    if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-slate-400 dark:text-gray-400">No se encontraron líneas de solicitud ni de órdenes de compra que coincidan con "${escapeHtml(globalSearchQuery)}".</td></tr>`;
-        return;
-    }
-
-    tbody.innerHTML = rows.map(r => {
-        const isOc = (r.doc_type === 'oc');
-        const typeBadge = isOc
-            ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-cresta-blue border border-blue-200 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800">OC</span>`
-            : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-cresta-navy border border-slate-300 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800">SOL</span>`;
-
-        const docLinkHtml = isOc
-            ? `${renderOcLinks(r.doc_id)}${r.related_doc ? `<div class="text-[10px] text-slate-400 mt-0.5">Sol: ${renderSolLink(r.related_doc)}</div>` : ''}`
-            : `${renderSolLink(r.doc_id)}${r.related_doc ? `<div class="text-[10px] text-slate-400 mt-0.5">OC: ${renderOcLinks(r.related_doc)}</div>` : ''}`;
-
-        const montoHtml = isOc && r.total !== null
-            ? `<span class="font-bold text-cresta-navy dark:text-sky-400">${formatMoney(r.total, r.divisa || 'GTQ')}</span>`
-            : `<span class="text-slate-400">—</span>`;
-
-        const provHtml = r.proveedor
-            ? `<span class="font-medium text-slate-700 dark:text-gray-200">${escapeHtml(r.proveedor)}</span>`
-            : `<span class="text-slate-400 italic text-[11px]">Por cotizar</span>`;
-
-        return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/50">
-            <td class="py-2 px-3">${typeBadge}</td>
-            <td class="py-2 px-3 whitespace-nowrap">${docLinkHtml}</td>
-            <td class="py-2 px-3 whitespace-nowrap text-slate-600 dark:text-gray-300 font-medium">${escapeHtml(r.fecha || '—')}</td>
-            <td class="py-2 px-3 text-slate-800 dark:text-gray-200 max-w-xs">${highlightMatchText(r.producto, globalSearchQuery)}</td>
-            <td class="py-2 px-3 text-right font-semibold text-slate-700 dark:text-gray-300">${Number(r.cantidad).toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
-            <td class="py-2 px-3 text-right whitespace-nowrap">${montoHtml}</td>
-            <td class="py-2 px-3 whitespace-nowrap text-slate-700 dark:text-gray-300">${escapeHtml(shortName(r.comprador))}</td>
-            <td class="py-2 px-3 whitespace-nowrap text-slate-600 dark:text-gray-300">${escapeHtml(shortName(r.solicitante))}</td>
-            <td class="py-2 px-3">${provHtml}</td>
-        </tr>`;
-    }).join('');
-}
-
-function exportGlobalSearchExcel() {
-    const rows = getSortedFilteredGlobalSearchRows();
-    if (!rows.length) return;
-
-    const headers = ['Tipo Documento', 'Documento', 'Doc. Relacionado', 'Fecha Creacion', 'Sociedad', 'SKU', 'Producto / Descripcion', 'Cantidad', 'Divisa', 'Precio Unitario', 'Total Linea', 'Comprador', 'Solicitante', 'Proveedor', 'Estado'];
-    const dataRows = rows.map(r => [
-        r.doc_type === 'oc' ? 'Orden de Compra' : 'Solicitud',
-        r.doc_id,
-        r.related_doc || '',
-        r.fecha || '',
-        r.sociedad || '',
-        r.sku || '',
-        String(r.producto).replace(/\n/g, ' '),
-        Number(r.cantidad),
-        r.divisa || '',
-        r.pu !== null ? Number(r.pu) : '',
-        r.total !== null ? Number(r.total) : '',
-        shortName(r.comprador),
-        shortName(r.solicitante),
-        r.proveedor || '',
-        r.estado || ''
-    ]);
-
-    const cleanQ = globalSearchQuery.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 25);
-    exportToExcel(
-        headers,
-        dataRows,
-        `busqueda_${cleanQ}_${RAW_DATA.cutoff_date}.xlsx`,
-        'Resultados Busqueda'
-    );
-}
-
-// =========================================================================
-// MODAL 1: AUDITORÍA DE LISTADOS
-// =========================================================================
-function openAuditModal(category, defaultSubFilter) {
-    activeModalCategory = category || 'REZAGO';
-    activeModalSubFilter = defaultSubFilter || 'ALL';
-    document.getElementById('modalSearch').value = '';
-
-    const cfg = MODAL_CONFIG[activeModalCategory];
-    document.getElementById('modalBadge').textContent = cfg.badge;
-    document.getElementById('modalTitle').textContent = cfg.title;
-
-    if (cfg.mode === 'spend') {
-        document.getElementById('modalTableHead').innerHTML = `<tr>
-            <th class="py-2.5 px-3">OC Odoo</th>
-            <th class="py-2.5 px-3">Fecha OC</th>
-            <th class="py-2.5 px-3">Sociedad</th>
-            <th class="py-2.5 px-3">Solicitante</th>
-            <th class="py-2.5 px-3">Proveedor</th>
-            <th class="py-2.5 px-3">Comprador</th>
-            <th class="py-2.5 px-3">Estado / SAP</th>
-            <th class="py-2.5 px-3 text-right">Monto (${activeCurrency})</th>
-        </tr>`;
-    } else {
-        document.getElementById('modalTableHead').innerHTML = `<tr>
-            <th class="py-2.5 px-3">Solicitud</th>
-            <th class="py-2.5 px-3">Fecha Creación</th>
-            <th class="py-2.5 px-3">Sociedad</th>
-            <th class="py-2.5 px-3">Solicitante</th>
-            <th class="py-2.5 px-3">Comprador</th>
-            <th class="py-2.5 px-3">OC Odoo</th>
-            <th class="py-2.5 px-3">Estatus / Etapas</th>
-            <th class="py-2.5 px-3 text-right">${cfg.daysLabel}</th>
-        </tr>`;
-    }
-
-    renderModalTabs();
-    document.getElementById('auditModal').classList.remove('hidden');
-    renderModalTable();
-}
-
-function closeAuditModal() {
-    document.getElementById('auditModal').classList.add('hidden');
-}
-
-function setModalSubFilter(subFilter) {
-    activeModalSubFilter = subFilter;
-    renderModalTabs();
-    renderModalTable();
-}
-
-function renderModalTabs() {
-    const cfg = MODAL_CONFIG[activeModalCategory];
-    const container = document.getElementById('modalTabsContainer');
-    container.innerHTML = cfg.tabs.map(t => {
-        const isActive = (t.id === activeModalSubFilter);
-        const cls = isActive
-            ? 'px-3 py-1 rounded-md font-bold bg-cresta-navy dark:bg-cresta-red text-white'
-            : 'px-3 py-1 rounded-md font-bold bg-slate-200 dark:bg-gray-800 text-slate-700 dark:text-gray-300 hover:opacity-80';
-        return `<button type="button" onclick="setModalSubFilter('${t.id}')" class="${cls}">${t.label}</button>`;
-    }).join('');
-}
-
-function getFilteredModalRows() {
-    const baseList = cachedUniverses[activeModalCategory] || [];
-    const q = document.getElementById('modalSearch').value.trim().toLowerCase();
-    const cfg = MODAL_CONFIG[activeModalCategory];
-
-    return baseList.filter(r => {
-        if (cfg.mode === 'spend') {
-            if (activeModalCategory === 'SPEND_FIRM') {
-                if (activeModalSubFilter === 'TOP5_PROV' && !currentTop5ProvidersSet.has(r.proveedor)) return false;
-                if (activeModalSubFilter === 'IN_SAP' && !r.en_sap) return false;
-                if (activeModalSubFilter === 'NO_SAP' && r.en_sap) return false;
-            }
-            if (q) {
-                const hay = `${r.oc_odoo} ${r.oc_sap} ${r.solicitud} ${r.sociedad} ${r.solicitado_por} ${r.proveedor} ${r.comprador} ${r.estado_oc}`.toLowerCase();
-                if (!hay.includes(q)) return false;
-            }
-            return true;
-        }
-
-        if (activeModalCategory === 'VALIDAS') {
-            if (activeModalSubFilter === 'IN_SAP' && !r.tiene_oc_sap) return false;
-            if (activeModalSubFilter === 'IN_ODOO' && !(r.tiene_oc_odoo && !r.tiene_oc_sap)) return false;
-            if (activeModalSubFilter === 'NO_OC' && r.tiene_oc_odoo) return false;
-        } else if (activeModalCategory === 'TIEMPO_COMP') {
-            const d = r.d_comprador ?? 0;
-            if (activeModalSubFilter === 'FAST' && d > 7) return false;
-            if (activeModalSubFilter === 'MED' && (d <= 7 || d > 14)) return false;
-            if (activeModalSubFilter === 'SLOW' && d <= 14) return false;
-        } else if (activeModalCategory === 'SLA_COMP') {
-            const ok = r.tiene_oc_odoo && r.d_comprador !== null && r.d_comprador <= 14;
-            if (activeModalSubFilter === 'OK_14' && !ok) return false;
-            if (activeModalSubFilter === 'LATE_14' && ok) return false;
-        } else if (activeModalCategory === 'SAP_14') {
-            const ok = r.tiene_oc_sap && r.d_to_sap !== null && r.d_to_sap <= 14;
-            if (activeModalSubFilter === 'OK_14' && !ok) return false;
-            if (activeModalSubFilter === 'LATE_14' && ok) return false;
-        } else if (activeModalCategory === 'REZAGO') {
-            if (activeModalSubFilter === 'GT30' && !(r.d_to_sap !== null && r.d_to_sap > 30)) return false;
-            if (activeModalSubFilter === 'NO_OC' && r.tiene_oc_odoo) return false;
-            if (activeModalSubFilter === 'PEND_SAP' && !r.tiene_oc_odoo) return false;
-        }
-
-        if (q) {
-            const hay = `${r.id} ${r.sociedad} ${r.solicitado_por} ${r.comprador} ${r.oc_odoo} ${r.estado_oc} ${r.estado_sol}`.toLowerCase();
-            if (!hay.includes(q)) return false;
+        if (search !== '') {
+            const hay = `${r.id || ''} ${r.sociedad || ''} ${r.solicitado_por || ''} ${r.comprador || ''} ${r.oc_odoo || ''} ${r.estado_oc || ''}`.toLowerCase();
+            if (!hay.includes(search)) return false;
         }
         return true;
     });
-}
 
-function getRowStatusBadge(r) {
-    if (r.tiene_oc_sap) {
-        return `<span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800">En SAP</span>`;
+    if (countEl) {
+        countEl.textContent = `${filtered.length} solicitud(es) encontrada(s)`;
     }
-    if (r.tiene_oc_odoo) {
-        return `<span class="px-2 py-0.5 rounded bg-slate-100 text-cresta-navy border border-slate-300 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800">${escapeHtml(r.estado_oc || 'OC Odoo (Sin SAP)')}</span>`;
-    }
-    if (!r.aprobada) {
-        return `<span class="px-2 py-0.5 rounded bg-gray-100 text-gray-700 border border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700">${escapeHtml(r.estado_sol || 'Sin aprobar')}</span>`;
-    }
-    return `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">Sin OC en Odoo</span>`;
-}
 
-function renderModalTable() {
-    const cfg = MODAL_CONFIG[activeModalCategory];
-    const rows = getFilteredModalRows();
-    const tbody = document.getElementById('modalTableBody');
-
-    if (cfg.mode === 'spend') {
-        const sumMonto = rows.reduce((s, r) => s + r.monto, 0);
-        document.getElementById('modalSubtitle').textContent = `${rows.length.toLocaleString()} OCs · Total: ${formatMoney(sumMonto)}`;
-
-        if (!rows.length) {
-            tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-slate-400 dark:text-gray-400">No hay órdenes de compra con este filtro.</td></tr>`;
-            return;
-        }
-
-        tbody.innerHTML = rows.slice(0, 300).map(r => {
-            const sapBadge = r.en_sap
-                ? `<span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800">SAP ${escapeHtml(r.oc_sap)}</span>`
-                : `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">${escapeHtml(r.estado_oc)} (Sin SAP)</span>`;
-
-            return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/50">
-                <td class="py-2 px-3">${renderOcLinks(r.oc_odoo)} <span class="text-[10px] text-slate-400">(${renderSolLink(r.solicitud)})</span></td>
-                <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(r.fecha)}</td>
-                <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(r.sociedad)}</td>
-                <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(shortName(r.solicitado_por || ''))}</td>
-                <td class="py-2 px-3 font-medium text-slate-800 dark:text-gray-200">${escapeHtml(r.proveedor)}</td>
-                <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(shortName(r.comprador))}</td>
-                <td class="py-2 px-3">${sapBadge}</td>
-                <td class="py-2 px-3 text-right font-bold text-cresta-navy dark:text-sky-400">${formatMoney(r.monto, r.divisa)}</td>
-            </tr>`;
-        }).join('');
+    if (!tbody) return;
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="py-6 text-center text-slate-400">No hay solicitudes pendientes de SAP bajo este filtro.</td></tr>`;
         return;
     }
 
-    document.getElementById('modalSubtitle').textContent = `${rows.length.toLocaleString()} solicitudes encontradas`;
+    tbody.innerHTML = filtered.map(r => {
+        const days = Number(r.d_to_sap ?? r.edad_dias ?? 0).toFixed(1);
+        const hasOc = Boolean(r.tiene_oc_odoo) || String(r.oc_odoo || '').trim() !== '';
+        const ocLinks = hasOc
+            ? String(r.oc_odoo).split(',').map(s => s.trim()).filter(Boolean)
+                .map(oc => `<button type="button" onclick="openDocDetailModal('oc','${escapeHtml(oc)}')" class="underline font-bold text-cresta-blue dark:text-sky-400 hover:opacity-80">${escapeHtml(oc)}</button>`)
+                .join(', ')
+            : '<span class="text-slate-400">—</span>';
 
-    if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-slate-400 dark:text-gray-400">No hay solicitudes con este filtro.</td></tr>`;
-        return;
-    }
+        const stageBadge = hasOc
+            ? `<span class="px-2 py-0.5 rounded bg-sky-50 text-cresta-blue border border-sky-200 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800 text-[10px] font-semibold">${escapeHtml(r.estado_oc || 'Con OC Odoo')}</span>`
+            : `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 text-[10px] font-semibold">Sin OC en Odoo</span>`;
 
-    tbody.innerHTML = rows.slice(0, 300).map(r => {
-        const rawDays = r[cfg.daysField];
-        const diasTxt = rawDays !== null && rawDays !== undefined ? `${rawDays.toFixed(1)} d` : '—';
-
-        let diasCls = 'text-slate-700 dark:text-gray-300 font-bold';
-        if (rawDays !== null && rawDays !== undefined) {
-            if (rawDays <= 14) diasCls = 'text-emerald-700 dark:text-emerald-400 font-bold';
-            else if (rawDays <= 30) diasCls = 'text-amber-700 dark:text-amber-300 font-bold';
-            else diasCls = 'text-cresta-red dark:text-red-400 font-bold';
-        }
-
-        return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/50">
-            <td class="py-2 px-3">${renderSolLink(r.id)}</td>
-            <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(r.fecha)}</td>
-            <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(r.sociedad)}</td>
-            <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(shortName(r.solicitado_por || ''))}</td>
-            <td class="py-2 px-3 text-slate-700 dark:text-gray-300">${escapeHtml(shortName(r.comprador))}</td>
-            <td class="py-2 px-3">${renderOcLinks(r.oc_odoo)}</td>
-            <td class="py-2 px-3">${getRowStatusBadge(r)}</td>
-            <td class="py-2 px-3 text-right ${diasCls}">${diasTxt}</td>
-        </tr>`;
-    }).join('');
-}
-
-function exportAuditExcel() {
-    const cfg = MODAL_CONFIG[activeModalCategory];
-    const rows = getFilteredModalRows();
-
-    if (cfg.mode === 'spend') {
-        const headers = ['OC Odoo', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Solicitante', 'Proveedor', 'Comprador', 'Estado OC', 'Divisa', 'Total OC'];
-        const dataRows = rows.map(r => [
-            r.oc_odoo,
-            r.oc_sap || '',
-            r.solicitud,
-            r.fecha,
-            r.sociedad,
-            r.solicitado_por || '',
-            r.proveedor,
-            r.comprador,
-            r.estado_oc,
-            r.divisa,
-            Number(r.monto.toFixed(2))
-        ]);
-
-        exportToExcel(
-            headers,
-            dataRows,
-            `auditoria_${activeModalCategory.toLowerCase()}_${activeCurrency}_${RAW_DATA.cutoff_date}.xlsx`,
-            'Ordenes de Compra'
-        );
-        return;
-    }
-
-    const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Estatus', cfg.daysLabel];
-    const dataRows = rows.map(r => {
-        const statusTxt = r.tiene_oc_sap
-            ? 'En SAP'
-            : (r.tiene_oc_odoo ? (r.estado_oc || 'OC Odoo sin SAP') : (!r.aprobada ? (r.estado_sol || 'Sin aprobar') : 'Sin OC en Odoo'));
-        const rawDays = r[cfg.daysField];
-        const daysVal = rawDays !== null && rawDays !== undefined ? Number(rawDays.toFixed(1)) : '';
-
-        return [
-            r.id,
-            r.fecha,
-            r.sociedad,
-            r.solicitado_por || '',
-            r.comprador,
-            r.oc_odoo || '',
-            statusTxt,
-            daysVal
-        ];
-    });
-
-    exportToExcel(
-        headers,
-        dataRows,
-        `auditoria_${activeModalCategory.toLowerCase()}_cresta_${RAW_DATA.cutoff_date}.xlsx`,
-        'Auditoria Solicitudes'
-    );
-}
-
-// =========================================================================
-// RENDERIZADOR DE LÍNEA DE TIEMPO PARA SOLICITUD Y ORDEN DE COMPRA
-// =========================================================================
-function fmtDaysPill(days, goodThreshold = 7, warnThreshold = 14) {
-    if (days === null || days === undefined || isNaN(days)) return '';
-    const d = Number(days);
-    let cls = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300';
-    if (d > warnThreshold) {
-        cls = 'bg-red-100 text-cresta-red dark:bg-red-950 dark:text-red-300';
-    } else if (d > goodThreshold) {
-        cls = 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300';
-    }
-    return `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${cls}">+${d.toFixed(1)} d</span>`;
-}
-
-function renderDocumentTimeline(data) {
-    const box = document.getElementById('docModalTimelineBox');
-    if (!box) return;
-
-    const steps = [];
-    let totalBadgeHtml = '';
-
-    if (data.type === 'sol') {
-        const m = data.meta || {};
-        const fCre = m.f_creacion_sol || m.fecha || null;
-        const fApr = m.f_aprobacion_sol || null;
-        const fOc  = m.f_creacion_oc || null;
-
-        steps.push({
-            state: fCre ? 'done' : 'pending',
-            title: '1. Creación Solicitud',
-            date: fCre || 'Sin fecha',
-            actor: shortName(m.solicitado_por || ''),
-            delta: ''
-        });
-
-        if (m.is_rechazada) {
-            steps.push({
-                state: 'rejected',
-                title: '2. Solicitud Rechazada',
-                date: fApr || 'Rechazada',
-                actor: shortName(m.autorizador_sol || ''),
-                delta: ''
-            });
-        } else if (fApr) {
-            steps.push({
-                state: 'done',
-                title: '2. Autorización Solicitud',
-                date: fApr,
-                actor: `Aut: ${shortName(m.autorizador_sol || '—')}`,
-                delta: fmtDaysPill(m.d_aprob_sol, 2, 5)
-            });
-        } else {
-            steps.push({
-                state: 'pending',
-                title: '2. Autorización Solicitud',
-                date: `Estatus: ${m.estado_sol || 'Pendiente'}`,
-                actor: `Aut: ${shortName(m.autorizador_sol || '—')}`,
-                delta: `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">En espera</span>`
-            });
-        }
-
-        if (!m.is_rechazada) {
-            if (fOc) {
-                steps.push({
-                    state: 'done',
-                    title: '3. OC Generada en Odoo',
-                    date: fOc,
-                    actor: `Comp: ${shortName(m.comprador || '—')}`,
-                    delta: fmtDaysPill(m.d_comprador, 7, 14)
-                });
-            } else {
-                steps.push({
-                    state: 'pending',
-                    title: '3. OC en Odoo',
-                    date: 'Pendiente de colocar OC',
-                    actor: `Comp: ${shortName(m.comprador || '—')}`,
-                    delta: m.d_comprador !== null ? fmtDaysPill(m.d_comprador, 7, 14) : ''
-                });
-            }
-        }
-
-        if (m.d_ciclo_total !== null && m.d_ciclo_total !== undefined) {
-            totalBadgeHtml = `<span class="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">Ciclo total a SAP: ${Number(m.d_ciclo_total).toFixed(1)} días</span>`;
-        } else if (m.d_aprob_sol !== null && m.d_aprob_sol !== undefined) {
-            totalBadgeHtml = `<span class="text-[11px] font-semibold text-slate-600 dark:text-gray-300">Tiempo aprobación: ${Number(m.d_aprob_sol).toFixed(1)} días</span>`;
-        }
-    } else if (data.type === 'oc') {
-        const m  = data.meta || {};
-        const sm = data.sol_meta || {};
-
-        const fCreSol = m.f_creacion_sol || sm.f_creacion_sol || null;
-        const fAprSol = m.f_aprobacion_sol || sm.f_aprobacion_sol || null;
-        const fCreOc  = m.f_creacion_oc || m.fecha || null;
-        const fAprOc  = m.f_aprobacion_oc || null;
-        const fSap    = m.f_creacion_sap || null;
-
-        steps.push({
-            state: fCreSol ? 'done' : 'pending',
-            title: '1. Creación Solicitud',
-            date: fCreSol || 'Sin fecha',
-            actor: `${m.solicitud || '—'} · ${shortName(m.solicitado_por || '')}`,
-            delta: ''
-        });
-
-        steps.push({
-            state: fAprSol ? 'done' : 'pending',
-            title: '2. Aprobación Solicitud',
-            date: fAprSol || 'Sin fecha aprobación',
-            actor: `Aut: ${shortName(m.autorizador_sol || sm.autorizador_sol || '—')}`,
-            delta: fmtDaysPill(m.d_aprob_sol ?? sm.d_aprob_sol, 2, 5)
-        });
-
-        steps.push({
-            state: fCreOc ? 'done' : 'pending',
-            title: '3. Creación OC Odoo',
-            date: fCreOc || 'Sin fecha',
-            actor: `Comp: ${shortName(m.comprador || '—')}`,
-            delta: fmtDaysPill(m.d_comprador, 7, 14)
-        });
-
-        if (m.is_cancelada) {
-            steps.push({
-                state: 'rejected',
-                title: '4. OC Cancelada',
-                date: 'Anulada en Odoo',
-                actor: m.estado_oc || 'Cancelado',
-                delta: ''
-            });
-        } else if (m.en_sap && fSap) {
-            const subAut = fAprOc ? `Aprob. OC: ${fAprOc.split(' ')[0]} · ` : '';
-            steps.push({
-                state: 'done',
-                title: '4. Aprobada y en SAP',
-                date: fSap,
-                actor: `${subAut}SAP ${m.oc_sap || ''}`,
-                delta: fmtDaysPill(m.d_to_sap_oc, 2, 5)
-            });
-        } else if (fAprOc) {
-            steps.push({
-                state: 'pending',
-                title: '4. OC Aprobada (Sin SAP)',
-                date: `Aprob. OC: ${fAprOc}`,
-                actor: `Estatus: ${m.estado_oc || 'Pendiente SAP'}`,
-                delta: fmtDaysPill(m.d_aprob_oc, 2, 5)
-            });
-        } else {
-            steps.push({
-                state: 'pending',
-                title: '4. Pendiente Aprob. / SAP',
-                date: `Estatus actual: ${m.estado_oc || 'En proceso'}`,
-                actor: m.autorizador_oc_1 ? `Aut. 1: ${shortName(m.autorizador_oc_1)}` : 'Sin aprobar para SAP',
-                delta: `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">En curso</span>`
-            });
-        }
-
-        if (fCreSol && fSap) {
-            const t1 = new Date(fCreSol.replace(' ', 'T')).getTime();
-            const t2 = new Date(fSap.replace(' ', 'T')).getTime();
-            if (!isNaN(t1) && !isNaN(t2) && t2 >= t1) {
-                const totD = ((t2 - t1) / 86400000).toFixed(1);
-                totalBadgeHtml = `<span class="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">Ciclo completo (Sol → SAP): ${totD} días</span>`;
-            }
-        }
-    }
-
-    const colsClass = steps.length >= 4 ? 'sm:grid-cols-4' : 'sm:grid-cols-3';
-
-    const stepsHtml = steps.map(st => {
-        let dotCls = 'bg-emerald-600 text-white';
-        let cardBorder = 'border-emerald-200 dark:border-emerald-900/70 bg-white dark:bg-gray-900';
-        let icon = '✓';
-
-        if (st.state === 'pending') {
-            dotCls = 'bg-amber-500 text-white';
-            cardBorder = 'border-amber-200 dark:border-amber-900/70 bg-amber-50/40 dark:bg-amber-950/20';
-            icon = '⏳';
-        } else if (st.state === 'rejected') {
-            dotCls = 'bg-cresta-red text-white';
-            cardBorder = 'border-red-200 dark:border-red-900/70 bg-red-50/40 dark:bg-red-950/20';
-            icon = '✕';
-        }
+        const dayColor = Number(days) > 30 ? 'text-cresta-red font-extrabold' : 'text-amber-600 dark:text-amber-400 font-bold';
 
         return `
-            <div class="border ${cardBorder} rounded-xl p-2.5 flex flex-col justify-between">
-                <div class="flex items-center justify-between gap-1">
-                    <div class="flex items-center gap-1.5">
-                        <span class="w-4 h-4 rounded-full ${dotCls} inline-flex items-center justify-center text-[9px] font-bold shrink-0">${icon}</span>
-                        <span class="font-bold text-[11px] text-slate-800 dark:text-gray-100">${escapeHtml(st.title)}</span>
-                    </div>
-                    ${st.delta}
-                </div>
-                <div class="mt-1.5 pl-5">
-                    <div class="text-[11px] font-semibold text-cresta-navy dark:text-sky-300">${escapeHtml(st.date)}</div>
-                    <div class="text-[10px] text-slate-500 dark:text-gray-400 truncate">${escapeHtml(st.actor)}</div>
-                </div>
-            </div>
+            <tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40 border-b border-slate-100 dark:border-gray-800">
+                <td class="py-2.5 px-3 font-bold">
+                    <button type="button" onclick="openDocDetailModal('sol','${escapeHtml(r.id)}')" class="underline text-cresta-navy dark:text-white hover:text-cresta-red">
+                        ${escapeHtml(r.id)}
+                    </button>
+                </td>
+                <td class="py-2.5 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(r.fecha || '')}</td>
+                <td class="py-2.5 px-3 text-slate-700 dark:text-gray-200">${escapeHtml(r.sociedad || '')}</td>
+                <td class="py-2.5 px-3 text-slate-700 dark:text-gray-200">${escapeHtml(r.solicitado_por || '')}</td>
+                <td class="py-2.5 px-3 text-slate-700 dark:text-gray-200">${escapeHtml(r.comprador || '')}</td>
+                <td class="py-2.5 px-3">${ocLinks}</td>
+                <td class="py-2.5 px-3">${stageBadge}</td>
+                <td class="py-2.5 px-3 text-right ${dayColor}">${days} d</td>
+            </tr>
         `;
     }).join('');
-
-    box.innerHTML = `
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-gray-400">
-                Línea de Tiempo y Trazabilidad de Autorizaciones
-            </span>
-            ${totalBadgeHtml}
-        </div>
-        <div class="grid grid-cols-1 ${colsClass} gap-2.5">
-            ${stepsHtml}
-        </div>
-    `;
 }
 
-// =========================================================================
-// MODAL 2: FICHA DETALLADA DE SOLICITUD U ORDEN DE COMPRA
-// =========================================================================
-async function openDocumentDetail(type, id) {
-    const modal = document.getElementById('docDetailModal');
-    const titleEl = document.getElementById('docModalTitle');
-    const badgeEl = document.getElementById('docModalBadge');
-    const subBadgeEl = document.getElementById('docModalSubBadge');
-    const metaBox = document.getElementById('docModalMetaBox');
-    const timelineBox = document.getElementById('docModalTimelineBox');
-    const thead = document.getElementById('docModalTableHead');
-    const tbody = document.getElementById('docModalTableBody');
-    const tfoot = document.getElementById('docModalTableFoot');
+function exportPendingSapToExcel() {
+    if (!pendingSapCacheRows.length || typeof XLSX === 'undefined') return;
+    const rows = pendingSapCacheRows.map(r => ({
+        'Solicitud': r.id,
+        'Fecha Creación': r.fecha,
+        'Sociedad': r.sociedad,
+        'Solicitante': r.solicitado_por,
+        'Comprador': r.comprador,
+        'OC Odoo': r.oc_odoo || '',
+        'Estatus OC': r.estado_oc || 'Sin OC en Odoo',
+        'Días desde Aprobación': Number((r.d_to_sap ?? r.edad_dias ?? 0).toFixed(1)),
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Rezago_Sin_SAP');
+    XLSX.writeFile(wb, `Rezago_Sin_SAP_${RAW_DATA.cutoff_date || 'corte'}.xlsx`);
+}
 
-    activeDocDetail = null;
-    badgeEl.textContent = type === 'oc' ? 'DETALLE DE ORDEN DE COMPRA' : 'DETALLE DE SOLICITUD';
-    subBadgeEl.textContent = 'Consultando...';
-    titleEl.textContent = id;
-    metaBox.innerHTML = `<div class="col-span-4 text-slate-400">Cargando información del documento...</div>`;
-    if (timelineBox) timelineBox.innerHTML = '';
-    thead.innerHTML = '';
-    tbody.innerHTML = '';
-    tfoot.innerHTML = '';
+function handleQuickDocLookup(e) {
+    if (e) e.preventDefault();
+    const q = String(document.getElementById('quickDocInput')?.value || '').trim();
+    if (!q) return;
+
+    if (/^(SV|TM|IO|CYE|OC|SOL)/i.test(q) && !q.includes(' ') && q.length <= 12) {
+        openDocDetailModal('sol', q.toUpperCase());
+        return;
+    }
+    if (/^P\d{3,}$/i.test(q)) {
+        openDocDetailModal('oc', q.toUpperCase());
+        return;
+    }
+    openLineSearchModal(q);
+}
+
+async function openDocDetailModal(type, id) {
+    const modal = document.getElementById('docDetailModal');
+    const body  = document.getElementById('docDetailBody');
+    const title = document.getElementById('docDetailTitle');
+    if (!modal || !body) return;
+
     modal.classList.remove('hidden');
+    if (title) title.textContent = `${type === 'oc' ? 'Orden de Compra' : 'Solicitud'} · ${id}`;
+    body.innerHTML = `<p class="py-8 text-center text-slate-400">Cargando trazabilidad y líneas del documento...</p>`;
 
     try {
-        const resp = await fetch(`?action=detail&type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`);
-        const data = await resp.json();
+        const res = await fetch(`?action=detail&type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`);
+        const data = await res.json();
 
         if (!data.found) {
-            subBadgeEl.textContent = 'No encontrado';
-            metaBox.innerHTML = `<div class="col-span-4 text-cresta-red font-semibold">No se encontraron líneas de detalle para "${escapeHtml(id)}" en los archivos sincronizados.</div>`;
+            body.innerHTML = `<p class="py-6 text-center text-cresta-red font-semibold">${escapeHtml(data.error || 'Documento no encontrado.')}</p>`;
             return;
         }
-
-        activeDocDetail = data;
 
         if (type === 'sol') {
             const m = data.meta || {};
             const lines = data.lines || [];
-            subBadgeEl.textContent = `${lines.length} línea(s) solicitada(s)`;
-            titleEl.textContent = `Solicitud ${data.id}`;
-
-            metaBox.innerHTML = `
-                <div><span class="text-slate-400 block text-[10px] uppercase">Fecha Creación</span><strong class="text-slate-800 dark:text-gray-200">${escapeHtml(m.fecha || '—')}</strong></div>
-                <div><span class="text-slate-400 block text-[10px] uppercase">Sociedad</span><strong class="text-slate-800 dark:text-gray-200">${escapeHtml(m.sociedad || '—')}</strong></div>
-                <div><span class="text-slate-400 block text-[10px] uppercase">Solicitado por</span><strong class="text-slate-800 dark:text-gray-200">${escapeHtml(m.solicitado_por || '—')}</strong></div>
-                <div><span class="text-slate-400 block text-[10px] uppercase">Comprador / OC</span><strong class="text-slate-800 dark:text-gray-200">${escapeHtml(shortName(m.comprador || '—'))}</strong><div class="mt-0.5">${renderOcLinks(m.oc_odoo || '')}</div></div>
+            body.innerHTML = `
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-xl bg-slate-50 dark:bg-gray-800/60 border border-slate-200 dark:border-gray-700 text-xs">
+                    <div><span class="text-slate-400 block">Estatus Solicitud</span><strong>${escapeHtml(m.estado_sol || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">Sociedad</span><strong>${escapeHtml(m.sociedad || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">Solicitante</span><strong>${escapeHtml(m.solicitado_por || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">Comprador</span><strong>${escapeHtml(m.comprador || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">Creación PR</span><strong>${escapeHtml(m.f_creacion_sol || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">Aprobación PR</span><strong>${escapeHtml(m.f_aprobacion_sol || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">OC Odoo</span><strong>${escapeHtml(m.oc_odoo || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">Ingreso SAP</span><strong>${escapeHtml(m.f_creacion_sap || 'Pendiente')}</strong></div>
+                </div>
+                <div class="mt-4 overflow-x-auto border border-slate-200 dark:border-gray-700 rounded-xl">
+                    <table class="w-full text-xs text-left">
+                        <thead class="bg-slate-100 dark:bg-gray-800">
+                            <tr><th class="py-2 px-3">Producto / Descripción</th><th class="py-2 px-3 text-right">Cantidad</th></tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-200 dark:divide-gray-800">
+                            ${lines.length ? lines.map(l => `<tr><td class="py-2 px-3">${escapeHtml(l.producto)}</td><td class="py-2 px-3 text-right font-bold">${Number(l.cantidad).toLocaleString()}</td></tr>`).join('') : '<tr><td colspan="2" class="py-4 text-center text-slate-400">Sin líneas registradas.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
             `;
-
-            renderDocumentTimeline(data);
-
-            thead.innerHTML = `<tr>
-                <th class="py-2.5 px-3 w-12">#</th>
-                <th class="py-2.5 px-3">Producto / Servicio Solicitado</th>
-                <th class="py-2.5 px-3 text-right w-36">Cantidad Solicitada</th>
-            </tr>`;
-
-            if (!lines.length) {
-                tbody.innerHTML = `<tr><td colspan="3" class="py-6 text-center text-slate-400">Esta solicitud no tiene líneas detalladas en Solicitudes.xlsx</td></tr>`;
-                tfoot.innerHTML = '';
-            } else {
-                const totalQty = lines.reduce((s, l) => s + (Number(l.cantidad) || 0), 0);
-                tbody.innerHTML = lines.map((l, idx) => `
-                    <tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40">
-                        <td class="py-2 px-3 text-slate-400 font-bold">${idx + 1}</td>
-                        <td class="py-2 px-3 text-slate-800 dark:text-gray-200 whitespace-pre-line">${escapeHtml(l.producto)}</td>
-                        <td class="py-2 px-3 text-right font-bold text-cresta-navy dark:text-sky-400">${Number(l.cantidad).toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
-                    </tr>
-                `).join('');
-
-                tfoot.innerHTML = `<tr>
-                    <td colspan="2" class="py-2.5 px-3 text-right text-slate-600 dark:text-gray-300">Total Unidades Solicitadas:</td>
-                    <td class="py-2.5 px-3 text-right text-cresta-navy dark:text-white">${totalQty.toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
-                </tr>`;
-            }
-        } else if (type === 'oc') {
+        } else {
             const m = data.meta || {};
-            const d = data.detail || {};
-            const lines = d.lineas || [];
-            const prov = d.proveedor || m.proveedor || 'Sin proveedor';
-            const divisa = d.divisa || m.divisa || 'GTQ';
-
-            subBadgeEl.textContent = `${lines.length} línea(s) · Divisa ${divisa}`;
-            titleEl.textContent = `Orden de Compra ${data.id}`;
-
-            metaBox.innerHTML = `
-                <div class="col-span-2"><span class="text-slate-400 block text-[10px] uppercase">Proveedor</span><strong class="text-cresta-navy dark:text-white">${escapeHtml(prov)}</strong></div>
-                <div><span class="text-slate-400 block text-[10px] uppercase">Sociedad / Fecha OC</span><strong class="text-slate-800 dark:text-gray-200">${escapeHtml(m.sociedad || '—')}</strong><span class="block text-[10px] text-slate-400">${escapeHtml(m.fecha || '')}</span></div>
-                <div><span class="text-slate-400 block text-[10px] uppercase">Solicitud / SAP</span><div>${renderSolLink(m.solicitud || '')}</div><span class="block text-[10px] text-emerald-600 font-semibold">${m.oc_sap ? 'SAP ' + escapeHtml(m.oc_sap) : (m.estado_oc || '')}</span></div>
+            const lines = (data.detail && data.detail.lineas) ? data.detail.lineas : [];
+            const div = m.divisa || (data.detail && data.detail.divisa) || 'GTQ';
+            body.innerHTML = `
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-xl bg-slate-50 dark:bg-gray-800/60 border border-slate-200 dark:border-gray-700 text-xs">
+                    <div><span class="text-slate-400 block">Proveedor</span><strong>${escapeHtml(m.proveedor || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">Estatus OC</span><strong>${escapeHtml(m.estado_oc || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">Solicitud Origen</span><strong>${escapeHtml(m.solicitud || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">DocNum SAP</span><strong>${escapeHtml(m.oc_sap || 'Pendiente')}</strong></div>
+                    <div><span class="text-slate-400 block">Creación OC</span><strong>${escapeHtml(m.f_creacion_oc || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">Aprobación OC</span><strong>${escapeHtml(m.f_aprobacion_oc || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">Fecha SAP</span><strong>${escapeHtml(m.f_creacion_sap || '—')}</strong></div>
+                    <div><span class="text-slate-400 block">Monto Total</span><strong>${escapeHtml(div)} ${Number(m.monto || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong></div>
+                </div>
+                <div class="mt-4 overflow-x-auto border border-slate-200 dark:border-gray-700 rounded-xl">
+                    <table class="w-full text-xs text-left">
+                        <thead class="bg-slate-100 dark:bg-gray-800">
+                            <tr>
+                                <th class="py-2 px-3">Descripción</th>
+                                <th class="py-2 px-3 text-right">Cantidad</th>
+                                <th class="py-2 px-3 text-right">Precio Unit.</th>
+                                <th class="py-2 px-3 text-right">Total (${escapeHtml(div)})</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-200 dark:divide-gray-800">
+                            ${lines.length ? lines.map(l => `
+                                <tr>
+                                    <td class="py-2 px-3">${escapeHtml(l.producto)}</td>
+                                    <td class="py-2 px-3 text-right">${Number(l.cantidad).toLocaleString()}</td>
+                                    <td class="py-2 px-3 text-right">${Number(l.precio_unitario).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4})}</td>
+                                    <td class="py-2 px-3 text-right font-bold">${Number(l.total).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                </tr>
+                            `).join('') : '<tr><td colspan="4" class="py-4 text-center text-slate-400">Sin líneas registradas.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
             `;
-
-            renderDocumentTimeline(data);
-
-            thead.innerHTML = `<tr>
-                <th class="py-2.5 px-3 w-10">#</th>
-                <th class="py-2.5 px-3">Producto / Descripción</th>
-                <th class="py-2.5 px-3 text-right">Cantidad</th>
-                <th class="py-2.5 px-3 text-right">Precio Unit. (${divisa})</th>
-                <th class="py-2.5 px-3 text-right">Subtotal (${divisa})</th>
-            </tr>`;
-
-            if (!lines.length) {
-                tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-slate-400">Esta OC no tiene líneas detalladas en OC.xlsx</td></tr>`;
-                tfoot.innerHTML = '';
-            } else {
-                const totalMonto = lines.reduce((s, l) => s + (Number(l.total) || 0), 0);
-                tbody.innerHTML = lines.map((l, idx) => `
-                    <tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40">
-                        <td class="py-2 px-3 text-slate-400 font-bold">${idx + 1}</td>
-                        <td class="py-2 px-3 text-slate-800 dark:text-gray-200 whitespace-pre-line">${escapeHtml(l.producto)}</td>
-                        <td class="py-2 px-3 text-right text-slate-700 dark:text-gray-300">${Number(l.cantidad).toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
-                        <td class="py-2 px-3 text-right text-slate-600 dark:text-gray-400">${formatMoney(l.precio_unitario, divisa)}</td>
-                        <td class="py-2 px-3 text-right font-bold text-cresta-navy dark:text-sky-400">${formatMoney(l.total, divisa)}</td>
-                    </tr>
-                `).join('');
-
-                tfoot.innerHTML = `<tr>
-                    <td colspan="4" class="py-2.5 px-3 text-right text-slate-600 dark:text-gray-300">Total Orden de Compra (${divisa}):</td>
-                    <td class="py-2.5 px-3 text-right text-cresta-red dark:text-emerald-400 text-sm">${formatMoney(totalMonto, divisa)}</td>
-                </tr>`;
-            }
         }
     } catch (err) {
-        subBadgeEl.textContent = 'Error';
-        metaBox.innerHTML = `<div class="col-span-4 text-cresta-red font-semibold">Error consultando detalle: ${escapeHtml(err.message)}</div>`;
+        body.innerHTML = `<p class="py-6 text-center text-cresta-red font-semibold">Error consultando documento.</p>`;
     }
 }
 
 function closeDocDetailModal() {
-    document.getElementById('docDetailModal').classList.add('hidden');
+    const modal = document.getElementById('docDetailModal');
+    if (modal) modal.classList.add('hidden');
 }
 
-function exportDocumentDetailExcel() {
-    if (!activeDocDetail) return;
+async function openLineSearchModal(query) {
+    const modal = document.getElementById('lineSearchModal');
+    const body  = document.getElementById('lineSearchBody');
+    const title = document.getElementById('lineSearchTitle');
+    if (!modal || !body) return;
 
-    if (activeDocDetail.type === 'sol') {
-        const m = activeDocDetail.meta || {};
-        const lines = activeDocDetail.lines || [];
-        const headers = ['Solicitud', 'Fecha Creacion', 'Fecha Aprobacion', 'Dias Aprobacion', 'Sociedad', 'Solicitante', 'Autorizador', 'Comprador', 'OC Odoo', 'Linea', 'Producto Solicitado', 'Cantidad Solicitada'];
-        const dataRows = lines.map((l, idx) => [
-            activeDocDetail.id,
-            m.f_creacion_sol || m.fecha || '',
-            m.f_aprobacion_sol || '',
-            m.d_aprob_sol ?? '',
-            m.sociedad || '',
-            m.solicitado_por || '',
-            m.autorizador_sol || '',
-            m.comprador || '',
-            m.oc_odoo || '',
-            idx + 1,
-            String(l.producto).replace(/\n/g, ' '),
-            Number(l.cantidad)
-        ]);
+    modal.classList.remove('hidden');
+    if (title) title.textContent = `Resultados de búsqueda: "${query}"`;
+    body.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-slate-400">Buscando coincidencias...</td></tr>`;
 
-        exportToExcel(
-            headers,
-            dataRows,
-            `detalle_solicitud_${activeDocDetail.id}.xlsx`,
-            `Solicitud ${activeDocDetail.id}`
-        );
-        return;
+    try {
+        const res = await fetch(`?action=search&q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        const items = data.results || [];
+        if (!items.length) {
+            body.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-slate-400">Sin resultados para "${escapeHtml(query)}".</td></tr>`;
+            return;
+        }
+        body.innerHTML = items.map(it => `
+            <tr class="hover:bg-slate-50 dark:hover:bg-gray-800/40 border-b border-slate-100 dark:border-gray-800">
+                <td class="py-2 px-3 font-bold">
+                    <button type="button" onclick="openDocDetailModal('${escapeHtml(it.doc_type)}','${escapeHtml(it.doc_id)}')" class="underline text-cresta-navy dark:text-white">
+                        ${escapeHtml(it.doc_id)}
+                    </button>
+                </td>
+                <td class="py-2 px-3">${escapeHtml(it.fecha || '')}</td>
+                <td class="py-2 px-3">${escapeHtml(it.sociedad || '')}</td>
+                <td class="py-2 px-3">${escapeHtml(it.comprador || '')}</td>
+                <td class="py-2 px-3">${escapeHtml(it.producto || '')}</td>
+                <td class="py-2 px-3 text-right">${Number(it.cantidad || 0).toLocaleString()}</td>
+                <td class="py-2 px-3 text-right font-semibold">${it.total !== null ? `${escapeHtml(it.divisa)} ${Number(it.total).toLocaleString(undefined,{minimumFractionDigits:2})}` : escapeHtml(it.estado || '')}</td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        body.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-cresta-red">Error ejecutando búsqueda.</td></tr>`;
     }
+}
 
-    if (activeDocDetail.type === 'oc') {
-        const m = activeDocDetail.meta || {};
-        const d = activeDocDetail.detail || {};
-        const lines = d.lineas || [];
-        const prov = d.proveedor || m.proveedor || '';
-        const divisa = d.divisa || m.divisa || 'GTQ';
+function closeLineSearchModal() {
+    const modal = document.getElementById('lineSearchModal');
+    if (modal) modal.classList.add('hidden');
+}
 
-        const headers = ['No. OC', 'OC SAP', 'Estado OC', 'Solicitud', 'Fecha Creacion Sol', 'Fecha Aprobacion Sol', 'Fecha Creacion OC', 'Fecha Aprobacion OC', 'Fecha SAP', 'Sociedad', 'Proveedor', 'Comprador', 'Solicitante', 'Linea', 'Producto', 'Cantidad Comprada', 'Divisa', 'Precio Unitario', 'Total Linea'];
-        const dataRows = lines.map((l, idx) => [
-            activeDocDetail.id,
-            m.oc_sap || '',
-            m.estado_oc || '',
-            m.solicitud || '',
-            m.f_creacion_sol || '',
-            m.f_aprobacion_sol || '',
-            m.f_creacion_oc || m.fecha || '',
-            m.f_aprobacion_oc || '',
-            m.f_creacion_sap || '',
-            m.sociedad || '',
-            prov,
-            m.comprador || '',
-            m.solicitado_por || '',
-            idx + 1,
-            String(l.producto).replace(/\n/g, ' '),
-            Number(l.cantidad),
-            divisa,
-            Number(l.precio_unitario),
-            Number(l.total)
-        ]);
-
-        exportToExcel(
-            headers,
-            dataRows,
-            `detalle_oc_${activeDocDetail.id}.xlsx`,
-            `OC ${activeDocDetail.id}`
-        );
-    }
+function escapeHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }

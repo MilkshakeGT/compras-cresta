@@ -29,6 +29,12 @@ if (isset($_GET['action'])) {
         echo json_encode($processor->getFirmOcLines(), JSON_UNESCAPED_UNICODE);
         exit;
     }
+
+    if ($_GET['action'] === 'search') {
+        $q = (string)($_GET['q'] ?? '');
+        echo json_encode($processor->searchLines($q), JSON_UNESCAPED_UNICODE);
+        exit;
+    }
 }
 
 // 3. Procesamiento de carga manual de reportes crudos de Odoo (.xlsx)
@@ -87,7 +93,7 @@ foreach ($assetFiles as $af) {
         }
     }
 }
-$assetVer = '1.10.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
+$assetVer = '1.11.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
 ?>
 <!DOCTYPE html>
 <html lang="es">

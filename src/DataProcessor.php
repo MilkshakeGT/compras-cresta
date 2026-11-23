@@ -5,7 +5,7 @@ require_once __DIR__ . '/SimpleXLSX.php';
 require_once __DIR__ . '/StatusConfig.php';
 
 // =========================================================================
-// SECCIÓN 1: PROCESADOR DE DATOS, REGLAS DE ESTATUS Y LIMPIEZA DE DUALIDAD ERP
+// SECCIÓN 1: PROCESADOR DE DATOS, REGLAS DE ESTATUS Y BLINDAJE CONTRA RECHAZADAS
 // =========================================================================
 class DataProcessor
 {
@@ -36,7 +36,7 @@ class DataProcessor
     }
 
     // =========================================================================
-    // SECCIÓN 2: EVALUACIÓN DE ESTATUS Y EXCLUSIÓN DE RECHAZADOS / BORRADORES / LEGACY
+    // SECCIÓN 2: REGLAS DE ESTATUS, EXCLUSIÓN DE RECHAZADAS Y DUALIDAD ERP
     // =========================================================================
     private function isPrStatusIncluded(string $estadoSol, array $prIncluded): bool
     {
@@ -44,11 +44,18 @@ class DataProcessor
         if ($st === '') {
             return false;
         }
+
+        // Las solicitudes rechazadas nunca deben contar como válidas/aprobadas en análisis
+        $low = mb_strtolower($st);
+        if (in_array($low, ['rechazado', 'rechazada', 'rejected'], true)) {
+            return false;
+        }
+
         if (array_key_exists($st, $prIncluded)) {
             return !empty($prIncluded[$st]);
         }
         foreach ($prIncluded as $k => $v) {
-            if (mb_strtolower((string)$k) === mb_strtolower($st)) {
+            if (mb_strtolower((string)$k) === $low) {
                 return !empty($v);
             }
         }
@@ -72,6 +79,18 @@ class DataProcessor
         return true;
     }
 
+    private function isRejectedPrStatus(string $estadoSol): bool
+    {
+        $low = mb_strtolower(trim($estadoSol));
+        return in_array($low, ['rechazado', 'rechazada', 'rejected'], true);
+    }
+
+    private function isDraftPrStatus(string $estadoSol): bool
+    {
+        $low = mb_strtolower(trim($estadoSol));
+        return in_array($low, ['borrador', 'draft'], true);
+    }
+
     /**
      * Detecta solicitudes marcadas como "hecho" que no tienen OC en Odoo ni en SAP
      * (flujo completado manualmente en SAP por dualidad ERP histórica).
@@ -87,8 +106,8 @@ class DataProcessor
     }
 
     /**
-     * Aplica las reglas de inclusión/exclusión de estatus (status_config.json)
-     * y limpia tiempos / rezagos de registros excluidos o rechazados.
+     * Aplica las reglas de estatus y garantiza que ninguna solicitud rechazada,
+     * borrador excluido o "hecho" sin OC/SAP aparezca en rezagos o métricas SLA.
      */
     private function applyStatusRulesToCache(array $cache, array $statusCfg): array
     {
@@ -104,14 +123,15 @@ class DataProcessor
             $solSt    = (string)($sr['estado_sol'] ?? '');
             $solRef   = (string)($sr['solicitud'] ?? '');
             $ym       = (string)($sr['ym'] ?? '');
-            $ocStLow  = mb_strtolower($ocSt);
+            $ocStLow  = mb_strtolower(trim($ocSt));
 
+            $isRejectedPr   = $this->isRejectedPrStatus($solSt);
             $poIncludedFlag = $this->isPoStatusIncluded($ocSt, $poIncluded);
             $prIncludedFlag = ($solSt === '' || $solSt === 'OC Directa')
                 ? true
-                : $this->isPrStatusIncluded($solSt, $prIncluded);
+                : (!$isRejectedPr && $this->isPrStatusIncluded($solSt, $prIncluded));
 
-            $isCancelada = ($ocStLow === 'cancelado') || !$poIncludedFlag;
+            $isCancelada = ($ocStLow === 'cancelado' || $ocStLow === 'cancelled') || !$poIncludedFlag;
             $isFirm      = in_array($ocStLow, ['orden de compra', 'para aprobar 1', 'para aprobar 2'], true)
                 && $poIncludedFlag
                 && $prIncludedFlag;
@@ -146,7 +166,6 @@ class DataProcessor
         foreach (($cache['records'] ?? []) as &$rec) {
             $recId    = (string)($rec['id'] ?? '');
             $solSt    = (string)($rec['estado_sol'] ?? '');
-            $solStLow = mb_strtolower($solSt);
             $included = $this->isPrStatusIncluded($solSt, $prIncluded);
 
             $hasAnyPo      = ($totalPoBySol[$recId] ?? 0) > 0;
@@ -154,15 +173,16 @@ class DataProcessor
             $allPoExcluded = $hasAnyPo && !$hasActivePo;
             $isLegacyDone  = $this->isLegacyDoneWithoutOcOrSap($rec);
 
-            $isRejected = ($solStLow === 'rechazado') || (!$included && $solStLow !== 'borrador' && $solStLow !== 'draft');
-            $isDraft    = ($solStLow === 'borrador' || $solStLow === 'draft') || (!$included && ($solStLow === 'borrador' || $solStLow === 'draft'));
-            $isExcluded = (!$included) || $isRejected || $isDraft || $allPoExcluded || $isLegacyDone;
+            $isRejected = $this->isRejectedPrStatus($solSt);
+            $isDraft    = $this->isDraftPrStatus($solSt);
+            $isExcluded = $isRejected || (!$included) || $allPoExcluded || $isLegacyDone;
 
             $rec['is_rechazada'] = $isRejected;
             $rec['is_borrador']  = $isDraft;
             $rec['excluida']     = $isExcluded;
 
             if ($isExcluded) {
+                $rec['aprobada']      = false;
                 $rec['d_comprador']   = null;
                 $rec['d_to_sap']      = null;
                 $rec['d_ciclo_total'] = null;
@@ -733,7 +753,7 @@ class DataProcessor
         $teamBySocYm = [];
         $teamGlobalYm = [];
         foreach (($payload['records'] ?? []) as $r) {
-            if (!empty($r['excluida']) || empty($r['aprobada']) || empty($r['tiene_oc_odoo']) || $r['d_comprador'] === null) {
+            if (!empty($r['excluida']) || !empty($r['is_rechazada']) || empty($r['aprobada']) || empty($r['tiene_oc_odoo']) || $r['d_comprador'] === null) {
                 continue;
             }
             $ym  = (string)$r['ym'];
@@ -791,7 +811,7 @@ class DataProcessor
             if (!empty($sr['ym'])) $mesesSet[$sr['ym']] = true;
             if (!empty($sr['sociedad'])) $socSet[$sr['sociedad']] = true;
             if (!empty($sr['comprador'])) $compSet[$sr['comprador']] = true;
-            if (!empty($sr['solicitado_por'])) $solSet[$sr['solicitado_por']] = true;
+            if (!empty($sr['solicitado_por'])) $solSet[$r['solicitado_por']] = true;
             if (!empty($sr['proveedor']) && $sr['proveedor'] !== 'Sin proveedor') {
                 $provSet[$sr['proveedor']] = true;
             }
@@ -1046,11 +1066,10 @@ class DataProcessor
 
             $solicitantesSet[$row['solicitado_por']] = true;
 
-            $estadoSolLower = mb_strtolower($row['estado_sol']);
-            $isSolRechazada = ($estadoSolLower === 'rechazado');
-            $isSolBorrador  = ($estadoSolLower === 'borrador' || $estadoSolLower === 'draft');
-            $estadoOcLower  = mb_strtolower($row['estado_oc']);
-            $isOcCancelada  = ($estadoOcLower === 'cancelado');
+            $isSolRechazada = $this->isRejectedPrStatus($row['estado_sol']);
+            $isSolBorrador  = $this->isDraftPrStatus($row['estado_sol']);
+            $estadoOcLower  = mb_strtolower(trim($row['estado_oc']));
+            $isOcCancelada  = ($estadoOcLower === 'cancelado' || $estadoOcLower === 'cancelled');
 
             if ($row['no_oc_odoo'] !== '') {
                 $ym = date('Y-m', $row['ts_creacion_sol']);
@@ -1278,7 +1297,7 @@ class DataProcessor
                 'is_rechazada'       => $sol['is_rechazada'],
                 'is_borrador'        => $sol['is_borrador'],
                 'excluida'           => $excluida,
-                'aprobada'           => ($tsAprobacionSol !== null),
+                'aprobada'           => (!$excluida && $tsAprobacionSol !== null),
                 'tiene_oc_odoo'      => $tieneOcOdoo,
                 'tiene_oc_sap'       => $tieneOcSap,
                 'd_aprob_sol'        => $diasAprobSol,

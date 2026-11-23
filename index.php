@@ -1,12 +1,14 @@
 <?php
 declare(strict_types=1);
 
+// =========================================================================
+// SECCIÓN 1: CARGA DE DEPENDENCIAS Y SESIÓN RBAC
+// =========================================================================
 require_once __DIR__ . '/src/Auth.php';
 require_once __DIR__ . '/src/DataProcessor.php';
 require_once __DIR__ . '/src/UploadHandler.php';
 require_once __DIR__ . '/src/OdooConnector.php';
 
-// 1. Control de acceso y sesión RBAC
 $auth = new Auth(__DIR__ . '/data/auth.config.php');
 $auth->requireAuthOrRenderLogin(__DIR__ . '/views/login.php');
 
@@ -22,7 +24,9 @@ $odooConfigPath   = $dataDir . '/odoo.config.php';
 
 $odooConnector = new OdooConnector($odooConfigPath, $cachePath, $detailsCachePath);
 
-// 2. Endpoints AJAX protegidos por sesión y aislados por comprador (Row-Level Security)
+// =========================================================================
+// SECCIÓN 2: ENDPOINTS AJAX PROTEGIDOS CON AISLAMIENTO POR COMPRADOR
+// =========================================================================
 if (isset($_GET['action'])) {
     header('Content-Type: application/json; charset=utf-8');
     $processor = new DataProcessor($excelPath, $cachePath);
@@ -46,7 +50,9 @@ if (isset($_GET['action'])) {
     }
 }
 
-// 3. Acciones POST de Administración (Exclusivas para Manager)
+// =========================================================================
+// SECCIÓN 3: ACCIONES POST ADMINISTRATIVAS (EXCLUSIVAS PARA MANAGER)
+// =========================================================================
 $uploadHandler     = new UploadHandler($dataDir);
 $uploadFeedback    = null;
 $userAdminFeedback = null;
@@ -64,6 +70,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $uploadFeedback = $odooConnector->syncFromOdoo();
         } catch (Throwable $e) {
             $uploadFeedback = ['ok' => false, 'message' => 'Error sincronizando con Odoo: ' . $e->getMessage()];
+        }
+    } elseif ($postAction === 'save_sync_config') {
+        if (!$isManager) {
+            http_response_code(403);
+            die('Acceso denegado: solo un usuario con perfil Manager puede configurar la sincronización.');
+        }
+        $resCfg = $odooConnector->saveSyncConfig($_POST);
+        $resCfg['tab'] = 'dates';
+        $userAdminFeedback = $resCfg;
+        if (!empty($resCfg['ok'])) {
+            $forceRebuild = true;
         }
     } elseif ($postAction === 'upload_odoo_files') {
         if (!$isManager) {
@@ -91,9 +108,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $filesStatus  = $isManager ? $uploadHandler->getFilesStatus() : [];
 $odooSyncInfo = $odooConnector->getLastSyncInfo();
+$syncConfig   = $isManager ? $odooConnector->getSyncConfig() : [];
 
-// 4. Carga de datos principales y aplicación de aislamiento RBAC
-$loadError = null;
+// =========================================================================
+// SECCIÓN 4: CARGA DE PAYLOAD, AISLAMIENTO RBAC Y VERSIONADO DE ASSETS
+// =========================================================================
+$loadError  = null;
 $rawPayload = [
     'cutoff_date'   => date('Y-m-d'),
     'filters'       => ['meses' => [], 'sociedades' => [], 'compradores' => [], 'proveedores' => [], 'solicitantes' => []],
@@ -118,7 +138,6 @@ $allUsersList  = $isManager ? $auth->getAllUsers() : [];
 $payload       = $processor->scopePayloadForUser($rawPayload, $currentUser);
 $jsonPayload   = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
-// Versionado dinámico basado en la última modificación de TODOS los assets
 $assetFiles = [
     __DIR__ . '/assets/css/app.css',
     __DIR__ . '/assets/js/app.js',
@@ -137,7 +156,7 @@ foreach ($assetFiles as $af) {
         }
     }
 }
-$assetVer = '1.13.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
+$assetVer = '1.14.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -170,12 +189,14 @@ $assetVer = '1.13.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
 </head>
 <body class="min-h-screen flex flex-col bg-slate-50 text-slate-900 dark:bg-gray-950 dark:text-gray-100">
 
+    <!-- =====================================================================
+         SECCIÓN 5: VISTAS PRINCIPALES, MODALES Y FOOTER
+         ===================================================================== -->
     <?php require __DIR__ . '/views/header.php'; ?>
     <?php require __DIR__ . '/views/tab_cycle.php'; ?>
     <?php require __DIR__ . '/views/tab_spend.php'; ?>
     <?php require __DIR__ . '/views/tab_supplier.php'; ?>
 
-    <!-- Footer con créditos -->
     <footer class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-4 w-full text-center">
         <p class="text-[11px] text-slate-400 dark:text-gray-500">
             Dashboard construido por <span class="font-semibold text-slate-500 dark:text-gray-400">Elder Velásquez</span> con ayuda de
@@ -189,7 +210,9 @@ $assetVer = '1.13.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
         <?php require __DIR__ . '/views/admin_users.php'; ?>
     <?php endif; ?>
 
-    <!-- Inyección de datos y módulos JS -->
+    <!-- =====================================================================
+         SECCIÓN 6: INYECCIÓN DE DATOS Y ARRANQUE DE MÓDULOS FRONTEND
+         ===================================================================== -->
     <script>
         const RAW_DATA = <?= $jsonPayload ?>;
     </script>

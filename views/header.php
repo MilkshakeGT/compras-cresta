@@ -1,7 +1,11 @@
-<!-- Header Ejecutivo -->
+<?php
+// =========================================================================
+// SECCIÓN 1: ENCABEZADO EJECUTIVO Y NAVEGACIÓN PRINCIPAL
+// =========================================================================
+?>
 <header class="border-b border-slate-200 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 sticky top-0 z-30 backdrop-blur shadow-sm">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 space-y-3">
-        <!-- Fila Superior: Marca + Buscador Global + Navegación de 3 Módulos + Acciones -->
+        <!-- Fila Superior: Marca, Estado, Buscador Global, Módulos y Acciones -->
         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
             <div>
                 <div class="flex flex-wrap items-center gap-2">
@@ -9,7 +13,7 @@
                         GRUPO CRESTA · SUPPLY CHAIN
                     </span>
                     <span class="text-xs text-slate-500 dark:text-gray-400">
-                        Corte: <strong class="text-slate-800 dark:text-gray-200"><?= htmlspecialchars($payload['cutoff_date']) ?></strong>
+                        Corte: <strong class="text-slate-800 dark:text-gray-200"><?= htmlspecialchars((string)($payload['cutoff_date'] ?? date('Y-m-d'))) ?></strong>
                     </span>
                     <?php if (!empty($odooSyncInfo['last_sync'])): ?>
                         <span class="text-[11px] text-slate-400 dark:text-gray-500" title="Última sincronización directa con Odoo">
@@ -21,7 +25,7 @@
                         : 'bg-sky-50 text-cresta-blue border border-sky-200 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800' ?>">
                         👤 <?= htmlspecialchars((string)($currentUser['display_name'] ?? '')) ?> · <?= !empty($isManager) ? 'Manager' : 'Comprador' ?>
                     </span>
-                    <?php if ($uploadFeedback !== null && !empty($uploadFeedback['ok'])): ?>
+                    <?php if (!empty($uploadFeedback) && !empty($uploadFeedback['ok'])): ?>
                         <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800 font-semibold">
                             ✓ <?= htmlspecialchars((string)$uploadFeedback['message']) ?>
                         </span>
@@ -68,7 +72,7 @@
                 </button>
 
                 <?php if (!empty($isManager)): ?>
-                    <!-- Botón Sincronización Directa con Odoo API (Solo Manager) -->
+                    <!-- Sincronización Directa con Odoo API (Solo Manager) -->
                     <form method="POST" class="inline" onsubmit="const b=this.querySelector('button'); b.disabled=true; b.innerHTML='<span>⏳</span><span>Sincronizando...</span>';">
                         <input type="hidden" name="action" value="sync_odoo_api">
                         <button type="submit" title="Sincronizar directamente con la base de datos de Odoo 17"
@@ -78,19 +82,19 @@
                         </button>
                     </form>
 
-                    <!-- Botón Respaldo: Cargar Reportes Excel (Solo Manager) -->
+                    <!-- Respaldo Manual: Cargar Reportes Excel (Solo Manager) -->
                     <button type="button" onclick="openAdminUploadModal()" title="Respaldo: Cargar archivos Excel exportados de Odoo"
                         class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
                         <span>⚙️</span>
                         <span class="hidden lg:inline">Excel</span>
                     </button>
 
-                    <!-- Botón Admin: Configuración General (Usuarios y Fechas) -->
-<button type="button" onclick="openAdminUsersModal()" title="Configuración de usuarios y rango de fechas de sincronización"
-    class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
-    <span>⚙️</span>
-    <span class="hidden md:inline">Configuración</span>
-</button>
+                    <!-- Configuración General: Usuarios y Fechas de Sincronización (Solo Manager) -->
+                    <button type="button" onclick="openAdminUsersModal()" title="Configuración de usuarios y rango de fechas de sincronización"
+                        class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
+                        <span>⚙️</span>
+                        <span class="hidden md:inline">Configuración</span>
+                    </button>
                 <?php endif; ?>
 
                 <!-- Toggle Modo Claro / Oscuro -->
@@ -100,7 +104,7 @@
                     <span id="themeLabel" class="hidden xl:inline">Oscuro</span>
                 </button>
 
-                <!-- Botón Cerrar Sesión -->
+                <!-- Cerrar Sesión -->
                 <a href="?logout=1" title="Cerrar sesión y bloquear dashboard"
                     class="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 hover:bg-red-100 dark:bg-red-950/60 dark:hover:bg-red-900 text-cresta-red dark:text-red-300 font-bold transition">
                     <span>Salir</span>
@@ -108,7 +112,9 @@
             </div>
         </div>
 
-        <!-- Fila Inferior del Header: Barra Unificada de Filtros Temporales y Dimensionales -->
+        <!-- =================================================================
+             SECCIÓN 2: BARRA DE FILTROS TEMPORALES Y DIMENSIONALES
+             ================================================================= -->
         <div class="pt-2.5 border-t border-slate-100 dark:border-gray-800 flex flex-wrap items-center gap-2 text-xs">
             <select id="filterYear" onchange="onYearChange()" title="Seleccionar Año"
                 class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-cresta-navy dark:text-white rounded-lg px-2.5 py-1.5 font-bold shadow-xs">

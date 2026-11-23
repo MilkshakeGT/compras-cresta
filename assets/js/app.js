@@ -105,7 +105,6 @@ function formatYearQuarterShort(yq) {
     return `${qId} ${y}`;
 }
 
-// Formatea a: Un Nombre + Un Apellido (ej. "Jaqueline Karina Solares Alvarez" -> "Jaqueline Solares")
 function shortName(fullName) {
     const clean = String(fullName || '').trim().replace(/\s+/g, ' ');
     if (!clean) return '';
@@ -120,7 +119,6 @@ function shortName(fullName) {
         return clean;
     }
 
-    // Si tiene 3 palabras (ej. "Kevin Saravia Garcia" o "Juan De Leon")
     const particles = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'san', 'santa']);
     if (parts.length === 3) {
         if (particles.has(parts[1].toLowerCase())) {
@@ -129,11 +127,8 @@ function shortName(fullName) {
         return `${parts[0]} ${parts[1]}`;
     }
 
-    // 4 o más palabras: [PrimerNombre, SegundoNombre, PrimerApellido, SegundoApellido...]
-    // Detectar partículas compuestas como "Erick De Jesús García Cruz" -> "Erick García"
     let surnameIdx = 2;
     if (particles.has(parts[1].toLowerCase()) && parts.length >= 4) {
-        // Segundo nombre compuesto (ej. "De Jesús") -> el primer apellido empieza en índice 3
         surnameIdx = 3;
     }
 
@@ -170,16 +165,6 @@ function getChartThemeConfig() {
         labelColor: isDark ? '#9CA3AF' : '#475569',
         gridColor: isDark ? '#374151' : '#E2E8F0'
     };
-}
-
-function downloadCsvBlob(content, filename) {
-    const blob = new Blob(["\uFEFF" + content], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
 }
 
 // =========================================================================
@@ -423,12 +408,42 @@ function initFilters() {
         selSoc.appendChild(opt);
     });
 
-    RAW_DATA.filters.compradores.forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c;
-        opt.textContent = shortName(c);
-        selComp.appendChild(opt);
-    });
+    // Configurar selector de Comprador según rol RBAC (Manager vs Buyer 1 o Multi-Buyer)
+    const userCtx = RAW_DATA.user_context || { role: 'manager', allowed_buyers: [] };
+    const compsList = RAW_DATA.filters.compradores || [];
+
+    if (userCtx.role === 'buyer') {
+        selComp.innerHTML = '';
+        if (compsList.length === 1) {
+            const opt = document.createElement('option');
+            opt.value = compsList[0];
+            opt.textContent = `Comprador: ${shortName(compsList[0])}`;
+            selComp.appendChild(opt);
+            selComp.value = compsList[0];
+            selComp.disabled = true;
+            selComp.classList.add('opacity-90', 'cursor-not-allowed', 'bg-slate-100', 'dark:bg-gray-800/80');
+        } else if (compsList.length > 1) {
+            const optAllAssigned = document.createElement('option');
+            optAllAssigned.value = 'ALL';
+            optAllAssigned.textContent = `Mis Compradores Asignados (${compsList.length})`;
+            selComp.appendChild(optAllAssigned);
+
+            compsList.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c;
+                opt.textContent = shortName(c);
+                selComp.appendChild(opt);
+            });
+            selComp.value = 'ALL';
+        }
+    } else {
+        compsList.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = shortName(c);
+            selComp.appendChild(opt);
+        });
+    }
 
     (RAW_DATA.filters.solicitantes || []).forEach(sol => {
         const opt = document.createElement('option');

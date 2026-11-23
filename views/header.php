@@ -85,12 +85,12 @@
                         <span class="hidden lg:inline">Excel</span>
                     </button>
 
-                    <!-- Botón Admin: Gestión de Usuarios y Permisos (Solo Manager) -->
-                    <button type="button" onclick="openAdminUsersModal()" title="Administrar usuarios y compradores asignados"
-                        class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
-                        <span>👥</span>
-                        <span class="hidden md:inline">Usuarios</span>
-                    </button>
+                    <!-- Botón Admin: Configuración General (Usuarios y Fechas) -->
+<button type="button" onclick="openAdminUsersModal()" title="Configuración de usuarios y rango de fechas de sincronización"
+    class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-gray-200 font-bold transition">
+    <span>⚙️</span>
+    <span class="hidden md:inline">Configuración</span>
+</button>
                 <?php endif; ?>
 
                 <!-- Toggle Modo Claro / Oscuro -->

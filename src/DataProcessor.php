@@ -100,16 +100,32 @@ class DataProcessor
         return $isDonePr && !$hasOcOdoo && !$hasOcSap;
     }
 
+    private function matchesPettyCashProvider(string $provNorm, array $buyerNamesNorm, array $pettyAliasesNorm): bool
+    {
+        if ($provNorm === '' || $provNorm === 'sin proveedor') {
+            return false;
+        }
+        if (isset($buyerNamesNorm[$provNorm])) {
+            return true;
+        }
+        foreach ($pettyAliasesNorm as $aliasNorm) {
+            if ($aliasNorm !== '' && ($provNorm === $aliasNorm || str_contains($provNorm, $aliasNorm))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
-     * Aplica las reglas de estatus, detecta solicitudes de caja chica y garantiza
-     * que ninguna solicitud rechazada o "hecho" sin OC/SAP aparezca en rezagos o métricas SLA.
+     * Aplica las reglas de estatus, detecta solicitudes de caja chica (activos + ex compradores)
+     * y garantiza que ninguna solicitud rechazada o "hecho" sin OC/SAP aparezca en rezagos o métricas SLA.
      */
     private function applyStatusRulesToCache(array $cache, array $statusCfg): array
     {
         $prIncluded = is_array($statusCfg['pr_included'] ?? null) ? $statusCfg['pr_included'] : [];
         $poIncluded = is_array($statusCfg['po_included'] ?? null) ? $statusCfg['po_included'] : [];
 
-        // Catálogo normalizado de compradores para detectar caja chica aunque la caché sea previa
+        // Catálogo normalizado de compradores activos + ex compradores configurados
         $buyerNamesNorm = [];
         foreach (($cache['filters']['compradores'] ?? []) as $bName) {
             $norm = $this->normalizeForMatch((string)$bName);
@@ -121,6 +137,14 @@ class DataProcessor
             $norm = $this->normalizeForMatch((string)($rItem['comprador'] ?? ''));
             if ($norm !== '' && $norm !== 'sin asignar') {
                 $buyerNamesNorm[$norm] = true;
+            }
+        }
+
+        $pettyAliasesNorm = [];
+        foreach (($statusCfg['petty_cash_aliases'] ?? []) as $al) {
+            $norm = $this->normalizeForMatch((string)$al);
+            if ($norm !== '') {
+                $pettyAliasesNorm[] = $norm;
             }
         }
 
@@ -136,8 +160,8 @@ class DataProcessor
             $ym       = (string)($sr['ym'] ?? '');
             $ocStLow  = mb_strtolower(trim($ocSt));
 
-            $provNorm = $this->normalizeForMatch((string)($sr['proveedor'] ?? ''));
-            $isCajaChica = !empty($sr['is_caja_chica']) || ($provNorm !== '' && isset($buyerNamesNorm[$provNorm]));
+            $provNorm    = $this->normalizeForMatch((string)($sr['proveedor'] ?? ''));
+            $isCajaChica = !empty($sr['is_caja_chica']) || $this->matchesPettyCashProvider($provNorm, $buyerNamesNorm, $pettyAliasesNorm);
             $sr['is_caja_chica'] = $isCajaChica;
 
             $isRejectedPr   = $this->isRejectedPrStatus($solSt);
@@ -192,7 +216,6 @@ class DataProcessor
             $allPoExcluded = $hasAnyPo && !$hasActivePo;
             $isLegacyDone  = $this->isLegacyDoneWithoutOcOrSap($rec);
 
-            // Marcar solicitud como caja chica si todas sus OCs activas son de caja chica
             $pettyCount = $pettyCashPoBySol[$recId] ?? 0;
             $rec['is_caja_chica'] = ($hasActivePo && $pettyCount === $activeCount);
 

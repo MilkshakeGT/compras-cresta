@@ -1,7 +1,7 @@
 # Portal Ejecutivo de Control de Compras y Proveedores · Grupo Cresta
 
 > **URL de Producción:** `[https://compras-cresta.mksbox.com](https://compras-cresta.mksbox.com)`  
-> **Versión:** `1.17` (Arquitectura Modular · Odoo 17 API + RBAC)  
+> **Versión:** `1.14` (Arquitectura Modular · Odoo 17 API + RBAC)  
 > **Autor y Arquitecto:** **Elder Juan Velásquez Vela** · Gerente de Supply Chain, Grupo Cresta  
 > **Infraestructura:** Shared Hosting 20i (StackCP · PHP 8.4 · Despliegue continuo vía Git/GitHub + Scheduled Tasks)
 

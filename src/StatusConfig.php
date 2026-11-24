@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 // =========================================================================
-// SECCIÓN 1: GESTOR DE CONFIGURACIÓN DE ESTATUS PR / OC (data/status_config.json)
+// SECCIÓN 1: GESTOR DE CONFIGURACIÓN DE ESTATUS Y CAJA CHICA (data/status_config.json)
 // =========================================================================
 class StatusConfig
 {
@@ -49,7 +49,8 @@ class StatusConfig
                 'Solicitud de cotización' => true,
                 'Cancelado'               => false,
             ],
-            'updated_at' => null,
+            'petty_cash_aliases' => [],
+            'updated_at'         => null,
         ];
 
         if (!file_exists($this->filePath)) {
@@ -61,10 +62,21 @@ class StatusConfig
             return $default;
         }
 
+        $aliases = [];
+        if (is_array($saved['petty_cash_aliases'] ?? null)) {
+            foreach ($saved['petty_cash_aliases'] as $item) {
+                $clean = trim((string)$item);
+                if ($clean !== '') {
+                    $aliases[] = $clean;
+                }
+            }
+        }
+
         return [
-            'pr_included' => array_merge($default['pr_included'], is_array($saved['pr_included'] ?? null) ? $saved['pr_included'] : []),
-            'po_included' => array_merge($default['po_included'], is_array($saved['po_included'] ?? null) ? $saved['po_included'] : []),
-            'updated_at'  => $saved['updated_at'] ?? null,
+            'pr_included'        => array_merge($default['pr_included'], is_array($saved['pr_included'] ?? null) ? $saved['pr_included'] : []),
+            'po_included'        => array_merge($default['po_included'], is_array($saved['po_included'] ?? null) ? $saved['po_included'] : []),
+            'petty_cash_aliases' => array_values(array_unique($aliases)),
+            'updated_at'         => $saved['updated_at'] ?? null,
         ];
     }
 
@@ -83,10 +95,23 @@ class StatusConfig
             $poMap[$st] = !empty($postedPo[$st]);
         }
 
+        // Procesar lista de ex compradores / responsables de caja chica (líneas o comas)
+        $rawAliases = (string)($input['petty_cash_aliases'] ?? '');
+        $parts = preg_split('/[\r\n,;]+/', $rawAliases) ?: [];
+        $aliases = [];
+        foreach ($parts as $p) {
+            $clean = trim($p);
+            if ($clean !== '') {
+                $aliases[] = $clean;
+            }
+        }
+        $aliases = array_values(array_unique($aliases));
+
         $payload = [
-            'pr_included' => $prMap,
-            'po_included' => $poMap,
-            'updated_at'  => date('Y-m-d H:i:s'),
+            'pr_included'        => $prMap,
+            'po_included'        => $poMap,
+            'petty_cash_aliases' => $aliases,
+            'updated_at'         => date('Y-m-d H:i:s'),
         ];
 
         $ok = file_put_contents(
@@ -101,7 +126,7 @@ class StatusConfig
 
         return [
             'ok'      => true,
-            'message' => 'Reglas de estatus PR / OC guardadas y aplicadas al análisis.',
+            'message' => 'Reglas de estatus y ex compradores de caja chica guardadas y aplicadas.',
             'config'  => $payload,
         ];
     }

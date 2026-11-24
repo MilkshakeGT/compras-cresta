@@ -195,7 +195,14 @@
                 <option value="ALL">Todos los Solicitantes</option>
             </select>
 
-            <!-- Controles compartidos entre Gasto y Portal 360 Proveedor -->
+            <!-- Checkbox Global: Excluir Compras de Caja Chica en todos los módulos (Ciclo SLA, Gasto y 360°) -->
+            <label title="Oculta órdenes de compra emitidas a nombre de compradores internos (Caja Chica)"
+                class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 cursor-pointer select-none whitespace-nowrap shrink-0">
+                <input id="chkExcludePettyCash" type="checkbox" onchange="renderDashboard()" class="rounded text-cresta-navy">
+                <span class="font-medium text-slate-700 dark:text-gray-300">Sin Caja Chica</span>
+            </label>
+
+            <!-- Controles adicionales para Gasto y Portal 360 Proveedor -->
             <div id="spendOnlyFilters" class="hidden flex items-center gap-1.5 shrink-0">
                 <select id="filterProveedor" onchange="renderDashboard()"
                     class="bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 text-slate-800 dark:text-gray-100 rounded-md px-2 py-1 font-medium max-w-[185px]">
@@ -212,11 +219,6 @@
                         USD
                     </button>
                 </div>
-
-                <label class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white dark:bg-gray-800 border border-slate-300 dark:border-gray-700 cursor-pointer select-none whitespace-nowrap">
-                    <input id="chkExcludePettyCash" type="checkbox" onchange="renderDashboard()" class="rounded text-cresta-navy">
-                    <span class="font-medium text-slate-700 dark:text-gray-300">Sin Caja Chica</span>
-                </label>
             </div>
         </div>
     </div>

@@ -5,7 +5,7 @@
 let quincenaChartMode = 'cumulative'; // 'cumulative' | 'buckets'
 
 // =========================================================================
-// REGLA CENTRAL DE EXCLUSIÓN ANALÍTICA (RECHAZADAS, BORRADORES, LEGACY Y CAJA CHICA)
+// REGLA CENTRAL DE EXCLUSIÓN ANALÍTICA (RECHAZADAS, BORRADORES, HECHO SIN SAP Y CAJA CHICA)
 // =========================================================================
 function isCycleRecordExcluded(r) {
     if (!r) return true;
@@ -21,11 +21,10 @@ function isCycleRecordExcluded(r) {
         return true;
     }
 
-    const hasOcOdoo = Boolean(r.tiene_oc_odoo) || String(r.oc_odoo || '').trim() !== '';
-    const hasOcSap  = Boolean(r.tiene_oc_sap) || Boolean(r.f_creacion_sap);
+    const hasOcSap = Boolean(r.tiene_oc_sap) || Boolean(r.f_creacion_sap);
 
-    // Excluir solicitudes marcadas como "hecho" sin OC en Odoo ni en SAP (dualidad ERP histórica)
-    if ((st === 'hecho' || st === 'done') && !hasOcOdoo && !hasOcSap) {
+    // Excluir toda solicitud marcada como "hecho" / "done" que no llegó a SAP (tenga o no RFQ/OC en Odoo)
+    if ((st === 'hecho' || st === 'done') && !hasOcSap) {
         return true;
     }
 

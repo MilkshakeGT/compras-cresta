@@ -90,14 +90,18 @@ class DataProcessor
         return in_array($low, ['borrador', 'draft'], true);
     }
 
-    private function isLegacyDoneWithoutOcOrSap(array $rec): bool
+    /**
+     * Toda solicitud marcada como "hecho" / "done" que no llegó a SAP
+     * (tenga o no RFQ/OC en Odoo) se considera cierre administrativo/dualidad ERP
+     * y no debe contar como rezago abierto pendiente de SAP ni castigar SLA.
+     */
+    private function isLegacyDoneWithoutSap(array $rec): bool
     {
-        $solStLow  = mb_strtolower(trim((string)($rec['estado_sol'] ?? '')));
-        $isDonePr  = in_array($solStLow, ['hecho', 'done'], true);
-        $hasOcOdoo = !empty($rec['tiene_oc_odoo']) || trim((string)($rec['oc_odoo'] ?? '')) !== '';
-        $hasOcSap  = !empty($rec['tiene_oc_sap']) || trim((string)($rec['f_creacion_sap'] ?? '')) !== '';
+        $solStLow = mb_strtolower(trim((string)($rec['estado_sol'] ?? '')));
+        $isDonePr = in_array($solStLow, ['hecho', 'done'], true);
+        $hasOcSap = !empty($rec['tiene_oc_sap']) || trim((string)($rec['f_creacion_sap'] ?? '')) !== '';
 
-        return $isDonePr && !$hasOcOdoo && !$hasOcSap;
+        return $isDonePr && !$hasOcSap;
     }
 
     private function matchesPettyCashProvider(string $provNorm, array $buyerNamesNorm, array $pettyAliasesNorm): bool
@@ -118,7 +122,7 @@ class DataProcessor
 
     /**
      * Aplica las reglas de estatus, detecta solicitudes de caja chica (activos + ex compradores)
-     * y garantiza que ninguna solicitud rechazada o "hecho" sin OC/SAP aparezca en rezagos o métricas SLA.
+     * y garantiza que ninguna solicitud rechazada o "hecho" sin SAP aparezca en rezagos o métricas SLA.
      */
     private function applyStatusRulesToCache(array $cache, array $statusCfg): array
     {
@@ -214,14 +218,14 @@ class DataProcessor
             $activeCount   = $activePoBySol[$recId] ?? 0;
             $hasActivePo   = $activeCount > 0;
             $allPoExcluded = $hasAnyPo && !$hasActivePo;
-            $isLegacyDone  = $this->isLegacyDoneWithoutOcOrSap($rec);
+            $isDoneNoSap   = $this->isLegacyDoneWithoutSap($rec);
 
             $pettyCount = $pettyCashPoBySol[$recId] ?? 0;
             $rec['is_caja_chica'] = ($hasActivePo && $pettyCount === $activeCount);
 
             $isRejected = $this->isRejectedPrStatus($solSt);
             $isDraft    = $this->isDraftPrStatus($solSt);
-            $isExcluded = $isRejected || (!$included) || $allPoExcluded || $isLegacyDone;
+            $isExcluded = $isRejected || (!$included) || $allPoExcluded || $isDoneNoSap;
 
             $rec['is_rechazada'] = $isRejected;
             $rec['is_borrador']  = $isDraft;

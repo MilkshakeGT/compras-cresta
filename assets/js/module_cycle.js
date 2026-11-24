@@ -5,11 +5,16 @@
 let quincenaChartMode = 'cumulative'; // 'cumulative' | 'buckets'
 
 // =========================================================================
-// REGLA CENTRAL DE EXCLUSIÓN ANALÍTICA (RECHAZADAS, BORRADORES Y LEGACY SAP)
+// REGLA CENTRAL DE EXCLUSIÓN ANALÍTICA (RECHAZADAS, BORRADORES, LEGACY Y CAJA CHICA)
 // =========================================================================
 function isCycleRecordExcluded(r) {
     if (!r) return true;
     if (r.excluida || r.is_rechazada || r.is_borrador) return true;
+
+    const excludePettyCash = Boolean(document.getElementById('chkExcludePettyCash')?.checked);
+    if (excludePettyCash && r.is_caja_chica) {
+        return true;
+    }
 
     const st = String(r.estado_sol || '').trim().toLowerCase();
     if (st === 'rechazado' || st === 'rechazada' || st === 'rejected' || st === 'borrador' || st === 'draft') {
@@ -989,9 +994,11 @@ function renderChartCompradorTrend(maxYm, selectedComp, selectedYear) {
 }
 
 function renderChartTopSolicitantesReqs(currentRecords) {
+    const excludePettyCash = Boolean(document.getElementById('chkExcludePettyCash')?.checked);
     const mapSol = {};
     currentRecords.forEach(r => {
         if (r.is_borrador) return;
+        if (excludePettyCash && r.is_caja_chica) return;
         const name = r.solicitado_por || 'Sin solicitante';
         if (!mapSol[name]) mapSol[name] = { validas: 0, rechazadas: 0, total: 0 };
         mapSol[name].total += 1;

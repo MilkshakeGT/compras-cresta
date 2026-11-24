@@ -24,11 +24,13 @@ if ($userAdminFeedback !== null && !empty($userAdminFeedback['tab'])) {
 }
 $autoOpenConfig = ($userAdminFeedback !== null);
 
-$prIncluded = $statusConfig['pr_included'] ?? [];
-$poIncluded = $statusConfig['po_included'] ?? [];
+$prIncluded       = $statusConfig['pr_included'] ?? [];
+$poIncluded       = $statusConfig['po_included'] ?? [];
+$pettyCashAliases = is_array($statusConfig['petty_cash_aliases'] ?? null) ? $statusConfig['petty_cash_aliases'] : [];
+$pettyAliasesText = implode("\n", $pettyCashAliases);
 ?>
 <!-- =====================================================================
-     SECCIÓN 2: MODAL CONFIGURACIÓN (USUARIOS | FECHAS | ESTATUS PR / OC)
+     SECCIÓN 2: MODAL CONFIGURACIÓN (USUARIOS | FECHAS | ESTATUS Y CAJA CHICA)
      ===================================================================== -->
 <div id="adminUsersModal" class="fixed inset-0 z-50 <?= $autoOpenConfig ? '' : 'hidden' ?> bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-white dark:bg-gray-900 border-2 border-cresta-navy dark:border-indigo-500 rounded-2xl max-w-5xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
@@ -50,7 +52,7 @@ $poIncluded = $statusConfig['po_included'] ?? [];
                     </button>
                     <button type="button" id="cfgTabBtnStatuses" onclick="switchConfigTab('statuses')"
                         class="px-3 py-1.5 rounded-lg text-xs font-bold transition <?= $defaultTab === 'statuses' ? 'bg-white text-cresta-navy' : 'bg-white/10 text-slate-200 hover:bg-white/20' ?>">
-                        🏷️ Estatus (PR / OC)
+                        🏷️ Estatus y Caja Chica
                     </button>
                 </div>
             </div>
@@ -300,7 +302,7 @@ $poIncluded = $statusConfig['po_included'] ?? [];
             </div>
 
             <!-- =============================================================
-                 PESTAÑA 3: ESTATUS (INCLUIR / EXCLUIR PR Y OC)
+                 PESTAÑA 3: ESTATUS (PR / OC) Y EX COMPRADORES DE CAJA CHICA
                  ============================================================= -->
             <div id="cfgPanelStatuses" class="<?= $defaultTab === 'statuses' ? '' : 'hidden' ?>">
                 <form method="POST" class="p-5 rounded-xl border border-slate-200 dark:border-gray-700 bg-slate-50/70 dark:bg-gray-800/40 space-y-5">
@@ -309,8 +311,7 @@ $poIncluded = $statusConfig['po_included'] ?? [];
                     <div>
                         <h4 class="font-bold text-cresta-navy dark:text-white text-sm">Inclusión / Exclusión de Estatus en el Análisis</h4>
                         <p class="text-[11px] text-slate-500 dark:text-gray-400 mt-1">
-                            Marca los estatus que deseas <strong>incluir</strong> en los cálculos y desmarca los que deseas <strong>excluir</strong>
-                            (por ejemplo borradores, rechazados o cancelados que no quieras considerar en KPIs y gráficas).
+                            Marca los estatus que deseas <strong>incluir</strong> en los cálculos y desmarca los que deseas <strong>excluir</strong>.
                         </p>
                     </div>
 
@@ -360,10 +361,28 @@ $poIncluded = $statusConfig['po_included'] ?? [];
                         </div>
                     </div>
 
+                    <!-- Subsección: Ex Compradores / Responsables de Caja Chica Histórica -->
+                    <div class="p-4 rounded-xl border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-900 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <label for="cfg_petty_cash_aliases" class="font-bold text-cresta-navy dark:text-indigo-300 text-xs uppercase tracking-wide">
+                                Ex Compradores / Cajas Chicas Históricas (Ocultar con el check "Sin Caja Chica")
+                            </label>
+                            <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 font-semibold">
+                                <?= count($pettyCashAliases) ?> registrado(s)
+                            </span>
+                        </div>
+                        <p class="text-[11px] text-slate-500 dark:text-gray-400">
+                            Ingresa los nombres (uno por línea o separados por coma) de ex compradores o responsables que aparecen como proveedor en OCs de caja chica y ya no están activos en Odoo.
+                        </p>
+                        <textarea id="cfg_petty_cash_aliases" name="petty_cash_aliases" rows="3"
+                            placeholder="Ej.&#10;Maria Isabel&#10;Juan Carlos Perez"
+                            class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-gray-700 bg-slate-50 dark:bg-gray-800 text-slate-800 dark:text-gray-100 text-xs"><?= htmlspecialchars($pettyAliasesText) ?></textarea>
+                    </div>
+
                     <div class="pt-1 flex items-center gap-3">
                         <button type="submit"
                             class="py-2.5 px-5 rounded-xl bg-cresta-navy hover:bg-cresta-blue text-white font-bold shadow-sm transition">
-                            Guardar Reglas de Estatus
+                            Guardar Reglas de Estatus y Caja Chica
                         </button>
                     </div>
                 </form>

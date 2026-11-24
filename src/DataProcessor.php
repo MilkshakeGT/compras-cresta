@@ -45,7 +45,6 @@ class DataProcessor
             return false;
         }
 
-        // Las solicitudes rechazadas nunca deben contar como válidas/aprobadas en análisis
         $low = mb_strtolower($st);
         if (in_array($low, ['rechazado', 'rechazada', 'rejected'], true)) {
             return false;
@@ -91,10 +90,6 @@ class DataProcessor
         return in_array($low, ['borrador', 'draft'], true);
     }
 
-    /**
-     * Detecta solicitudes marcadas como "hecho" que no tienen OC en Odoo ni en SAP
-     * (flujo completado manualmente en SAP por dualidad ERP histórica).
-     */
     private function isLegacyDoneWithoutOcOrSap(array $rec): bool
     {
         $solStLow  = mb_strtolower(trim((string)($rec['estado_sol'] ?? '')));
@@ -106,17 +101,33 @@ class DataProcessor
     }
 
     /**
-     * Aplica las reglas de estatus y garantiza que ninguna solicitud rechazada,
-     * borrador excluido o "hecho" sin OC/SAP aparezca en rezagos o métricas SLA.
+     * Aplica las reglas de estatus, detecta solicitudes de caja chica y garantiza
+     * que ninguna solicitud rechazada o "hecho" sin OC/SAP aparezca en rezagos o métricas SLA.
      */
     private function applyStatusRulesToCache(array $cache, array $statusCfg): array
     {
         $prIncluded = is_array($statusCfg['pr_included'] ?? null) ? $statusCfg['pr_included'] : [];
         $poIncluded = is_array($statusCfg['po_included'] ?? null) ? $statusCfg['po_included'] : [];
 
-        $activePoBySol = [];
-        $totalPoBySol  = [];
-        $ocStatsByYm   = [];
+        // Catálogo normalizado de compradores para detectar caja chica aunque la caché sea previa
+        $buyerNamesNorm = [];
+        foreach (($cache['filters']['compradores'] ?? []) as $bName) {
+            $norm = $this->normalizeForMatch((string)$bName);
+            if ($norm !== '' && $norm !== 'sin asignar') {
+                $buyerNamesNorm[$norm] = true;
+            }
+        }
+        foreach (($cache['records'] ?? []) as $rItem) {
+            $norm = $this->normalizeForMatch((string)($rItem['comprador'] ?? ''));
+            if ($norm !== '' && $norm !== 'sin asignar') {
+                $buyerNamesNorm[$norm] = true;
+            }
+        }
+
+        $activePoBySol    = [];
+        $totalPoBySol     = [];
+        $pettyCashPoBySol = [];
+        $ocStatsByYm      = [];
 
         foreach (($cache['spend_records'] ?? []) as &$sr) {
             $ocSt     = (string)($sr['estado_oc'] ?? '');
@@ -124,6 +135,10 @@ class DataProcessor
             $solRef   = (string)($sr['solicitud'] ?? '');
             $ym       = (string)($sr['ym'] ?? '');
             $ocStLow  = mb_strtolower(trim($ocSt));
+
+            $provNorm = $this->normalizeForMatch((string)($sr['proveedor'] ?? ''));
+            $isCajaChica = !empty($sr['is_caja_chica']) || ($provNorm !== '' && isset($buyerNamesNorm[$provNorm]));
+            $sr['is_caja_chica'] = $isCajaChica;
 
             $isRejectedPr   = $this->isRejectedPrStatus($solSt);
             $poIncludedFlag = $this->isPoStatusIncluded($ocSt, $poIncluded);
@@ -147,6 +162,9 @@ class DataProcessor
                 $totalPoBySol[$solRef] = ($totalPoBySol[$solRef] ?? 0) + 1;
                 if (!$isCancelada) {
                     $activePoBySol[$solRef] = ($activePoBySol[$solRef] ?? 0) + 1;
+                    if ($isCajaChica) {
+                        $pettyCashPoBySol[$solRef] = ($pettyCashPoBySol[$solRef] ?? 0) + 1;
+                    }
                 }
                 if ($ym !== '') {
                     if (!isset($ocStatsByYm[$ym])) {
@@ -169,9 +187,14 @@ class DataProcessor
             $included = $this->isPrStatusIncluded($solSt, $prIncluded);
 
             $hasAnyPo      = ($totalPoBySol[$recId] ?? 0) > 0;
-            $hasActivePo   = ($activePoBySol[$recId] ?? 0) > 0;
+            $activeCount   = $activePoBySol[$recId] ?? 0;
+            $hasActivePo   = $activeCount > 0;
             $allPoExcluded = $hasAnyPo && !$hasActivePo;
             $isLegacyDone  = $this->isLegacyDoneWithoutOcOrSap($rec);
+
+            // Marcar solicitud como caja chica si todas sus OCs activas son de caja chica
+            $pettyCount = $pettyCashPoBySol[$recId] ?? 0;
+            $rec['is_caja_chica'] = ($hasActivePo && $pettyCount === $activeCount);
 
             $isRejected = $this->isRejectedPrStatus($solSt);
             $isDraft    = $this->isDraftPrStatus($solSt);
@@ -811,7 +834,7 @@ class DataProcessor
             if (!empty($sr['ym'])) $mesesSet[$sr['ym']] = true;
             if (!empty($sr['sociedad'])) $socSet[$sr['sociedad']] = true;
             if (!empty($sr['comprador'])) $compSet[$sr['comprador']] = true;
-            if (!empty($sr['solicitado_por'])) $solSet[$r['solicitado_por']] = true;
+            if (!empty($sr['solicitado_por'])) $solSet[$sr['solicitado_por']] = true;
             if (!empty($sr['proveedor']) && $sr['proveedor'] !== 'Sin proveedor') {
                 $provSet[$sr['proveedor']] = true;
             }
@@ -1296,6 +1319,7 @@ class DataProcessor
                 'estado_oc'          => implode(', ', array_unique($ocStates)),
                 'is_rechazada'       => $sol['is_rechazada'],
                 'is_borrador'        => $sol['is_borrador'],
+                'is_caja_chica'      => false,
                 'excluida'           => $excluida,
                 'aprobada'           => (!$excluida && $tsAprobacionSol !== null),
                 'tiene_oc_odoo'      => $tieneOcOdoo,

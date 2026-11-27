@@ -360,7 +360,7 @@ class DataProcessor
 
         if (!$force && file_exists($this->detailsCachePath)) {
             $existing = json_decode((string)file_get_contents($this->detailsCachePath), true);
-            if (is_array($existing) && ($existing['schema_v'] ?? 0) === 3) {
+            if (is_array($existing) && in_array((int)($existing['schema_v'] ?? 0), [2, 3], true)) {
                 if (($existing['source'] ?? '') === 'odoo_api'
                     && $solMtime <= (int)($existing['sol_mtime'] ?? 0)
                     && $ocMtime <= (int)($existing['oc_mtime'] ?? 0)
@@ -1011,7 +1011,7 @@ class DataProcessor
 
         if (!$forceRebuild && file_exists($this->cachePath)) {
             $cached = json_decode((string)file_get_contents($this->cachePath), true);
-            if (is_array($cached) && ($cached['schema_v'] ?? 1) === 17) {
+            if (is_array($cached) && in_array((int)($cached['schema_v'] ?? 0), [16, 17], true)) {
                 if (($cached['source'] ?? '') === 'odoo_api'
                     && $excelMtime <= (int)($cached['excel_mtime'] ?? 0)
                     && $solMtime <= (int)($cached['sol_mtime'] ?? 0)

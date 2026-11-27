@@ -30,14 +30,16 @@ $allowedBuyers = $isManager ? null : $auth->getAllowedBuyers();
 $processor       = new DataProcessor($excelPath, $cachePath);
 $odooConnector   = new OdooConnector($odooConfigPath, $cachePath, $detailsCachePath);
 $statusConfigMgr = new StatusConfig($dataDir);
+$notesMgr        = new SolNotesManager($dataDir);
 
 // =========================================================================
-// SECCIÓN 2: ENDPOINTS AJAX PROTEGIDOS (JSON)
+// SECCIÓN 2: ENDPOINTS AJAX PROTEGIDOS (JSON SIN CACHÉ)
 // =========================================================================
 $action = $_GET['action'] ?? '';
 if ($action !== '') {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
 
     if ($action === 'detail') {
         $type = $_GET['type'] ?? '';
@@ -54,6 +56,15 @@ if ($action !== '') {
     if ($action === 'search') {
         $q = $_GET['q'] ?? '';
         echo json_encode($processor->searchLines($q, $allowedBuyers), JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if ($action === 'get_sol_notes') {
+        $allNotes = $notesMgr->getAllNotes();
+        echo json_encode([
+            'ok'    => true,
+            'notes' => $allNotes,
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 

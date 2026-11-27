@@ -1,5 +1,5 @@
 /* =========================================================================
- * MODALES DE AUDITORÍA, BÚSQUEDA GLOBAL Y DETALLE DE DOCUMENTOS (modals.js)
+ * MODALES DE AUDITORÍA, BÚSQUEDA GLOBAL, DETALLE Y NOTAS (assets/js/modals.js)
  * ========================================================================= */
 
 let activeModalCategory = 'REZAGO';
@@ -14,6 +14,9 @@ let cachedUniverses = {
     SPEND_RFQ: [],
     SPEND_NO_SAP: []
 };
+
+// Estado de edición rápida de justificación dentro de #auditModal
+let activeQuickNoteSolId = '';
 
 // Estado de Búsqueda Global por Ítem / SKU / Descripción
 let globalSearchResults = [];
@@ -113,11 +116,85 @@ const MODAL_CONFIG = {
     }
 };
 
+// =========================================================================
+// PERMISOS Y SINCRONIZACIÓN EN MEMORIA DE JUSTIFICACIONES (280 CARACTERES)
+// =========================================================================
+function normalizeBuyerText(str) {
+    return String(str ?? '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ');
+}
+
+function canCurrentUserEditSolNote(solBuyerName) {
+    const ctx = (typeof RAW_DATA !== 'undefined' && RAW_DATA.user_context) ? RAW_DATA.user_context : null;
+    if (!ctx) return false;
+    if (ctx.role === 'manager') return true;
+
+    const allowed = Array.isArray(ctx.allowed_buyers) ? ctx.allowed_buyers : [];
+    const targetNorm = normalizeBuyerText(solBuyerName);
+    if (!targetNorm) return false;
+
+    return allowed.some(b => normalizeBuyerText(b) === targetNorm);
+}
+
+function syncSolNoteInMemory(solId, noteText, noteBy, noteAt) {
+    const cleanId = String(solId ?? '').trim();
+    if (!cleanId) return;
+
+    const applyUpdate = (item) => {
+        if (!item) return;
+        item.buyer_note = noteText;
+        item.note_by    = noteBy;
+        item.note_at    = noteAt;
+    };
+
+    if (typeof RAW_DATA !== 'undefined') {
+        (RAW_DATA.records || []).forEach(r => {
+            if (String(r.id || '').trim() === cleanId) applyUpdate(r);
+        });
+        (RAW_DATA.spend_records || []).forEach(sr => {
+            if (String(sr.solicitud || '').trim() === cleanId) applyUpdate(sr);
+        });
+    }
+
+    Object.keys(cachedUniverses).forEach(catKey => {
+        (cachedUniverses[catKey] || []).forEach(item => {
+            if (String(item.id || '').trim() === cleanId || String(item.solicitud || '').trim() === cleanId) {
+                applyUpdate(item);
+            }
+        });
+    });
+
+    (globalSearchResults || []).forEach(gs => {
+        if ((gs.doc_type === 'sol' && String(gs.doc_id || '').trim() === cleanId) ||
+            (gs.doc_type === 'oc' && String(gs.related_doc || '').trim() === cleanId)) {
+            gs.buyer_note = noteText;
+        }
+    });
+}
+
+async function persistSolNoteRequest(solId, noteText) {
+    const resp = await fetch('?action=save_sol_note', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: solId, note: noteText })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) {
+        throw new Error(data.error || 'No se pudo guardar la justificación.');
+    }
+    syncSolNoteInMemory(data.id, data.note || '', data.note_by || '', data.note_at || '');
+    return data;
+}
+
 function renderSolLink(solId) {
     const clean = String(solId ?? '').trim();
     if (!clean) return '—';
     return `<button type="button" onclick="event.stopPropagation(); openDocumentDetail('sol', '${escapeHtml(clean)}')"
-        title="Ver línea de tiempo y productos solicitados en ${escapeHtml(clean)}"
+        title="Ver línea de tiempo, productos solicitados y justificación en ${escapeHtml(clean)}"
         class="font-bold text-cresta-navy dark:text-indigo-300 underline decoration-dotted hover:decoration-solid hover:text-cresta-red dark:hover:text-white transition cursor-pointer">
         ${escapeHtml(clean)}
     </button>`;
@@ -146,7 +223,6 @@ function handleQuickDocLookup(e) {
 
     const upper = raw.toUpperCase();
 
-    // 1. Verificar si coincide exactamente con un código de OC (ej. P17177) o de Solicitud existente
     const isExactOc = /^P\d+$/i.test(upper) || (RAW_DATA.spend_records || []).some(r => String(r.oc_odoo || '').toUpperCase() === upper);
     if (isExactOc) {
         openDocumentDetail('oc', upper);
@@ -159,7 +235,6 @@ function handleQuickDocLookup(e) {
         return;
     }
 
-    // 2. De lo contrario, ejecutar búsqueda profunda en líneas de Solicitudes y Órdenes de Compra
     openGlobalSearchModal(raw);
 }
 
@@ -232,32 +307,18 @@ function getSortedFilteredGlobalSearchRows() {
     const cmpStr = (a, b) => String(a || '').localeCompare(String(b || ''), 'es', { sensitivity: 'base' });
 
     filtered.sort((a, b) => {
-        if (sortMode === 'fecha_desc') {
-            return cmpStr(b.fecha, a.fecha);
-        }
-        if (sortMode === 'fecha_asc') {
-            return cmpStr(a.fecha, b.fecha);
-        }
-        if (sortMode === 'comprador_asc') {
-            return cmpStr(shortName(a.comprador), shortName(b.comprador)) || cmpStr(b.fecha, a.fecha);
-        }
-        if (sortMode === 'comprador_desc') {
-            return cmpStr(shortName(b.comprador), shortName(a.comprador)) || cmpStr(b.fecha, a.fecha);
-        }
+        if (sortMode === 'fecha_desc') return cmpStr(b.fecha, a.fecha);
+        if (sortMode === 'fecha_asc') return cmpStr(a.fecha, b.fecha);
+        if (sortMode === 'comprador_asc') return cmpStr(shortName(a.comprador), shortName(b.comprador)) || cmpStr(b.fecha, a.fecha);
+        if (sortMode === 'comprador_desc') return cmpStr(shortName(b.comprador), shortName(a.comprador)) || cmpStr(b.fecha, a.fecha);
         if (sortMode === 'proveedor_asc') {
             const pa = a.proveedor || 'zzz';
             const pb = b.proveedor || 'zzz';
             return cmpStr(pa, pb) || cmpStr(b.fecha, a.fecha);
         }
-        if (sortMode === 'proveedor_desc') {
-            return cmpStr(b.proveedor, a.proveedor) || cmpStr(b.fecha, a.fecha);
-        }
-        if (sortMode === 'solicitante_asc') {
-            return cmpStr(shortName(a.solicitante), shortName(b.solicitante)) || cmpStr(b.fecha, a.fecha);
-        }
-        if (sortMode === 'solicitante_desc') {
-            return cmpStr(shortName(b.solicitante), shortName(a.solicitante)) || cmpStr(b.fecha, a.fecha);
-        }
+        if (sortMode === 'proveedor_desc') return cmpStr(b.proveedor, a.proveedor) || cmpStr(b.fecha, a.fecha);
+        if (sortMode === 'solicitante_asc') return cmpStr(shortName(a.solicitante), shortName(b.solicitante)) || cmpStr(b.fecha, a.fecha);
+        if (sortMode === 'solicitante_desc') return cmpStr(shortName(b.solicitante), shortName(a.solicitante)) || cmpStr(b.fecha, a.fecha);
         return 0;
     });
 
@@ -292,9 +353,13 @@ function renderGlobalSearchTable() {
             ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-cresta-blue border border-blue-200 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800">OC</span>`
             : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-cresta-navy border border-slate-300 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800">SOL</span>`;
 
+        const noteSnippet = r.buyer_note
+            ? `<div class="mt-1 px-1.5 py-0.5 rounded bg-amber-50 dark:bg-indigo-950/70 border border-amber-200 dark:border-indigo-800 text-[10px] text-slate-700 dark:text-gray-200 max-w-[220px] whitespace-normal" title="${escapeHtml(r.buyer_note)}">💬 ${escapeHtml(r.buyer_note)}</div>`
+            : '';
+
         const docLinkHtml = isOc
-            ? `${renderOcLinks(r.doc_id)}${r.related_doc ? `<div class="text-[10px] text-slate-400 mt-0.5">Sol: ${renderSolLink(r.related_doc)}</div>` : ''}`
-            : `${renderSolLink(r.doc_id)}${r.related_doc ? `<div class="text-[10px] text-slate-400 mt-0.5">OC: ${renderOcLinks(r.related_doc)}</div>` : ''}`;
+            ? `${renderOcLinks(r.doc_id)}${r.related_doc ? `<div class="text-[10px] text-slate-400 mt-0.5">Sol: ${renderSolLink(r.related_doc)}</div>` : ''}${noteSnippet}`
+            : `${renderSolLink(r.doc_id)}${r.related_doc ? `<div class="text-[10px] text-slate-400 mt-0.5">OC: ${renderOcLinks(r.related_doc)}</div>` : ''}${noteSnippet}`;
 
         const montoHtml = isOc && r.total !== null
             ? `<span class="font-bold text-cresta-navy dark:text-sky-400">${formatMoney(r.total, r.divisa || 'GTQ')}</span>`
@@ -305,15 +370,15 @@ function renderGlobalSearchTable() {
             : `<span class="text-slate-400 italic text-[11px]">Por cotizar</span>`;
 
         return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/50">
-            <td class="py-2 px-3">${typeBadge}</td>
-            <td class="py-2 px-3 whitespace-nowrap">${docLinkHtml}</td>
-            <td class="py-2 px-3 whitespace-nowrap text-slate-600 dark:text-gray-300 font-medium">${escapeHtml(r.fecha || '—')}</td>
-            <td class="py-2 px-3 text-slate-800 dark:text-gray-200 max-w-xs">${highlightMatchText(r.producto, globalSearchQuery)}</td>
-            <td class="py-2 px-3 text-right font-semibold text-slate-700 dark:text-gray-300">${Number(r.cantidad).toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
-            <td class="py-2 px-3 text-right whitespace-nowrap">${montoHtml}</td>
-            <td class="py-2 px-3 whitespace-nowrap text-slate-700 dark:text-gray-300">${escapeHtml(shortName(r.comprador))}</td>
-            <td class="py-2 px-3 whitespace-nowrap text-slate-600 dark:text-gray-300">${escapeHtml(shortName(r.solicitante))}</td>
-            <td class="py-2 px-3">${provHtml}</td>
+            <td class="py-2 px-3 align-top">${typeBadge}</td>
+            <td class="py-2 px-3 align-top whitespace-nowrap">${docLinkHtml}</td>
+            <td class="py-2 px-3 align-top whitespace-nowrap text-slate-600 dark:text-gray-300 font-medium">${escapeHtml(r.fecha || '—')}</td>
+            <td class="py-2 px-3 align-top text-slate-800 dark:text-gray-200 max-w-xs">${highlightMatchText(r.producto, globalSearchQuery)}</td>
+            <td class="py-2 px-3 align-top text-right font-semibold text-slate-700 dark:text-gray-300">${Number(r.cantidad).toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
+            <td class="py-2 px-3 align-top text-right whitespace-nowrap">${montoHtml}</td>
+            <td class="py-2 px-3 align-top whitespace-nowrap text-slate-700 dark:text-gray-300">${escapeHtml(shortName(r.comprador))}</td>
+            <td class="py-2 px-3 align-top whitespace-nowrap text-slate-600 dark:text-gray-300">${escapeHtml(shortName(r.solicitante))}</td>
+            <td class="py-2 px-3 align-top">${provHtml}</td>
         </tr>`;
     }).join('');
 }
@@ -322,7 +387,7 @@ function exportGlobalSearchExcel() {
     const rows = getSortedFilteredGlobalSearchRows();
     if (!rows.length) return;
 
-    const headers = ['Tipo Documento', 'Documento', 'Doc. Relacionado', 'Fecha Creacion', 'Sociedad', 'SKU', 'Producto / Descripcion', 'Cantidad', 'Divisa', 'Precio Unitario', 'Total Linea', 'Comprador', 'Solicitante', 'Proveedor', 'Estado'];
+    const headers = ['Tipo Documento', 'Documento', 'Doc. Relacionado', 'Fecha Creacion', 'Sociedad', 'SKU', 'Producto / Descripcion', 'Cantidad', 'Divisa', 'Precio Unitario', 'Total Linea', 'Comprador', 'Solicitante', 'Proveedor', 'Estado', 'Justificacion Comprador'];
     const dataRows = rows.map(r => [
         r.doc_type === 'oc' ? 'Orden de Compra' : 'Solicitud',
         r.doc_id,
@@ -338,7 +403,8 @@ function exportGlobalSearchExcel() {
         shortName(r.comprador),
         shortName(r.solicitante),
         r.proveedor || '',
-        r.estado || ''
+        r.estado || '',
+        r.buyer_note || ''
     ]);
 
     const cleanQ = globalSearchQuery.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 25);
@@ -351,12 +417,13 @@ function exportGlobalSearchExcel() {
 }
 
 // =========================================================================
-// MODAL 1: AUDITORÍA DE LISTADOS
+// MODAL 1: AUDITORÍA DE LISTADOS Y EDICIÓN RÁPIDA DE JUSTIFICACIONES
 // =========================================================================
 function openAuditModal(category, defaultSubFilter) {
     activeModalCategory = category || 'REZAGO';
     activeModalSubFilter = defaultSubFilter || 'ALL';
     document.getElementById('modalSearch').value = '';
+    closeQuickAuditNote();
 
     const cfg = MODAL_CONFIG[activeModalCategory];
     document.getElementById('modalBadge').textContent = cfg.badge;
@@ -376,12 +443,13 @@ function openAuditModal(category, defaultSubFilter) {
     } else {
         document.getElementById('modalTableHead').innerHTML = `<tr>
             <th class="py-2.5 px-3">Solicitud</th>
-            <th class="py-2.5 px-3">Fecha Creación</th>
+            <th class="py-2.5 px-3">Fecha</th>
             <th class="py-2.5 px-3">Sociedad</th>
             <th class="py-2.5 px-3">Solicitante</th>
             <th class="py-2.5 px-3">Comprador</th>
             <th class="py-2.5 px-3">OC Odoo</th>
-            <th class="py-2.5 px-3">Estatus / Etapas</th>
+            <th class="py-2.5 px-3">Estatus</th>
+            <th class="py-2.5 px-3 min-w-[210px]">Justificación Comprador</th>
             <th class="py-2.5 px-3 text-right">${cfg.daysLabel}</th>
         </tr>`;
     }
@@ -392,7 +460,73 @@ function openAuditModal(category, defaultSubFilter) {
 }
 
 function closeAuditModal() {
+    closeQuickAuditNote();
     document.getElementById('auditModal').classList.add('hidden');
+}
+
+function openQuickAuditNote(solId) {
+    const cleanId = String(solId ?? '').trim();
+    if (!cleanId) return;
+
+    const baseList = cachedUniverses[activeModalCategory] || [];
+    const rec = baseList.find(item => String(item.id || '').trim() === cleanId)
+        || (RAW_DATA.records || []).find(item => String(item.id || '').trim() === cleanId);
+
+    if (!rec || !canCurrentUserEditSolNote(rec.comprador)) {
+        return;
+    }
+
+    activeQuickNoteSolId = cleanId;
+    const bar     = document.getElementById('auditQuickNoteBar');
+    const titleEl = document.getElementById('aqnSolTitle');
+    const metaEl  = document.getElementById('aqnMetaInfo');
+    const inputEl = document.getElementById('aqnInput');
+
+    titleEl.textContent = `${cleanId} · ${shortName(rec.comprador || '')}`;
+    metaEl.textContent  = rec.note_at ? `(Última act.: ${rec.note_by || ''} · ${rec.note_at})` : '(Sin nota previa)';
+    inputEl.value       = rec.buyer_note || '';
+    updateQuickNoteCounter();
+
+    bar.classList.remove('hidden');
+    inputEl.focus();
+}
+
+function closeQuickAuditNote() {
+    activeQuickNoteSolId = '';
+    const bar = document.getElementById('auditQuickNoteBar');
+    if (bar) bar.classList.add('hidden');
+}
+
+function updateQuickNoteCounter() {
+    const inputEl = document.getElementById('aqnInput');
+    const cntEl   = document.getElementById('aqnCharCounter');
+    if (!inputEl || !cntEl) return;
+    const len = inputEl.value.length;
+    cntEl.textContent = `${len} / 280`;
+    cntEl.className = len >= 260
+        ? 'text-[11px] font-bold text-cresta-red'
+        : 'text-[11px] font-bold text-slate-500 dark:text-gray-400';
+}
+
+async function submitQuickAuditNote() {
+    if (!activeQuickNoteSolId) return;
+    const inputEl = document.getElementById('aqnInput');
+    const btnEl   = document.getElementById('aqnSaveBtn');
+    const rawNote = inputEl ? inputEl.value : '';
+
+    btnEl.disabled = true;
+    btnEl.textContent = 'Guardando...';
+
+    try {
+        await persistSolNoteRequest(activeQuickNoteSolId, rawNote);
+        closeQuickAuditNote();
+        renderModalTable();
+    } catch (err) {
+        alert(err.message || 'Error guardando justificación.');
+    } finally {
+        btnEl.disabled = false;
+        btnEl.textContent = 'Guardar';
+    }
 }
 
 function setModalSubFilter(subFilter) {
@@ -426,13 +560,12 @@ function getFilteredModalRows() {
                 if (activeModalSubFilter === 'NO_SAP' && r.en_sap) return false;
             }
             if (q) {
-                const hay = `${r.oc_odoo} ${r.oc_sap} ${r.solicitud} ${r.sociedad} ${r.solicitado_por} ${r.proveedor} ${r.comprador} ${r.estado_oc}`.toLowerCase();
+                const hay = `${r.oc_odoo} ${r.oc_sap} ${r.solicitud} ${r.sociedad} ${r.solicitado_por} ${r.proveedor} ${r.comprador} ${r.estado_oc} ${r.buyer_note || ''}`.toLowerCase();
                 if (!hay.includes(q)) return false;
             }
             return true;
         }
 
-        // Blindaje adicional en modales de ciclo: nunca mostrar excluidas, rechazadas, borradores ni "hecho" sin OC/SAP
         if (typeof isCycleRecordExcluded === 'function' && isCycleRecordExcluded(r)) {
             return false;
         }
@@ -462,7 +595,7 @@ function getFilteredModalRows() {
         }
 
         if (q) {
-            const hay = `${r.id} ${r.sociedad} ${r.solicitado_por} ${r.comprador} ${r.oc_odoo} ${r.estado_oc} ${r.estado_sol}`.toLowerCase();
+            const hay = `${r.id} ${r.sociedad} ${r.solicitado_por} ${r.comprador} ${r.oc_odoo} ${r.estado_oc} ${r.estado_sol} ${r.buyer_note || ''}`.toLowerCase();
             if (!hay.includes(q)) return false;
         }
         return true;
@@ -480,6 +613,34 @@ function getRowStatusBadge(r) {
         return `<span class="px-2 py-0.5 rounded bg-gray-100 text-gray-700 border border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700">${escapeHtml(r.estado_sol || 'Sin aprobar')}</span>`;
     }
     return `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">Sin OC en Odoo</span>`;
+}
+
+function renderAuditNoteCell(r) {
+    const canEdit = canCurrentUserEditSolNote(r.comprador);
+    const note = String(r.buyer_note || '').trim();
+    const metaTitle = note && r.note_at ? ` title="Actualizado por ${escapeHtml(r.note_by || '')} el ${escapeHtml(r.note_at)}"` : '';
+
+    if (note) {
+        return `
+            <div class="flex items-start justify-between gap-1.5 max-w-[270px]"${metaTitle}>
+                <span class="text-[11px] text-slate-700 dark:text-gray-200 leading-snug break-words">${escapeHtml(note)}</span>
+                ${canEdit ? `<button type="button" onclick="event.stopPropagation(); openQuickAuditNote('${escapeHtml(r.id)}')"
+                    title="Editar justificación"
+                    class="shrink-0 px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-sky-300 text-[10px] font-bold">
+                    ✏️
+                </button>` : ''}
+            </div>
+        `;
+    }
+
+    if (canEdit) {
+        return `<button type="button" onclick="event.stopPropagation(); openQuickAuditNote('${escapeHtml(r.id)}')"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-dashed border-slate-300 dark:border-gray-700 hover:border-cresta-navy dark:hover:border-sky-400 text-[10px] font-semibold text-slate-500 dark:text-gray-400 hover:text-cresta-navy dark:hover:text-sky-300 transition">
+            💬 + Justificar
+        </button>`;
+    }
+
+    return `<span class="text-slate-400 italic text-[11px]">Sin comentario</span>`;
 }
 
 function renderModalTable() {
@@ -501,8 +662,12 @@ function renderModalTable() {
                 ? `<span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800">SAP ${escapeHtml(r.oc_sap)}</span>`
                 : `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">${escapeHtml(r.estado_oc)} (Sin SAP)</span>`;
 
+            const noteHint = r.buyer_note
+                ? `<div class="text-[10px] text-slate-500 dark:text-gray-400 mt-0.5 max-w-[200px] truncate" title="${escapeHtml(r.buyer_note)}">💬 ${escapeHtml(r.buyer_note)}</div>`
+                : '';
+
             return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/50">
-                <td class="py-2 px-3">${renderOcLinks(r.oc_odoo)} <span class="text-[10px] text-slate-400">(${renderSolLink(r.solicitud)})</span></td>
+                <td class="py-2 px-3">${renderOcLinks(r.oc_odoo)} <span class="text-[10px] text-slate-400">(${renderSolLink(r.solicitud)})</span>${noteHint}</td>
                 <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(r.fecha)}</td>
                 <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(r.sociedad)}</td>
                 <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(shortName(r.solicitado_por || ''))}</td>
@@ -518,7 +683,7 @@ function renderModalTable() {
     document.getElementById('modalSubtitle').textContent = `${rows.length.toLocaleString()} solicitudes encontradas`;
 
     if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-slate-400 dark:text-gray-400">No hay solicitudes con este filtro.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-slate-400 dark:text-gray-400">No hay solicitudes con este filtro.</td></tr>`;
         return;
     }
 
@@ -534,14 +699,15 @@ function renderModalTable() {
         }
 
         return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/50">
-            <td class="py-2 px-3">${renderSolLink(r.id)}</td>
-            <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(r.fecha)}</td>
-            <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(r.sociedad)}</td>
-            <td class="py-2 px-3 text-slate-600 dark:text-gray-300">${escapeHtml(shortName(r.solicitado_por || ''))}</td>
-            <td class="py-2 px-3 text-slate-700 dark:text-gray-300">${escapeHtml(shortName(r.comprador))}</td>
-            <td class="py-2 px-3">${renderOcLinks(r.oc_odoo)}</td>
-            <td class="py-2 px-3">${getRowStatusBadge(r)}</td>
-            <td class="py-2 px-3 text-right ${diasCls}">${diasTxt}</td>
+            <td class="py-2 px-3 align-top">${renderSolLink(r.id)}</td>
+            <td class="py-2 px-3 align-top text-slate-600 dark:text-gray-300 whitespace-nowrap">${escapeHtml(r.fecha)}</td>
+            <td class="py-2 px-3 align-top text-slate-600 dark:text-gray-300">${escapeHtml(r.sociedad)}</td>
+            <td class="py-2 px-3 align-top text-slate-600 dark:text-gray-300">${escapeHtml(shortName(r.solicitado_por || ''))}</td>
+            <td class="py-2 px-3 align-top text-slate-700 dark:text-gray-300">${escapeHtml(shortName(r.comprador))}</td>
+            <td class="py-2 px-3 align-top">${renderOcLinks(r.oc_odoo)}</td>
+            <td class="py-2 px-3 align-top">${getRowStatusBadge(r)}</td>
+            <td class="py-2 px-3 align-top">${renderAuditNoteCell(r)}</td>
+            <td class="py-2 px-3 align-top text-right whitespace-nowrap ${diasCls}">${diasTxt}</td>
         </tr>`;
     }).join('');
 }
@@ -551,7 +717,7 @@ function exportAuditExcel() {
     const rows = getFilteredModalRows();
 
     if (cfg.mode === 'spend') {
-        const headers = ['OC Odoo', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Solicitante', 'Proveedor', 'Comprador', 'Estado OC', 'Divisa', 'Total OC'];
+        const headers = ['OC Odoo', 'OC SAP', 'Solicitud', 'Fecha OC', 'Sociedad', 'Solicitante', 'Proveedor', 'Comprador', 'Estado OC', 'Divisa', 'Total OC', 'Justificacion Comprador'];
         const dataRows = rows.map(r => [
             r.oc_odoo,
             r.oc_sap || '',
@@ -563,7 +729,8 @@ function exportAuditExcel() {
             r.comprador,
             r.estado_oc,
             r.divisa,
-            Number(r.monto.toFixed(2))
+            Number(r.monto.toFixed(2)),
+            r.buyer_note || ''
         ]);
 
         exportToExcel(
@@ -575,7 +742,7 @@ function exportAuditExcel() {
         return;
     }
 
-    const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Estatus', cfg.daysLabel];
+    const headers = ['Solicitud', 'Fecha Creacion', 'Sociedad', 'Solicitante', 'Comprador', 'OC Odoo', 'Estatus', 'Justificacion Comprador', 'Actualizado Por', 'Fecha Nota', cfg.daysLabel];
     const dataRows = rows.map(r => {
         const statusTxt = r.tiene_oc_sap
             ? 'En SAP'
@@ -591,6 +758,9 @@ function exportAuditExcel() {
             r.comprador,
             r.oc_odoo || '',
             statusTxt,
+            r.buyer_note || '',
+            r.note_by || '',
+            r.note_at || '',
             daysVal
         ];
     });
@@ -817,6 +987,135 @@ function renderDocumentTimeline(data) {
 }
 
 // =========================================================================
+// CAJA DE JUSTIFICACIÓN EN MODAL 2 (DETALLE DE SOLICITUD U OC VINCULADA)
+// =========================================================================
+function renderDocumentNoteSection(data) {
+    const noteBox = document.getElementById('docModalNoteBox');
+    if (!noteBox) return;
+
+    const solId = data.type === 'sol'
+        ? String(data.id || '').trim()
+        : String((data.meta && data.meta.solicitud) || (data.sol_meta && data.sol_meta.id) || '').trim();
+
+    if (!solId || solId.startsWith('SIN-SOL-')) {
+        noteBox.classList.add('hidden');
+        noteBox.innerHTML = '';
+        return;
+    }
+
+    const srcMeta = data.type === 'sol' ? (data.meta || {}) : (data.sol_meta || data.meta || {});
+    const currentNote = String(srcMeta.buyer_note || '').trim();
+    const noteBy = String(srcMeta.note_by || '').trim();
+    const noteAt = String(srcMeta.note_at || '').trim();
+    const canEdit = Boolean(data.can_edit_note);
+
+    const metaLabel = (currentNote && noteAt)
+        ? `Actualizado por <strong>${escapeHtml(noteBy)}</strong> el ${escapeHtml(noteAt)}`
+        : 'Sin actualización registrada';
+
+    if (!canEdit) {
+        noteBox.classList.remove('hidden');
+        noteBox.innerHTML = `
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-cresta-navy dark:text-indigo-300">
+                    💬 Estatus / Justificación del Comprador (${escapeHtml(solId)})
+                </span>
+                <span class="text-[10px] text-slate-500 dark:text-gray-400">${metaLabel}</span>
+            </div>
+            <p class="text-xs text-slate-800 dark:text-gray-200">
+                ${currentNote ? escapeHtml(currentNote) : '<span class="italic text-slate-400">El comprador aún no ha registrado un estatus o justificación para esta solicitud.</span>'}
+            </p>
+        `;
+        return;
+    }
+
+    noteBox.classList.remove('hidden');
+    noteBox.innerHTML = `
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+            <div class="flex items-center gap-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-cresta-navy dark:text-indigo-300">
+                    💬 Estatus / Justificación del Comprador (${escapeHtml(solId)})
+                </span>
+                <span id="docNoteSavedFeedback" class="hidden text-[10px] font-bold text-emerald-700 dark:text-emerald-400">✓ Guardado</span>
+            </div>
+            <div class="flex items-center gap-3 text-[10px] text-slate-500 dark:text-gray-400">
+                <span id="docNoteMetaLabel">${metaLabel}</span>
+                <span id="docNoteCharCount" class="font-bold">${currentNote.length} / 280</span>
+            </div>
+        </div>
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-start gap-2">
+            <textarea id="docNoteTextarea" rows="2" maxlength="280"
+                oninput="updateDocNoteCounter()"
+                placeholder="Indica brevemente en qué etapa se encuentra esta solicitud o la justificación del pendiente (máx. 280 caracteres)..."
+                class="flex-1 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-slate-800 dark:text-gray-100 text-xs resize-none">${escapeHtml(currentNote)}</textarea>
+            <button id="docNoteSaveBtn" type="button" onclick="saveDocDetailNote('${escapeHtml(solId)}')"
+                class="px-3.5 py-2 rounded-lg bg-cresta-navy hover:bg-cresta-blue dark:bg-cresta-red dark:hover:opacity-90 text-white font-bold text-xs transition shrink-0">
+                Guardar Nota
+            </button>
+        </div>
+    `;
+}
+
+function updateDocNoteCounter() {
+    const ta  = document.getElementById('docNoteTextarea');
+    const cnt = document.getElementById('docNoteCharCount');
+    if (!ta || !cnt) return;
+    const len = ta.value.length;
+    cnt.textContent = `${len} / 280`;
+    cnt.className = len >= 260 ? 'font-bold text-cresta-red' : 'font-bold';
+}
+
+async function saveDocDetailNote(solId) {
+    const ta       = document.getElementById('docNoteTextarea');
+    const btn      = document.getElementById('docNoteSaveBtn');
+    const fb       = document.getElementById('docNoteSavedFeedback');
+    const metaLbl  = document.getElementById('docNoteMetaLabel');
+    if (!ta || !btn) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Guardando...';
+    if (fb) fb.classList.add('hidden');
+
+    try {
+        const res = await persistSolNoteRequest(solId, ta.value);
+        ta.value = res.note || '';
+        updateDocNoteCounter();
+
+        if (activeDocDetail && activeDocDetail.meta) {
+            activeDocDetail.meta.buyer_note = res.note || '';
+            activeDocDetail.meta.note_by    = res.note_by || '';
+            activeDocDetail.meta.note_at    = res.note_at || '';
+        }
+        if (activeDocDetail && activeDocDetail.sol_meta) {
+            activeDocDetail.sol_meta.buyer_note = res.note || '';
+            activeDocDetail.sol_meta.note_by    = res.note_by || '';
+            activeDocDetail.sol_meta.note_at    = res.note_at || '';
+        }
+
+        if (metaLbl) {
+            metaLbl.innerHTML = res.note
+                ? `Actualizado por <strong>${escapeHtml(res.note_by)}</strong> el ${escapeHtml(res.note_at)}`
+                : 'Nota eliminada';
+        }
+        if (fb) {
+            fb.classList.remove('hidden');
+            setTimeout(() => fb.classList.add('hidden'), 2500);
+        }
+
+        // Si el modal de auditoría está abierto debajo, refrescar sus filas también
+        const auditModalEl = document.getElementById('auditModal');
+        if (auditModalEl && !auditModalEl.classList.contains('hidden')) {
+            renderModalTable();
+        }
+    } catch (err) {
+        alert(err.message || 'No se pudo guardar la nota.');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Guardar Nota';
+    }
+}
+
+// =========================================================================
 // MODAL 2: FICHA DETALLADA DE SOLICITUD U ORDEN DE COMPRA
 // =========================================================================
 async function openDocumentDetail(type, id) {
@@ -825,6 +1124,7 @@ async function openDocumentDetail(type, id) {
     const badgeEl = document.getElementById('docModalBadge');
     const subBadgeEl = document.getElementById('docModalSubBadge');
     const metaBox = document.getElementById('docModalMetaBox');
+    const noteBox = document.getElementById('docModalNoteBox');
     const timelineBox = document.getElementById('docModalTimelineBox');
     const thead = document.getElementById('docModalTableHead');
     const tbody = document.getElementById('docModalTableBody');
@@ -835,6 +1135,10 @@ async function openDocumentDetail(type, id) {
     subBadgeEl.textContent = 'Consultando...';
     titleEl.textContent = id;
     metaBox.innerHTML = `<div class="col-span-4 text-slate-400">Cargando información del documento...</div>`;
+    if (noteBox) {
+        noteBox.classList.add('hidden');
+        noteBox.innerHTML = '';
+    }
     if (timelineBox) timelineBox.innerHTML = '';
     thead.innerHTML = '';
     tbody.innerHTML = '';
@@ -866,6 +1170,7 @@ async function openDocumentDetail(type, id) {
                 <div><span class="text-slate-400 block text-[10px] uppercase">Comprador / OC</span><strong class="text-slate-800 dark:text-gray-200">${escapeHtml(shortName(m.comprador || '—'))}</strong><div class="mt-0.5">${renderOcLinks(m.oc_odoo || '')}</div></div>
             `;
 
+            renderDocumentNoteSection(data);
             renderDocumentTimeline(data);
 
             thead.innerHTML = `<tr>
@@ -908,6 +1213,7 @@ async function openDocumentDetail(type, id) {
                 <div><span class="text-slate-400 block text-[10px] uppercase">Solicitud / SAP</span><div>${renderSolLink(m.solicitud || '')}</div><span class="block text-[10px] text-emerald-600 font-semibold">${m.oc_sap ? 'SAP ' + escapeHtml(m.oc_sap) : (m.estado_oc || '')}</span></div>
             `;
 
+            renderDocumentNoteSection(data);
             renderDocumentTimeline(data);
 
             thead.innerHTML = `<tr>
@@ -955,7 +1261,7 @@ function exportDocumentDetailExcel() {
     if (activeDocDetail.type === 'sol') {
         const m = activeDocDetail.meta || {};
         const lines = activeDocDetail.lines || [];
-        const headers = ['Solicitud', 'Fecha Creacion', 'Fecha Aprobacion', 'Dias Aprobacion', 'Sociedad', 'Solicitante', 'Autorizador', 'Comprador', 'OC Odoo', 'Linea', 'Producto Solicitado', 'Cantidad Solicitada'];
+        const headers = ['Solicitud', 'Fecha Creacion', 'Fecha Aprobacion', 'Dias Aprobacion', 'Sociedad', 'Solicitante', 'Autorizador', 'Comprador', 'OC Odoo', 'Justificacion Comprador', 'Linea', 'Producto Solicitado', 'Cantidad Solicitada'];
         const dataRows = lines.map((l, idx) => [
             activeDocDetail.id,
             m.f_creacion_sol || m.fecha || '',
@@ -966,6 +1272,7 @@ function exportDocumentDetailExcel() {
             m.autorizador_sol || '',
             m.comprador || '',
             m.oc_odoo || '',
+            m.buyer_note || '',
             idx + 1,
             String(l.producto).replace(/\n/g, ' '),
             Number(l.cantidad)
@@ -987,12 +1294,13 @@ function exportDocumentDetailExcel() {
         const prov = d.proveedor || m.proveedor || '';
         const divisa = d.divisa || m.divisa || 'GTQ';
 
-        const headers = ['No. OC', 'OC SAP', 'Estado OC', 'Solicitud', 'Fecha Creacion Sol', 'Fecha Aprobacion Sol', 'Fecha Creacion OC', 'Fecha Aprobacion OC', 'Fecha SAP', 'Sociedad', 'Proveedor', 'Comprador', 'Solicitante', 'Linea', 'Producto', 'Cantidad Comprada', 'Divisa', 'Precio Unitario', 'Total Linea'];
+        const headers = ['No. OC', 'OC SAP', 'Estado OC', 'Solicitud', 'Justificacion Comprador', 'Fecha Creacion Sol', 'Fecha Aprobacion Sol', 'Fecha Creacion OC', 'Fecha Aprobacion OC', 'Fecha SAP', 'Sociedad', 'Proveedor', 'Comprador', 'Solicitante', 'Linea', 'Producto', 'Cantidad Comprada', 'Divisa', 'Precio Unitario', 'Total Linea'];
         const dataRows = lines.map((l, idx) => [
             activeDocDetail.id,
             m.oc_sap || '',
             m.estado_oc || '',
             m.solicitud || '',
+            m.buyer_note || '',
             m.f_creacion_sol || '',
             m.f_aprobacion_sol || '',
             m.f_creacion_oc || m.fecha || '',

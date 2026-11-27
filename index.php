@@ -216,7 +216,17 @@ foreach ($assetFiles as $af) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Control de Compras y Proveedores · Grupo Cresta</title>
+    <title>Compras Cresta · Control de Compras y Proveedores</title>
+
+    <!-- Configuración Progressive Web App (PWA) -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1B2A4A">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Compras">
+    <link rel="icon" type="image/png" sizes="192x192" href="assets/pwa/icon-192.png">
+    <link rel="apple-touch-icon" href="assets/pwa/icon-192.png">
 
     <script>
         if (localStorage.getItem('cresta_theme') === 'dark') {
@@ -284,7 +294,7 @@ foreach ($assetFiles as $af) {
     <script src="assets/js/module_supplier.js?v=<?= $assetVer ?>"></script>
 
     <!-- =================================================================
-         SECCIÓN 5: ARRANQUE AUTOMÁTICO GARANTIZADO DEL DASHBOARD
+         SECCIÓN 5: ARRANQUE AUTOMÁTICO DEL DASHBOARD Y REGISTRO PWA
          ================================================================= -->
     <script>
         (function bootCrestaDashboard() {
@@ -304,6 +314,12 @@ foreach ($assetFiles as $af) {
                 document.addEventListener('DOMContentLoaded', start);
             } else {
                 start();
+            }
+
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('./sw.js').catch(() => {});
+                });
             }
         })();
     </script>

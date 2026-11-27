@@ -23,9 +23,9 @@ $odooConfigPath   = $dataDir . '/odoo.config.php';
 $auth = new Auth($authConfigPath);
 $auth->requireAuthOrRenderLogin(__DIR__ . '/views/login.php');
 
-$currentUser   = $auth->getCurrentUser();
+$currentUser   = $auth->currentUser();
 $isManager     = $auth->isManager();
-$allowedBuyers = $auth->getAllowedBuyers();
+$allowedBuyers = $isManager ? null : $auth->getAllowedBuyers();
 
 $processor       = new DataProcessor($excelPath, $cachePath);
 $odooConnector   = new OdooConnector($odooConfigPath, $cachePath, $detailsCachePath);
@@ -73,7 +73,7 @@ if ($action !== '') {
         $solId   = trim((string)($jsonIn['id'] ?? ''));
         $rawNote = (string)($jsonIn['note'] ?? '');
 
-        $res = $processor->saveSolicitationNote($solId, $rawNote, $currentUser);
+        $res = $processor->saveSolicitationNote($solId, $rawNote, $currentUser ?? []);
         if (empty($res['ok'])) {
             http_response_code(403);
         }

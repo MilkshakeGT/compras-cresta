@@ -1,4 +1,10 @@
-/* Estilos corporativos · Grupo Cresta Supply Chain */
+/* =========================================================================
+ * ESTILOS CORPORATIVOS Y RESPONSIVOS PWA · GRUPO CRESTA SUPPLY CHAIN
+ * ========================================================================= */
+
+/* =========================================================================
+ * SECCIÓN 1: VARIABLES CORPORATIVAS Y BASE
+ * ========================================================================= */
 :root {
     --cresta-navy: #1B2A4A;
     --cresta-blue: #264073;
@@ -6,18 +12,85 @@
     --cresta-light: #F8FAFC;
 }
 
+html,
+body {
+    max-width: 100%;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+}
+
 body {
     font-family: Verdana, Geneva, sans-serif;
     transition: background-color 0.2s ease, color 0.2s ease;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 select,
 button,
-input {
+input,
+textarea {
     outline: none;
 }
 
-/* Scrollbar limpio para tablas ejecutivas y modales */
+/* =========================================================================
+ * SECCIÓN 2: SOPORTE NATIVO PWA (MODO STANDALONE EN iOS Y ANDROID)
+ * ========================================================================= */
+@media all and (display-mode: standalone) {
+    body {
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-bottom: max(env(safe-area-inset-bottom, 0px), 12px);
+    }
+
+    header {
+        padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+    }
+}
+
+/* =========================================================================
+ * SECCIÓN 3: OPTIMIZACIÓN TÁCTIL Y FORMULARIOS EN PANTALLAS MÓVILES (< 640px)
+ * ========================================================================= */
+@media (max-width: 639px) {
+    /* Evita el auto-zoom intrusivo de Safari iOS al enfocar inputs o selects */
+    input[type="text"],
+    input[type="search"],
+    input[type="password"],
+    input[type="date"],
+    select,
+    textarea {
+        font-size: 16px !important;
+    }
+
+    /* Mejora el área táctil de botones y selectores en dedos */
+    header select,
+    header button,
+    header input[type="text"] {
+        min-height: 36px;
+    }
+
+    /* Evita desbordamiento en contenedores de gráficas ApexCharts */
+    .apexcharts-canvas,
+    .apexcharts-svg {
+        max-width: 100% !important;
+    }
+}
+
+/* =========================================================================
+ * SECCIÓN 4: SCROLL TÁCTIL FLUIDO Y SCROLLBARS EJECUTIVOS
+ * ========================================================================= */
+.overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+}
+
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
 ::-webkit-scrollbar {
     width: 7px;
     height: 7px;

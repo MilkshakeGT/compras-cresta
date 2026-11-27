@@ -1,161 +1,199 @@
 <?php
 declare(strict_types=1);
 
-// =========================================================================
-// SECCIÓN 1: ZONA HORARIA, DEPENDENCIAS Y SESIÓN RBAC
-// =========================================================================
 date_default_timezone_set('America/Guatemala');
 
 require_once __DIR__ . '/src/Auth.php';
 require_once __DIR__ . '/src/DataProcessor.php';
-require_once __DIR__ . '/src/UploadHandler.php';
 require_once __DIR__ . '/src/OdooConnector.php';
+require_once __DIR__ . '/src/UploadHandler.php';
 require_once __DIR__ . '/src/StatusConfig.php';
+require_once __DIR__ . '/src/SolNotesManager.php';
 
-$auth = new Auth(__DIR__ . '/data/auth.config.php');
-$auth->requireAuthOrRenderLogin(__DIR__ . '/views/login.php');
-
-$currentUser   = $auth->currentUser();
-$isManager     = $auth->isManager();
-$allowedBuyers = $isManager ? null : $auth->getAllowedBuyers();
-
+// =========================================================================
+// SECCIÓN 1: INICIALIZACIÓN DE SERVICIOS Y CONTROL DE ACCESO (RBAC)
+// =========================================================================
 $dataDir          = __DIR__ . '/data';
 $excelPath        = $dataDir . '/DB.xlsx';
 $cachePath        = $dataDir . '/cache.json';
 $detailsCachePath = $dataDir . '/details_cache.json';
+$authConfigPath   = $dataDir . '/auth.config.php';
 $odooConfigPath   = $dataDir . '/odoo.config.php';
 
-$odooConnector = new OdooConnector($odooConfigPath, $cachePath, $detailsCachePath);
-$processor     = new DataProcessor($excelPath, $cachePath);
-$statusMgr     = new StatusConfig($dataDir);
+$auth = new Auth($authConfigPath);
+$auth->requireAuthOrRenderLogin();
+
+$currentUser   = $auth->getCurrentUser();
+$isManager     = $auth->isManager();
+$allowedBuyers = $auth->getAllowedBuyers();
+
+$processor       = new DataProcessor($excelPath, $cachePath);
+$odooConnector   = new OdooConnector($odooConfigPath, $cachePath, $detailsCachePath);
+$statusConfigMgr = new StatusConfig($dataDir);
 
 // =========================================================================
-// SECCIÓN 2: ENDPOINTS AJAX PROTEGIDOS CON AISLAMIENTO POR COMPRADOR
+// SECCIÓN 2: ENDPOINTS AJAX PROTEGIDOS (JSON)
 // =========================================================================
-if (isset($_GET['action'])) {
+$action = $_GET['action'] ?? '';
+if ($action !== '') {
     header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
-    if ($_GET['action'] === 'detail') {
-        $type = (string)($_GET['type'] ?? '');
-        $id   = (string)($_GET['id'] ?? '');
-        echo json_encode($processor->getDocumentDetail($type, $id, $allowedBuyers), JSON_UNESCAPED_UNICODE);
+    if ($action === 'detail') {
+        $type = $_GET['type'] ?? '';
+        $id   = $_GET['id'] ?? '';
+        echo json_encode($processor->getDocumentDetail($type, $id, $allowedBuyers, $currentUser), JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    if ($_GET['action'] === 'firm_lines') {
+    if ($action === 'firm_lines') {
         echo json_encode($processor->getFirmOcLines($allowedBuyers), JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    if ($_GET['action'] === 'search') {
-        $q = (string)($_GET['q'] ?? '');
+    if ($action === 'search') {
+        $q = $_GET['q'] ?? '';
         echo json_encode($processor->searchLines($q, $allowedBuyers), JSON_UNESCAPED_UNICODE);
         exit;
     }
+
+    if ($action === 'save_sol_note') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo json_encode(['ok' => false, 'error' => 'Método no permitido.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $rawBody = (string)file_get_contents('php://input');
+        $jsonIn  = json_decode($rawBody, true);
+        if (!is_array($jsonIn)) {
+            $jsonIn = $_POST;
+        }
+
+        $solId   = trim((string)($jsonIn['id'] ?? ''));
+        $rawNote = (string)($jsonIn['note'] ?? '');
+
+        $res = $processor->saveSolicitationNote($solId, $rawNote, $currentUser);
+        if (empty($res['ok'])) {
+            http_response_code(403);
+        }
+        echo json_encode($res, JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    http_response_code(400);
+    echo json_encode(['error' => 'Acción no válida']);
+    exit;
 }
 
 // =========================================================================
-// SECCIÓN 3: ACCIONES POST ADMINISTRATIVAS (EXCLUSIVAS PARA MANAGER)
+// SECCIÓN 3: ACCIONES ADMINISTRATIVAS (POST · EXCLUSIVAS PARA MANAGER)
 // =========================================================================
-$uploadHandler     = new UploadHandler($dataDir);
 $uploadFeedback    = null;
 $userAdminFeedback = null;
-$forceRebuild      = $isManager && isset($_GET['rebuild']) && $_GET['rebuild'] === '1';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $postAction = (string)($_POST['action'] ?? '');
+    $postAction = $_POST['action'] ?? '';
 
     if ($postAction === 'sync_odoo_api') {
         if (!$isManager) {
-            http_response_code(403);
-            die('Acceso denegado: solo un usuario con perfil Manager puede sincronizar Odoo.');
-        }
-        try {
-            $uploadFeedback = $odooConnector->syncFromOdoo();
-        } catch (Throwable $e) {
-            $uploadFeedback = ['ok' => false, 'message' => 'Error sincronizando con Odoo: ' . $e->getMessage()];
-        }
-    } elseif ($postAction === 'save_sync_config') {
-        if (!$isManager) {
-            http_response_code(403);
-            die('Acceso denegado: solo un usuario con perfil Manager puede configurar la sincronización.');
-        }
-        $resCfg = $odooConnector->saveSyncConfig($_POST);
-        $resCfg['tab'] = 'dates';
-        $userAdminFeedback = $resCfg;
-        if (!empty($resCfg['ok'])) {
-            $forceRebuild = true;
-        }
-    } elseif ($postAction === 'save_status_config') {
-        if (!$isManager) {
-            http_response_code(403);
-            die('Acceso denegado: solo un usuario con perfil Manager puede configurar los estatus.');
-        }
-        $resSt = $statusMgr->saveConfig($_POST);
-        $resSt['tab'] = 'statuses';
-        $userAdminFeedback = $resSt;
-        if (!empty($resSt['ok'])) {
-            // Forzar re-sincronización o limpieza de caché para reflejar estatus inmediatamente
-            if (file_exists($cachePath)) {
-                @unlink($cachePath);
+            $uploadFeedback = ['ok' => false, 'message' => 'Acceso denegado: solo el Manager puede sincronizar Odoo.'];
+        } else {
+            try {
+                $syncResult = $odooConnector->syncFromOdoo();
+                $uploadFeedback = [
+                    'ok'      => true,
+                    'message' => $syncResult['message'],
+                ];
+            } catch (Throwable $e) {
+                $uploadFeedback = [
+                    'ok'      => false,
+                    'message' => 'Error sincronizando Odoo: ' . $e->getMessage(),
+                ];
             }
-            $forceRebuild = true;
         }
-    } elseif ($postAction === 'upload_odoo_files') {
+    } elseif ($postAction === 'upload_excel_files') {
         if (!$isManager) {
-            http_response_code(403);
-            die('Acceso denegado: solo un usuario con perfil Manager puede cargar reportes de Odoo.');
-        }
-        $uploadFeedback = $uploadHandler->handleUploads();
-        if (!empty($uploadFeedback['ok'])) {
-            $forceRebuild = true;
+            $uploadFeedback = ['ok' => false, 'message' => 'Acceso denegado: solo el Manager puede subir respaldos Excel.'];
+        } else {
+            $uploader = new UploadHandler($dataDir);
+            $uploadFeedback = $uploader->handleUpload($_FILES);
+            if (!empty($uploadFeedback['ok'])) {
+                try {
+                    $processor->getProcessedData(true);
+                } catch (Throwable $e) {
+                    $uploadFeedback['ok'] = false;
+                    $uploadFeedback['message'] .= ' (Aviso: ' . $e->getMessage() . ')';
+                }
+            }
         }
     } elseif ($postAction === 'save_user') {
         if (!$isManager) {
-            http_response_code(403);
-            die('Acceso denegado: solo un usuario con perfil Manager puede administrar usuarios.');
+            $userAdminFeedback = ['ok' => false, 'message' => 'Acceso denegado.', 'tab' => 'users'];
+        } else {
+            $userAdminFeedback = $auth->saveUser($_POST);
+            $userAdminFeedback['tab'] = 'users';
         }
-        $userAdminFeedback = $auth->saveUser($_POST);
     } elseif ($postAction === 'delete_user') {
         if (!$isManager) {
-            http_response_code(403);
-            die('Acceso denegado: solo un usuario con perfil Manager puede eliminar usuarios.');
+            $userAdminFeedback = ['ok' => false, 'message' => 'Acceso denegado.', 'tab' => 'users'];
+        } else {
+            $userAdminFeedback = $auth->deleteUser((string)($_POST['username'] ?? ''));
+            $userAdminFeedback['tab'] = 'users';
         }
-        $userAdminFeedback = $auth->deleteUser((string)($_POST['username'] ?? ''));
+    } elseif ($postAction === 'save_sync_config') {
+        if (!$isManager) {
+            $userAdminFeedback = ['ok' => false, 'message' => 'Acceso denegado.', 'tab' => 'dates'];
+        } else {
+            $userAdminFeedback = $odooConnector->saveSyncConfig($_POST);
+            $userAdminFeedback['tab'] = 'dates';
+        }
+    } elseif ($postAction === 'save_status_config') {
+        if (!$isManager) {
+            $userAdminFeedback = ['ok' => false, 'message' => 'Acceso denegado.', 'tab' => 'statuses'];
+        } else {
+            $userAdminFeedback = $statusConfigMgr->saveConfig($_POST);
+            $userAdminFeedback['tab'] = 'statuses';
+        }
     }
 }
 
-$filesStatus  = $isManager ? $uploadHandler->getFilesStatus() : [];
-$odooSyncInfo = $odooConnector->getLastSyncInfo();
-$syncConfig   = $isManager ? $odooConnector->getSyncConfig() : [];
-$statusConfig = $isManager ? $statusMgr->getConfig() : [];
-
 // =========================================================================
-// SECCIÓN 4: CARGA DE PAYLOAD, AISLAMIENTO RBAC Y VERSIONADO DE ASSETS
+// SECCIÓN 4: CARGA DE DATOS, FILTRADO RBAC Y VERSIONADO DE ASSETS
 // =========================================================================
-$loadError  = null;
-$rawPayload = [
-    'cutoff_date'   => date('Y-m-d'),
-    'filters'       => ['meses' => [], 'sociedades' => [], 'compradores' => [], 'proveedores' => [], 'solicitantes' => []],
-    'oc_stats'      => [],
-    'records'       => [],
-    'oc_records'    => [],
-    'spend_records' => [],
-];
+$forceRebuild = isset($_GET['sync']) && $_GET['sync'] === '1';
 
 try {
     $rawPayload = $processor->getProcessedData($forceRebuild);
+    $allOdooBuyers = $rawPayload['filters']['compradores'] ?? [];
+    $payload = $processor->scopePayloadForUser($rawPayload, $currentUser);
 } catch (Throwable $e) {
-    $loadError = $e->getMessage();
-    if ($isManager && $uploadFeedback === null) {
-        $uploadFeedback = ['ok' => false, 'message' => $loadError];
+    $payload = [
+        'cutoff_date'       => date('Y-m-d'),
+        'filters'           => ['meses' => [], 'sociedades' => [], 'compradores' => [], 'proveedores' => [], 'solicitantes' => []],
+        'oc_stats'          => [],
+        'records'           => [],
+        'oc_records'        => [],
+        'spend_records'     => [],
+        'team_avg_by_month' => ['ALL' => []],
+        'user_context'      => [
+            'role'           => $currentUser['role'] ?? 'buyer',
+            'username'       => $currentUser['username'] ?? '',
+            'display_name'   => $currentUser['display_name'] ?? '',
+            'allowed_buyers' => $allowedBuyers ?? [],
+        ],
+    ];
+    $allOdooBuyers = [];
+    if ($uploadFeedback === null) {
+        $uploadFeedback = ['ok' => false, 'message' => $e->getMessage()];
     }
 }
 
-$allOdooBuyers = $rawPayload['filters']['compradores'] ?? [];
-$allUsersList  = $isManager ? $auth->getAllUsers() : [];
-$payload       = $processor->scopePayloadForUser($rawPayload, $currentUser);
-$jsonPayload   = json_encode($payload, JSON_UNESCAPED_UNICODE);
+$allUsersList   = $isManager ? $auth->getAllUsers() : [];
+$odooConfigured = $odooConnector->isConfigured();
+$odooSyncInfo   = $odooConnector->getLastSyncInfo();
+$syncConfig     = $isManager ? $odooConnector->getSyncConfig() : [];
+$statusConfig   = $isManager ? $statusConfigMgr->getConfig() : [];
 
 $assetFiles = [
     __DIR__ . '/assets/css/app.css',
@@ -166,16 +204,12 @@ $assetFiles = [
     __DIR__ . '/assets/js/module_spend.js',
     __DIR__ . '/assets/js/module_supplier.js',
 ];
-$maxAssetMtime = 0;
+$assetVer = 1;
 foreach ($assetFiles as $af) {
     if (file_exists($af)) {
-        $mt = (int)filemtime($af);
-        if ($mt > $maxAssetMtime) {
-            $maxAssetMtime = $mt;
-        }
+        $assetVer = max($assetVer, (int)filemtime($af));
     }
 }
-$assetVer = '1.17.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -183,45 +217,49 @@ $assetVer = '1.17.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control de Compras y Proveedores · Grupo Cresta</title>
+
+    <script>
+        if (localStorage.getItem('cresta_theme') === 'dark') {
+            document.documentElement.classList.add('dark');
+        }
+    </script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
             theme: {
                 extend: {
+                    fontFamily: {
+                        sans: ['Verdana', 'Geneva', 'Tahoma', 'sans-serif'],
+                    },
                     colors: {
                         cresta: {
-                            navy: '#1B2A4A',
-                            blue: '#264073',
-                            red: '#C8102E',
-                            light: '#F8FAFC'
+                            navy:  '#1B2A4A',
+                            blue:  '#264073',
+                            red:   '#C8102E',
+                            slate: '#F4F6F9',
+                            ink:   '#0F172A'
                         }
                     }
                 }
             }
-        };
+        }
     </script>
+
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
     <link rel="stylesheet" href="assets/css/app.css?v=<?= $assetVer ?>">
 </head>
-<body class="min-h-screen flex flex-col bg-slate-50 text-slate-900 dark:bg-gray-950 dark:text-gray-100">
+<body class="bg-cresta-slate text-cresta-ink dark:bg-gray-950 dark:text-gray-100 antialiased min-h-screen flex flex-col">
 
-    <!-- =====================================================================
-         SECCIÓN 5: VISTAS PRINCIPALES, MODALES Y FOOTER
-         ===================================================================== -->
     <?php require __DIR__ . '/views/header.php'; ?>
+
     <?php require __DIR__ . '/views/tab_cycle.php'; ?>
     <?php require __DIR__ . '/views/tab_spend.php'; ?>
     <?php require __DIR__ . '/views/tab_supplier.php'; ?>
-
-    <footer class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-4 w-full text-center">
-        <p class="text-[11px] text-slate-400 dark:text-gray-500">
-            Dashboard construido por <span class="font-semibold text-slate-500 dark:text-gray-400">Elder Velásquez</span> con ayuda de
-            <a href="https://mksbox.com" target="_blank" rel="noopener noreferrer" class="underline hover:text-cresta-navy dark:hover:text-gray-300">mksbox.com</a>
-        </p>
-    </footer>
 
     <?php require __DIR__ . '/views/modals.php'; ?>
     <?php if ($isManager): ?>
@@ -229,22 +267,20 @@ $assetVer = '1.17.' . ($maxAssetMtime > 0 ? $maxAssetMtime : time());
         <?php require __DIR__ . '/views/admin_users.php'; ?>
     <?php endif; ?>
 
-    <!-- =====================================================================
-         SECCIÓN 6: INYECCIÓN DE DATOS Y ARRANQUE DE MÓDULOS FRONTEND
-         ===================================================================== -->
+    <footer class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 mt-6 border-t border-slate-200 dark:border-gray-800 text-xs text-slate-500 dark:text-gray-400 flex flex-col sm:flex-row justify-between gap-2 w-full">
+        <span>Grupo Cresta · Gerencia de Compras y Suministros</span>
+        <span>Corte al <?= htmlspecialchars((string)$payload['cutoff_date']) ?> · Todos los derechos reservados · Powered by <a href="https://mksbox.com" target="_blank" rel="noopener noreferrer" class="font-semibold text-cresta-navy dark:text-indigo-400 hover:underline">mksbox.com</a></span>
+    </footer>
+
     <script>
-        const RAW_DATA = <?= $jsonPayload ?>;
+        const RAW_DATA = <?= json_encode($payload, JSON_UNESCAPED_UNICODE) ?>;
     </script>
+
     <script src="assets/js/app.js?v=<?= $assetVer ?>"></script>
     <script src="assets/js/export.js?v=<?= $assetVer ?>"></script>
     <script src="assets/js/modals.js?v=<?= $assetVer ?>"></script>
     <script src="assets/js/module_cycle.js?v=<?= $assetVer ?>"></script>
     <script src="assets/js/module_spend.js?v=<?= $assetVer ?>"></script>
     <script src="assets/js/module_supplier.js?v=<?= $assetVer ?>"></script>
-    <script>
-        initTheme();
-        initFilters();
-        renderDashboard();
-    </script>
 </body>
 </html>

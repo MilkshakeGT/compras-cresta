@@ -282,5 +282,30 @@ foreach ($assetFiles as $af) {
     <script src="assets/js/module_cycle.js?v=<?= $assetVer ?>"></script>
     <script src="assets/js/module_spend.js?v=<?= $assetVer ?>"></script>
     <script src="assets/js/module_supplier.js?v=<?= $assetVer ?>"></script>
+
+    <!-- =================================================================
+         SECCIÓN 5: ARRANQUE AUTOMÁTICO GARANTIZADO DEL DASHBOARD
+         ================================================================= -->
+    <script>
+        (function bootCrestaDashboard() {
+            const start = () => {
+                if (typeof initFilters === 'function') {
+                    const yearSel = document.getElementById('filterYear');
+                    if (yearSel && yearSel.options.length === 0) {
+                        initFilters();
+                    }
+                }
+                if (typeof renderDashboard === 'function') {
+                    renderDashboard();
+                }
+            };
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', start);
+            } else {
+                start();
+            }
+        })();
+    </script>
 </body>
 </html>

@@ -21,7 +21,7 @@ $authConfigPath   = $dataDir . '/auth.config.php';
 $odooConfigPath   = $dataDir . '/odoo.config.php';
 
 $auth = new Auth($authConfigPath);
-$auth->requireAuthOrRenderLogin();
+$auth->requireAuthOrRenderLogin(__DIR__ . '/views/login.php');
 
 $currentUser   = $auth->getCurrentUser();
 $isManager     = $auth->isManager();

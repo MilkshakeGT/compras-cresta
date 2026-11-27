@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/SimpleXLSX.php';
 require_once __DIR__ . '/StatusConfig.php';
+require_once __DIR__ . '/SolNotesManager.php';
 
 // =========================================================================
 // SECCIÓN 1: PROCESADOR DE DATOS, REGLAS DE ESTATUS Y BLINDAJE CONTRA RECHAZADAS
@@ -15,6 +16,7 @@ class DataProcessor
     private string $ocExcelPath;
     private string $detailsCachePath;
     private StatusConfig $statusConfigMgr;
+    private SolNotesManager $notesMgr;
 
     // Aprobadores retirados / inactivos que distorsionan el ranking operativo
     private array $excludedApprovers = [
@@ -33,6 +35,7 @@ class DataProcessor
         $this->ocExcelPath      = $dataDir . '/OC.xlsx';
         $this->detailsCachePath = $dataDir . '/details_cache.json';
         $this->statusConfigMgr  = new StatusConfig($dataDir);
+        $this->notesMgr         = new SolNotesManager($dataDir);
     }
 
     // =========================================================================
@@ -121,15 +124,16 @@ class DataProcessor
     }
 
     /**
-     * Aplica las reglas de estatus, detecta solicitudes de caja chica (activos + ex compradores)
+     * Aplica las reglas de estatus, detecta solicitudes de caja chica (activos + ex compradores),
+     * inyecta las justificaciones breves por solicitud (sol_notes.json)
      * y garantiza que ninguna solicitud rechazada o "hecho" sin SAP aparezca en rezagos o métricas SLA.
      */
     private function applyStatusRulesToCache(array $cache, array $statusCfg): array
     {
         $prIncluded = is_array($statusCfg['pr_included'] ?? null) ? $statusCfg['pr_included'] : [];
         $poIncluded = is_array($statusCfg['po_included'] ?? null) ? $statusCfg['po_included'] : [];
+        $allNotes   = $this->notesMgr->getAllNotes();
 
-        // Catálogo normalizado de compradores activos + ex compradores configurados
         $buyerNamesNorm = [];
         foreach (($cache['filters']['compradores'] ?? []) as $bName) {
             $norm = $this->normalizeForMatch((string)$bName);
@@ -167,6 +171,12 @@ class DataProcessor
             $provNorm    = $this->normalizeForMatch((string)($sr['proveedor'] ?? ''));
             $isCajaChica = !empty($sr['is_caja_chica']) || $this->matchesPettyCashProvider($provNorm, $buyerNamesNorm, $pettyAliasesNorm);
             $sr['is_caja_chica'] = $isCajaChica;
+
+            // Inyectar nota de la solicitud origen en spend_records
+            $noteObj = ($solRef !== '' && isset($allNotes[$solRef]) && is_array($allNotes[$solRef])) ? $allNotes[$solRef] : null;
+            $sr['buyer_note'] = $noteObj ? (string)($noteObj['note'] ?? '') : '';
+            $sr['note_by']    = $noteObj ? (string)($noteObj['updated_by'] ?? '') : '';
+            $sr['note_at']    = $noteObj ? (string)($noteObj['updated_at'] ?? '') : '';
 
             $isRejectedPr   = $this->isRejectedPrStatus($solSt);
             $poIncludedFlag = $this->isPoStatusIncluded($ocSt, $poIncluded);
@@ -213,6 +223,12 @@ class DataProcessor
             $recId    = (string)($rec['id'] ?? '');
             $solSt    = (string)($rec['estado_sol'] ?? '');
             $included = $this->isPrStatusIncluded($solSt, $prIncluded);
+
+            // Inyectar comentario breve / justificación de la solicitud
+            $noteObj = ($recId !== '' && isset($allNotes[$recId]) && is_array($allNotes[$recId])) ? $allNotes[$recId] : null;
+            $rec['buyer_note'] = $noteObj ? (string)($noteObj['note'] ?? '') : '';
+            $rec['note_by']    = $noteObj ? (string)($noteObj['updated_by'] ?? '') : '';
+            $rec['note_at']    = $noteObj ? (string)($noteObj['updated_at'] ?? '') : '';
 
             $hasAnyPo      = ($totalPoBySol[$recId] ?? 0) > 0;
             $activeCount   = $activePoBySol[$recId] ?? 0;
@@ -468,9 +484,9 @@ class DataProcessor
     }
 
     // =========================================================================
-    // SECCIÓN 5: ENDPOINTS AJAX CON AISLAMIENTO POR COMPRADOR (RBAC)
+    // SECCIÓN 5: ENDPOINTS AJAX CON AISLAMIENTO POR COMPRADOR (RBAC) Y NOTAS
     // =========================================================================
-    public function getDocumentDetail(string $type, string $id, ?array $allowedBuyers = null): array
+    public function getDocumentDetail(string $type, string $id, ?array $allowedBuyers = null, ?array $user = null): array
     {
         $this->rebuildDetailsCacheIfNeeded(false);
 
@@ -501,14 +517,26 @@ class DataProcessor
                 }
             }
 
+            $noteObj = $this->notesMgr->getNoteForSol($id);
+            if ($meta !== null) {
+                $meta['buyer_note'] = $noteObj ? (string)($noteObj['note'] ?? '') : '';
+                $meta['note_by']    = $noteObj ? (string)($noteObj['updated_by'] ?? '') : '';
+                $meta['note_at']    = $noteObj ? (string)($noteObj['updated_at'] ?? '') : '';
+            }
+
+            $canEditNote = ($meta !== null)
+                ? $this->notesMgr->canUserEditSol($user, (string)($meta['comprador'] ?? ''))
+                : (($user['role'] ?? '') === 'manager');
+
             $lines = $details['sol'][$id] ?? [];
             return [
-                'found'       => ($meta !== null || !empty($lines)),
-                'type'        => 'sol',
-                'id'          => $id,
-                'cutoff_date' => $cutoffDate,
-                'meta'        => $meta,
-                'lines'       => $lines,
+                'found'         => ($meta !== null || !empty($lines)),
+                'type'          => 'sol',
+                'id'            => $id,
+                'cutoff_date'   => $cutoffDate,
+                'meta'          => $meta,
+                'lines'         => $lines,
+                'can_edit_note' => $canEditNote,
             ];
         }
 
@@ -536,21 +564,67 @@ class DataProcessor
                         break;
                     }
                 }
+                $noteObj = $this->notesMgr->getNoteForSol($solId);
+                if ($solMeta !== null) {
+                    $solMeta['buyer_note'] = $noteObj ? (string)($noteObj['note'] ?? '') : '';
+                    $solMeta['note_by']    = $noteObj ? (string)($noteObj['updated_by'] ?? '') : '';
+                    $solMeta['note_at']    = $noteObj ? (string)($noteObj['updated_at'] ?? '') : '';
+                }
+                if ($meta !== null) {
+                    $meta['buyer_note'] = $noteObj ? (string)($noteObj['note'] ?? '') : '';
+                    $meta['note_by']    = $noteObj ? (string)($noteObj['updated_by'] ?? '') : '';
+                    $meta['note_at']    = $noteObj ? (string)($noteObj['updated_at'] ?? '') : '';
+                }
             }
+
+            $buyerForPerm = (string)($solMeta['comprador'] ?? ($meta['comprador'] ?? ''));
+            $canEditNote  = ($solId !== '') && $this->notesMgr->canUserEditSol($user, $buyerForPerm);
 
             $ocInfo = $details['oc'][$id] ?? null;
             return [
-                'found'       => ($meta !== null || $ocInfo !== null),
-                'type'        => 'oc',
-                'id'          => $id,
-                'cutoff_date' => $cutoffDate,
-                'meta'        => $meta,
-                'sol_meta'    => $solMeta,
-                'detail'      => $ocInfo,
+                'found'         => ($meta !== null || $ocInfo !== null),
+                'type'          => 'oc',
+                'id'            => $id,
+                'cutoff_date'   => $cutoffDate,
+                'meta'          => $meta,
+                'sol_meta'      => $solMeta,
+                'detail'        => $ocInfo,
+                'can_edit_note' => $canEditNote,
             ];
         }
 
         return ['found' => false, 'error' => 'Tipo de documento inválido'];
+    }
+
+    /**
+     * Guarda una nota breve de 280 caracteres para una solicitud validando permisos RBAC.
+     */
+    public function saveSolicitationNote(string $solId, string $rawNote, array $user): array
+    {
+        $cleanId = trim($solId);
+        if ($cleanId === '') {
+            return ['ok' => false, 'error' => 'Solicitud no especificada.'];
+        }
+
+        $mainCache = file_exists($this->cachePath)
+            ? (json_decode((string)file_get_contents($this->cachePath), true) ?: [])
+            : [];
+
+        $solBuyerName = '';
+        $found = false;
+        foreach (($mainCache['records'] ?? []) as $rec) {
+            if (($rec['id'] ?? '') === $cleanId) {
+                $solBuyerName = (string)($rec['comprador'] ?? '');
+                $found = true;
+                break;
+            }
+        }
+
+        if (!$found && ($user['role'] ?? '') !== 'manager') {
+            return ['ok' => false, 'error' => 'No se encontró la solicitud solicitada.'];
+        }
+
+        return $this->notesMgr->saveNote($cleanId, $rawNote, $user, $solBuyerName);
     }
 
     public function searchLines(string $rawQuery, ?array $allowedBuyers = null): array
@@ -582,6 +656,7 @@ class DataProcessor
         $mainCache = file_exists($this->cachePath)
             ? (json_decode((string)file_get_contents($this->cachePath), true) ?: [])
             : [];
+        $allNotes = $this->notesMgr->getAllNotes();
 
         $solMetaMap = [];
         foreach (($mainCache['records'] ?? []) as $rec) {
@@ -616,10 +691,11 @@ class DataProcessor
             $solicitante = $meta['solicitado_por'] ?? 'Sin solicitante';
             $ocVinculada = $meta['oc_odoo'] ?? '';
             $estado      = $meta['estado_sol'] ?? '';
+            $buyerNote   = isset($allNotes[$solId]['note']) ? (string)$allNotes[$solId]['note'] : '';
 
             foreach ($lines as $ln) {
                 $prod = (string)($ln['producto'] ?? '');
-                $searchHaystack = "{$solId} {$prod} {$ocVinculada}";
+                $searchHaystack = "{$solId} {$prod} {$ocVinculada} {$buyerNote}";
 
                 if ($matchesTokens($searchHaystack)) {
                     $results[] = [
@@ -638,6 +714,7 @@ class DataProcessor
                         'pu'          => null,
                         'total'       => null,
                         'estado'      => (string)$estado,
+                        'buyer_note'  => $buyerNote,
                     ];
 
                     if (count($results) >= $maxResults) {
@@ -665,10 +742,13 @@ class DataProcessor
                 $divisa       = strtoupper(trim((string)($meta['divisa'] ?? ($ocInfo['divisa'] ?? 'GTQ'))));
                 $estado       = $meta['estado_oc'] ?? '';
                 $ocSap        = $meta['oc_sap'] ?? '';
+                $buyerNote    = ($solVinculada !== '' && isset($allNotes[$solVinculada]['note']))
+                    ? (string)$allNotes[$solVinculada]['note']
+                    : '';
 
                 foreach (($ocInfo['lineas'] ?? []) as $ln) {
                     $prod = (string)($ln['producto'] ?? '');
-                    $searchHaystack = "{$ocId} {$ocSap} {$solVinculada} {$prod} {$prov}";
+                    $searchHaystack = "{$ocId} {$ocSap} {$solVinculada} {$prod} {$prov} {$buyerNote}";
 
                     if ($matchesTokens($searchHaystack)) {
                         $results[] = [
@@ -687,6 +767,7 @@ class DataProcessor
                             'pu'          => (float)($ln['precio_unitario'] ?? 0),
                             'total'       => (float)($ln['total'] ?? 0),
                             'estado'      => $ocSap !== '' ? "SAP {$ocSap}" : (string)$estado,
+                            'buyer_note'  => $buyerNote,
                         ];
 
                         if (count($results) >= $maxResults) {
@@ -1347,6 +1428,9 @@ class DataProcessor
                 'is_rechazada'       => $sol['is_rechazada'],
                 'is_borrador'        => $sol['is_borrador'],
                 'is_caja_chica'      => false,
+                'buyer_note'         => '',
+                'note_by'            => '',
+                'note_at'            => '',
                 'excluida'           => $excluida,
                 'aprobada'           => (!$excluida && $tsAprobacionSol !== null),
                 'tiene_oc_odoo'      => $tieneOcOdoo,

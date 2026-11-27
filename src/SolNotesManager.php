@@ -44,7 +44,6 @@ class SolNotesManager
             return [];
         }
 
-        // Indexar siempre con clave normalizada en mayúsculas para evitar fallos de coincidencia
         $normalizedMap = [];
         foreach ($decoded as $k => $v) {
             if (!is_array($v)) {
@@ -84,7 +83,12 @@ class SolNotesManager
         return preg_replace('/\s+/', ' ', $s) ?? $s;
     }
 
-    public function canUserEditSol(?array $user, string $solBuyerName): bool
+    /**
+     * Verifica si el usuario autenticado tiene permiso para comentar/editar la solicitud:
+     * - Manager: acceso global para crear y editar cualquier justificación.
+     * - Buyer: puede crear en sus solicitudes asignadas y editar las que él mismo registró.
+     */
+    public function canUserEditSol(?array $user, string $solBuyerName, ?array $existingEntry = null): bool
     {
         if ($user === null) {
             return false;
@@ -92,6 +96,20 @@ class SolNotesManager
 
         if (($user['role'] ?? '') === 'manager') {
             return true;
+        }
+
+        if ($existingEntry !== null && trim((string)($existingEntry['note'] ?? '')) !== '') {
+            $curUsername   = $this->normalizeForMatch((string)($user['username'] ?? ''));
+            $curDisplay    = $this->normalizeForMatch((string)($user['display_name'] ?? ''));
+            $entryUsername = $this->normalizeForMatch((string)($existingEntry['updated_username'] ?? ''));
+            $entryAuthor   = $this->normalizeForMatch((string)($existingEntry['updated_by'] ?? ''));
+
+            if ($entryUsername !== '' && $curUsername !== '' && $entryUsername === $curUsername) {
+                return true;
+            }
+            if ($entryAuthor !== '' && $curDisplay !== '' && $entryAuthor === $curDisplay) {
+                return true;
+            }
         }
 
         $allowedBuyers = (array)($user['odoo_buyers'] ?? []);
@@ -121,8 +139,11 @@ class SolNotesManager
             return ['ok' => false, 'error' => 'Identificador de solicitud inválido.'];
         }
 
-        if (!$this->canUserEditSol($user, $solBuyerName)) {
-            return ['ok' => false, 'error' => 'No tienes permisos para editar comentarios de esta solicitud.'];
+        $all           = $this->getAllNotes();
+        $existingEntry = $all[$normKey] ?? null;
+
+        if (!$this->canUserEditSol($user, $solBuyerName, is_array($existingEntry) ? $existingEntry : null)) {
+            return ['ok' => false, 'error' => 'Solo el autor de la justificación o un Manager puede editar este comentario.'];
         }
 
         $sanitized = preg_replace('/\s+/u', ' ', trim($rawNote)) ?? '';
@@ -130,22 +151,24 @@ class SolNotesManager
             $sanitized = mb_substr($sanitized, 0, self::MAX_LENGTH, 'UTF-8');
         }
 
-        $all    = $this->getAllNotes();
-        $now    = date('Y-m-d H:i');
-        $author = trim((string)($user['display_name'] ?? $user['username'] ?? 'Usuario'));
+        $now        = date('Y-m-d H:i');
+        $author     = trim((string)($user['display_name'] ?? $user['username'] ?? 'Usuario'));
+        $authorUser = trim((string)($user['username'] ?? ''));
 
         if ($sanitized === '') {
             unset($all[$normKey]);
             $entry = [
-                'note'       => '',
-                'updated_by' => $author,
-                'updated_at' => $now,
+                'note'             => '',
+                'updated_by'       => $author,
+                'updated_username' => $authorUser,
+                'updated_at'       => $now,
             ];
         } else {
             $entry = [
-                'note'       => $sanitized,
-                'updated_by' => $author,
-                'updated_at' => $now,
+                'note'             => $sanitized,
+                'updated_by'       => $author,
+                'updated_username' => $authorUser,
+                'updated_at'       => $now,
             ];
             $all[$normKey] = $entry;
         }
@@ -164,11 +187,12 @@ class SolNotesManager
         clearstatcache(true, $this->filePath);
 
         return [
-            'ok'      => true,
-            'id'      => $cleanId,
-            'note'    => $entry['note'],
-            'note_by' => $entry['updated_by'],
-            'note_at' => $entry['updated_at'],
+            'ok'            => true,
+            'id'            => $cleanId,
+            'note'          => $entry['note'],
+            'note_by'       => $entry['updated_by'],
+            'note_username' => $entry['updated_username'],
+            'note_at'       => $entry['updated_at'],
         ];
     }
 }

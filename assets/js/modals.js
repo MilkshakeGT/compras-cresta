@@ -117,7 +117,7 @@ const MODAL_CONFIG = {
 };
 
 // =========================================================================
-// PERMISOS Y SINCRONIZACIÓN EN MEMORIA DE JUSTIFICACIONES (280 CARACTERES)
+// PERMISOS Y SINCRONIZACIÓN DE JUSTIFICACIONES (280 CARACTERES)
 // =========================================================================
 function normalizeBuyerText(str) {
     return String(str ?? '')
@@ -128,49 +128,107 @@ function normalizeBuyerText(str) {
         .replace(/\s+/g, ' ');
 }
 
-function canCurrentUserEditSolNote(solBuyerName) {
+/**
+ * Resuelve siempre la nota más reciente de una solicitud consultando tanto
+ * el registro local como RAW_DATA.records (fuente maestra cargada por PHP).
+ */
+function resolveLatestSolNote(recOrSolId) {
+    const isObj = (recOrSolId && typeof recOrSolId === 'object');
+    const cleanId = isObj
+        ? String(recOrSolId.id || recOrSolId.solicitud || '').trim().toUpperCase()
+        : String(recOrSolId || '').trim().toUpperCase();
+
+    let note    = isObj ? String(recOrSolId.buyer_note || '').trim() : '';
+    let noteBy  = isObj ? String(recOrSolId.note_by || '').trim() : '';
+    let noteAt  = isObj ? String(recOrSolId.note_at || '').trim() : '';
+    let noteUsr = isObj ? String(recOrSolId.note_username || '').trim() : '';
+
+    if (cleanId && typeof RAW_DATA !== 'undefined' && Array.isArray(RAW_DATA.records)) {
+        const master = RAW_DATA.records.find(r => String(r.id || '').trim().toUpperCase() === cleanId);
+        if (master) {
+            const mNote = String(master.buyer_note || '').trim();
+            if (mNote !== '' || note === '') {
+                note    = mNote;
+                noteBy  = String(master.note_by || '').trim();
+                noteAt  = String(master.note_at || '').trim();
+                noteUsr = String(master.note_username || '').trim();
+            }
+        }
+    }
+
+    return { note, noteBy, noteAt, noteUsr };
+}
+
+/**
+ * Determina si el usuario actual puede crear o editar la nota:
+ * - Manager: siempre puede crear y editar.
+ * - Comprador: puede crear en sus solicitudes asignadas, y editar si él mismo la registró.
+ */
+function canCurrentUserEditSolNote(recOrBuyer) {
     const ctx = (typeof RAW_DATA !== 'undefined' && RAW_DATA.user_context) ? RAW_DATA.user_context : null;
     if (!ctx) return false;
     if (ctx.role === 'manager') return true;
 
+    const isObj = (recOrBuyer && typeof recOrBuyer === 'object');
+    const solBuyerName = isObj ? String(recOrBuyer.comprador || '') : String(recOrBuyer || '');
+    const noteInfo = isObj ? resolveLatestSolNote(recOrBuyer) : { note: '', noteBy: '', noteUsr: '' };
+
     const allowed = Array.isArray(ctx.allowed_buyers) ? ctx.allowed_buyers : [];
     const targetNorm = normalizeBuyerText(solBuyerName);
-    if (!targetNorm) return false;
+    const isAssignedBuyer = targetNorm !== '' && allowed.some(b => normalizeBuyerText(b) === targetNorm);
 
-    return allowed.some(b => normalizeBuyerText(b) === targetNorm);
+    // Si ya existe nota, verificar que sea el mismo usuario que la creó o el comprador asignado
+    if (noteInfo.note !== '') {
+        const curUserNorm = normalizeBuyerText(ctx.username || '');
+        const curDispNorm = normalizeBuyerText(ctx.display_name || '');
+        const authorUsrNorm = normalizeBuyerText(noteInfo.noteUsr || '');
+        const authorByNorm  = normalizeBuyerText(noteInfo.noteBy || '');
+
+        if (authorUsrNorm !== '' && curUserNorm !== '' && authorUsrNorm === curUserNorm) {
+            return true;
+        }
+        if (authorByNorm !== '' && curDispNorm !== '' && authorByNorm === curDispNorm) {
+            return true;
+        }
+        return isAssignedBuyer;
+    }
+
+    return isAssignedBuyer;
 }
 
-function syncSolNoteInMemory(solId, noteText, noteBy, noteAt) {
-    const cleanId = String(solId ?? '').trim();
+function syncSolNoteInMemory(solId, noteText, noteBy, noteAt, noteUsername = '') {
+    const cleanId = String(solId ?? '').trim().toUpperCase();
     if (!cleanId) return;
 
     const applyUpdate = (item) => {
         if (!item) return;
-        item.buyer_note = noteText;
-        item.note_by    = noteBy;
-        item.note_at    = noteAt;
+        item.buyer_note    = noteText;
+        item.note_by       = noteBy;
+        item.note_at       = noteAt;
+        item.note_username = noteUsername;
     };
 
     if (typeof RAW_DATA !== 'undefined') {
         (RAW_DATA.records || []).forEach(r => {
-            if (String(r.id || '').trim() === cleanId) applyUpdate(r);
+            if (String(r.id || '').trim().toUpperCase() === cleanId) applyUpdate(r);
         });
         (RAW_DATA.spend_records || []).forEach(sr => {
-            if (String(sr.solicitud || '').trim() === cleanId) applyUpdate(sr);
+            if (String(sr.solicitud || '').trim().toUpperCase() === cleanId) applyUpdate(sr);
         });
     }
 
     Object.keys(cachedUniverses).forEach(catKey => {
         (cachedUniverses[catKey] || []).forEach(item => {
-            if (String(item.id || '').trim() === cleanId || String(item.solicitud || '').trim() === cleanId) {
+            const itemSol = String(item.id || item.solicitud || '').trim().toUpperCase();
+            if (itemSol === cleanId) {
                 applyUpdate(item);
             }
         });
     });
 
     (globalSearchResults || []).forEach(gs => {
-        if ((gs.doc_type === 'sol' && String(gs.doc_id || '').trim() === cleanId) ||
-            (gs.doc_type === 'oc' && String(gs.related_doc || '').trim() === cleanId)) {
+        if ((gs.doc_type === 'sol' && String(gs.doc_id || '').trim().toUpperCase() === cleanId) ||
+            (gs.doc_type === 'oc' && String(gs.related_doc || '').trim().toUpperCase() === cleanId)) {
             gs.buyer_note = noteText;
         }
     });
@@ -186,7 +244,13 @@ async function persistSolNoteRequest(solId, noteText) {
     if (!resp.ok || !data.ok) {
         throw new Error(data.error || 'No se pudo guardar la justificación.');
     }
-    syncSolNoteInMemory(data.id, data.note || '', data.note_by || '', data.note_at || '');
+    syncSolNoteInMemory(
+        data.id,
+        data.note || '',
+        data.note_by || '',
+        data.note_at || '',
+        data.note_username || ''
+    );
     return data;
 }
 
@@ -285,8 +349,8 @@ function updateGlobalSearchTabButtons() {
     const btnSol = document.getElementById('gsTabSol');
     const btnOc  = document.getElementById('gsTabOc');
 
-    const activeCls   = 'px-3 py-1 rounded-md font-bold bg-cresta-navy dark:bg-cresta-red text-white transition';
-    const inactiveCls = 'px-3 py-1 rounded-md font-bold text-slate-700 dark:text-gray-300 hover:opacity-80 transition';
+    const activeCls   = 'px-3 py-1 rounded-md font-bold bg-cresta-navy dark:bg-cresta-red text-white transition whitespace-nowrap';
+    const inactiveCls = 'px-3 py-1 rounded-md font-bold text-slate-700 dark:text-gray-300 hover:opacity-80 transition whitespace-nowrap';
 
     btnAll.textContent = `Todos (${globalSearchResults.length})`;
     btnSol.textContent = `Líneas de Solicitud (${solCount})`;
@@ -353,8 +417,12 @@ function renderGlobalSearchTable() {
             ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-cresta-blue border border-blue-200 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800">OC</span>`
             : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-cresta-navy border border-slate-300 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800">SOL</span>`;
 
-        const noteSnippet = r.buyer_note
-            ? `<div class="mt-1 px-1.5 py-0.5 rounded bg-amber-50 dark:bg-indigo-950/70 border border-amber-200 dark:border-indigo-800 text-[10px] text-slate-700 dark:text-gray-200 max-w-[220px] whitespace-normal" title="${escapeHtml(r.buyer_note)}">💬 ${escapeHtml(r.buyer_note)}</div>`
+        const targetSol = isOc ? (r.related_doc || '') : (r.doc_id || '');
+        const resolved = resolveLatestSolNote(targetSol);
+        const noteText = resolved.note || String(r.buyer_note || '').trim();
+
+        const noteSnippet = noteText
+            ? `<div class="mt-1 px-1.5 py-0.5 rounded bg-amber-50 dark:bg-indigo-950/70 border border-amber-200 dark:border-indigo-800 text-[10px] text-slate-700 dark:text-gray-200 max-w-[220px] whitespace-normal" title="${escapeHtml(noteText)}">💬 ${escapeHtml(noteText)}</div>`
             : '';
 
         const docLinkHtml = isOc
@@ -388,24 +456,28 @@ function exportGlobalSearchExcel() {
     if (!rows.length) return;
 
     const headers = ['Tipo Documento', 'Documento', 'Doc. Relacionado', 'Fecha Creacion', 'Sociedad', 'SKU', 'Producto / Descripcion', 'Cantidad', 'Divisa', 'Precio Unitario', 'Total Linea', 'Comprador', 'Solicitante', 'Proveedor', 'Estado', 'Justificacion Comprador'];
-    const dataRows = rows.map(r => [
-        r.doc_type === 'oc' ? 'Orden de Compra' : 'Solicitud',
-        r.doc_id,
-        r.related_doc || '',
-        r.fecha || '',
-        r.sociedad || '',
-        r.sku || '',
-        String(r.producto).replace(/\n/g, ' '),
-        Number(r.cantidad),
-        r.divisa || '',
-        r.pu !== null ? Number(r.pu) : '',
-        r.total !== null ? Number(r.total) : '',
-        shortName(r.comprador),
-        shortName(r.solicitante),
-        r.proveedor || '',
-        r.estado || '',
-        r.buyer_note || ''
-    ]);
+    const dataRows = rows.map(r => {
+        const targetSol = r.doc_type === 'oc' ? (r.related_doc || '') : (r.doc_id || '');
+        const noteText = resolveLatestSolNote(targetSol).note || r.buyer_note || '';
+        return [
+            r.doc_type === 'oc' ? 'Orden de Compra' : 'Solicitud',
+            r.doc_id,
+            r.related_doc || '',
+            r.fecha || '',
+            r.sociedad || '',
+            r.sku || '',
+            String(r.producto).replace(/\n/g, ' '),
+            Number(r.cantidad),
+            r.divisa || '',
+            r.pu !== null ? Number(r.pu) : '',
+            r.total !== null ? Number(r.total) : '',
+            shortName(r.comprador),
+            shortName(r.solicitante),
+            r.proveedor || '',
+            r.estado || '',
+            noteText
+        ];
+    });
 
     const cleanQ = globalSearchQuery.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 25);
     exportToExcel(
@@ -449,7 +521,7 @@ function openAuditModal(category, defaultSubFilter) {
             <th class="py-2.5 px-3">Comprador</th>
             <th class="py-2.5 px-3">OC Odoo</th>
             <th class="py-2.5 px-3">Estatus</th>
-            <th class="py-2.5 px-3 min-w-[210px]">Justificación Comprador</th>
+            <th class="py-2.5 px-3 min-w-[230px]">Justificación Comprador</th>
             <th class="py-2.5 px-3 text-right">${cfg.daysLabel}</th>
         </tr>`;
     }
@@ -465,26 +537,28 @@ function closeAuditModal() {
 }
 
 function openQuickAuditNote(solId) {
-    const cleanId = String(solId ?? '').trim();
+    const cleanId = String(solId ?? '').trim().toUpperCase();
     if (!cleanId) return;
 
     const baseList = cachedUniverses[activeModalCategory] || [];
-    const rec = baseList.find(item => String(item.id || '').trim() === cleanId)
-        || (RAW_DATA.records || []).find(item => String(item.id || '').trim() === cleanId);
+    const rec = baseList.find(item => String(item.id || '').trim().toUpperCase() === cleanId)
+        || (RAW_DATA.records || []).find(item => String(item.id || '').trim().toUpperCase() === cleanId);
 
-    if (!rec || !canCurrentUserEditSolNote(rec.comprador)) {
+    if (!rec || !canCurrentUserEditSolNote(rec)) {
         return;
     }
 
-    activeQuickNoteSolId = cleanId;
+    const noteInfo = resolveLatestSolNote(rec);
+
+    activeQuickNoteSolId = String(rec.id || cleanId).trim();
     const bar     = document.getElementById('auditQuickNoteBar');
     const titleEl = document.getElementById('aqnSolTitle');
     const metaEl  = document.getElementById('aqnMetaInfo');
     const inputEl = document.getElementById('aqnInput');
 
-    titleEl.textContent = `${cleanId} · ${shortName(rec.comprador || '')}`;
-    metaEl.textContent  = rec.note_at ? `(Última act.: ${rec.note_by || ''} · ${rec.note_at})` : '(Sin nota previa)';
-    inputEl.value       = rec.buyer_note || '';
+    titleEl.textContent = `${activeQuickNoteSolId} · ${shortName(rec.comprador || '')}`;
+    metaEl.textContent  = noteInfo.noteAt ? `(Última act.: ${noteInfo.noteBy || ''} · ${noteInfo.noteAt})` : '(Sin nota previa)';
+    inputEl.value       = noteInfo.note || '';
     updateQuickNoteCounter();
 
     bar.classList.remove('hidden');
@@ -560,7 +634,8 @@ function getFilteredModalRows() {
                 if (activeModalSubFilter === 'NO_SAP' && r.en_sap) return false;
             }
             if (q) {
-                const hay = `${r.oc_odoo} ${r.oc_sap} ${r.solicitud} ${r.sociedad} ${r.solicitado_por} ${r.proveedor} ${r.comprador} ${r.estado_oc} ${r.buyer_note || ''}`.toLowerCase();
+                const noteText = resolveLatestSolNote(r.solicitud).note;
+                const hay = `${r.oc_odoo} ${r.oc_sap} ${r.solicitud} ${r.sociedad} ${r.solicitado_por} ${r.proveedor} ${r.comprador} ${r.estado_oc} ${noteText}`.toLowerCase();
                 if (!hay.includes(q)) return false;
             }
             return true;
@@ -595,7 +670,8 @@ function getFilteredModalRows() {
         }
 
         if (q) {
-            const hay = `${r.id} ${r.sociedad} ${r.solicitado_por} ${r.comprador} ${r.oc_odoo} ${r.estado_oc} ${r.estado_sol} ${r.buyer_note || ''}`.toLowerCase();
+            const noteText = resolveLatestSolNote(r).note;
+            const hay = `${r.id} ${r.sociedad} ${r.solicitado_por} ${r.comprador} ${r.oc_odoo} ${r.estado_oc} ${r.estado_sol} ${noteText}`.toLowerCase();
             if (!hay.includes(q)) return false;
         }
         return true;
@@ -616,26 +692,33 @@ function getRowStatusBadge(r) {
 }
 
 function renderAuditNoteCell(r) {
-    const canEdit = canCurrentUserEditSolNote(r.comprador);
-    const note = String(r.buyer_note || '').trim();
-    const metaTitle = note && r.note_at ? ` title="Actualizado por ${escapeHtml(r.note_by || '')} el ${escapeHtml(r.note_at)}"` : '';
+    const canEdit  = canCurrentUserEditSolNote(r);
+    const noteInfo = resolveLatestSolNote(r);
+    const note     = noteInfo.note;
 
     if (note) {
+        const subMeta = noteInfo.noteAt
+            ? `<div class="text-[9px] text-slate-500 dark:text-gray-400 mt-1">${escapeHtml(shortName(noteInfo.noteBy || ''))} · ${escapeHtml(noteInfo.noteAt)}</div>`
+            : '';
+
         return `
-            <div class="flex items-start justify-between gap-1.5 max-w-[270px]"${metaTitle}>
-                <span class="text-[11px] text-slate-700 dark:text-gray-200 leading-snug break-words">${escapeHtml(note)}</span>
-                ${canEdit ? `<button type="button" onclick="event.stopPropagation(); openQuickAuditNote('${escapeHtml(r.id)}')"
-                    title="Editar justificación"
-                    class="shrink-0 px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-cresta-navy dark:text-sky-300 text-[10px] font-bold">
-                    ✏️
-                </button>` : ''}
+            <div class="p-1.5 rounded-lg bg-amber-50/90 dark:bg-indigo-950/60 border border-amber-200 dark:border-indigo-800 max-w-[280px]">
+                <div class="flex items-start justify-between gap-1.5">
+                    <span class="text-[11px] font-medium text-slate-800 dark:text-gray-100 leading-snug break-words">💬 ${escapeHtml(note)}</span>
+                    ${canEdit ? `<button type="button" onclick="event.stopPropagation(); openQuickAuditNote('${escapeHtml(r.id)}')"
+                        title="Editar justificación"
+                        class="shrink-0 px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-slate-200 dark:border-gray-700 text-cresta-navy dark:text-sky-300 text-[10px] font-bold shadow-2xs">
+                        ✏️
+                    </button>` : ''}
+                </div>
+                ${subMeta}
             </div>
         `;
     }
 
     if (canEdit) {
         return `<button type="button" onclick="event.stopPropagation(); openQuickAuditNote('${escapeHtml(r.id)}')"
-            class="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-dashed border-slate-300 dark:border-gray-700 hover:border-cresta-navy dark:hover:border-sky-400 text-[10px] font-semibold text-slate-500 dark:text-gray-400 hover:text-cresta-navy dark:hover:text-sky-300 transition">
+            class="inline-flex items-center gap-1 px-2 py-1 rounded border border-dashed border-slate-300 dark:border-gray-700 hover:border-cresta-navy dark:hover:border-sky-400 text-[10px] font-semibold text-slate-500 dark:text-gray-400 hover:text-cresta-navy dark:hover:text-sky-300 transition">
             💬 + Justificar
         </button>`;
     }
@@ -662,8 +745,9 @@ function renderModalTable() {
                 ? `<span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800">SAP ${escapeHtml(r.oc_sap)}</span>`
                 : `<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">${escapeHtml(r.estado_oc)} (Sin SAP)</span>`;
 
-            const noteHint = r.buyer_note
-                ? `<div class="text-[10px] text-slate-500 dark:text-gray-400 mt-0.5 max-w-[200px] truncate" title="${escapeHtml(r.buyer_note)}">💬 ${escapeHtml(r.buyer_note)}</div>`
+            const noteText = resolveLatestSolNote(r.solicitud).note;
+            const noteHint = noteText
+                ? `<div class="text-[10px] text-slate-600 dark:text-gray-300 mt-0.5 max-w-[220px] truncate" title="${escapeHtml(noteText)}">💬 ${escapeHtml(noteText)}</div>`
                 : '';
 
             return `<tr class="hover:bg-slate-50 dark:hover:bg-gray-800/50">
@@ -730,7 +814,7 @@ function exportAuditExcel() {
             r.estado_oc,
             r.divisa,
             Number(r.monto.toFixed(2)),
-            r.buyer_note || ''
+            resolveLatestSolNote(r.solicitud).note || ''
         ]);
 
         exportToExcel(
@@ -749,6 +833,7 @@ function exportAuditExcel() {
             : (r.tiene_oc_odoo ? (r.estado_oc || 'OC Odoo sin SAP') : (!r.aprobada ? (r.estado_sol || 'Sin aprobar') : 'Sin OC en Odoo'));
         const rawDays = r[cfg.daysField];
         const daysVal = rawDays !== null && rawDays !== undefined ? Number(rawDays.toFixed(1)) : '';
+        const noteInfo = resolveLatestSolNote(r);
 
         return [
             r.id,
@@ -758,9 +843,9 @@ function exportAuditExcel() {
             r.comprador,
             r.oc_odoo || '',
             statusTxt,
-            r.buyer_note || '',
-            r.note_by || '',
-            r.note_at || '',
+            noteInfo.note || '',
+            noteInfo.noteBy || '',
+            noteInfo.noteAt || '',
             daysVal
         ];
     });
@@ -1082,14 +1167,16 @@ async function saveDocDetailNote(solId) {
         updateDocNoteCounter();
 
         if (activeDocDetail && activeDocDetail.meta) {
-            activeDocDetail.meta.buyer_note = res.note || '';
-            activeDocDetail.meta.note_by    = res.note_by || '';
-            activeDocDetail.meta.note_at    = res.note_at || '';
+            activeDocDetail.meta.buyer_note    = res.note || '';
+            activeDocDetail.meta.note_by       = res.note_by || '';
+            activeDocDetail.meta.note_at       = res.note_at || '';
+            activeDocDetail.meta.note_username = res.note_username || '';
         }
         if (activeDocDetail && activeDocDetail.sol_meta) {
-            activeDocDetail.sol_meta.buyer_note = res.note || '';
-            activeDocDetail.sol_meta.note_by    = res.note_by || '';
-            activeDocDetail.sol_meta.note_at    = res.note_at || '';
+            activeDocDetail.sol_meta.buyer_note    = res.note || '';
+            activeDocDetail.sol_meta.note_by       = res.note_by || '';
+            activeDocDetail.sol_meta.note_at       = res.note_at || '';
+            activeDocDetail.sol_meta.note_username = res.note_username || '';
         }
 
         if (metaLbl) {
@@ -1102,7 +1189,6 @@ async function saveDocDetailNote(solId) {
             setTimeout(() => fb.classList.add('hidden'), 2500);
         }
 
-        // Si el modal de auditoría está abierto debajo, refrescar sus filas también
         const auditModalEl = document.getElementById('auditModal');
         if (auditModalEl && !auditModalEl.classList.contains('hidden')) {
             renderModalTable();
@@ -1272,7 +1358,7 @@ function exportDocumentDetailExcel() {
             m.autorizador_sol || '',
             m.comprador || '',
             m.oc_odoo || '',
-            m.buyer_note || '',
+            resolveLatestSolNote(activeDocDetail.id).note || m.buyer_note || '',
             idx + 1,
             String(l.producto).replace(/\n/g, ' '),
             Number(l.cantidad)
@@ -1300,7 +1386,7 @@ function exportDocumentDetailExcel() {
             m.oc_sap || '',
             m.estado_oc || '',
             m.solicitud || '',
-            m.buyer_note || '',
+            resolveLatestSolNote(m.solicitud || '').note || m.buyer_note || '',
             m.f_creacion_sol || '',
             m.f_aprobacion_sol || '',
             m.f_creacion_oc || m.fecha || '',

@@ -23,6 +23,9 @@ let globalSearchResults = [];
 let globalSearchQuery   = '';
 let globalSearchTab     = 'ALL'; // 'ALL' | 'sol' | 'oc'
 
+// Mapa en vivo de notas descargadas desde ?action=get_sol_notes
+let liveSolNotesMap = {};
+
 const MODAL_CONFIG = {
     VALIDAS: {
         mode: 'cycle',
@@ -129,14 +132,29 @@ function normalizeBuyerText(str) {
 }
 
 /**
- * Resuelve siempre la nota más reciente de una solicitud consultando tanto
- * el registro local como RAW_DATA.records (fuente maestra cargada por PHP).
+ * Resuelve siempre la nota más reciente de una solicitud consultando:
+ * 1) liveSolNotesMap (descargado en vivo desde ?action=get_sol_notes)
+ * 2) RAW_DATA.records (fuente maestra en memoria)
+ * 3) El objeto local recibido
  */
 function resolveLatestSolNote(recOrSolId) {
     const isObj = (recOrSolId && typeof recOrSolId === 'object');
     const cleanId = isObj
         ? String(recOrSolId.id || recOrSolId.solicitud || '').trim().toUpperCase()
         : String(recOrSolId || '').trim().toUpperCase();
+
+    if (cleanId && liveSolNotesMap && Object.prototype.hasOwnProperty.call(liveSolNotesMap, cleanId)) {
+        const entry = liveSolNotesMap[cleanId];
+        if (entry && typeof entry === 'object') {
+            return {
+                note:    String(entry.note || '').trim(),
+                noteBy:  String(entry.updated_by || entry.note_by || '').trim(),
+                noteAt:  String(entry.updated_at || entry.note_at || '').trim(),
+                noteUsr: String(entry.updated_username || entry.note_username || '').trim()
+            };
+        }
+        return { note: '', noteBy: '', noteAt: '', noteUsr: '' };
+    }
 
     let note    = isObj ? String(recOrSolId.buyer_note || '').trim() : '';
     let noteBy  = isObj ? String(recOrSolId.note_by || '').trim() : '';
@@ -160,6 +178,64 @@ function resolveLatestSolNote(recOrSolId) {
 }
 
 /**
+ * Consulta ?action=get_sol_notes en vivo y sincroniza toda la memoria del frontend.
+ */
+async function refreshLiveSolNotes(reRenderAudit = true) {
+    try {
+        const resp = await fetch(`?action=get_sol_notes&_t=${Date.now()}`, {
+            cache: 'no-store'
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data || !data.ok || typeof data.notes !== 'object') {
+            return;
+        }
+
+        const freshMap = {};
+        Object.keys(data.notes).forEach(k => {
+            const normKey = String(k).trim().toUpperCase();
+            if (normKey && data.notes[k] && typeof data.notes[k] === 'object') {
+                freshMap[normKey] = data.notes[k];
+            }
+        });
+        liveSolNotesMap = freshMap;
+
+        const applyEntry = (item, key) => {
+            if (!item || !key) return;
+            const entry = liveSolNotesMap[key];
+            item.buyer_note    = entry ? String(entry.note || '') : '';
+            item.note_by       = entry ? String(entry.updated_by || '') : '';
+            item.note_at       = entry ? String(entry.updated_at || '') : '';
+            item.note_username = entry ? String(entry.updated_username || '') : '';
+        };
+
+        if (typeof RAW_DATA !== 'undefined') {
+            (RAW_DATA.records || []).forEach(r => {
+                applyEntry(r, String(r.id || '').trim().toUpperCase());
+            });
+            (RAW_DATA.spend_records || []).forEach(sr => {
+                applyEntry(sr, String(sr.solicitud || '').trim().toUpperCase());
+            });
+        }
+
+        Object.keys(cachedUniverses).forEach(catKey => {
+            (cachedUniverses[catKey] || []).forEach(item => {
+                const key = String(item.id || item.solicitud || '').trim().toUpperCase();
+                applyEntry(item, key);
+            });
+        });
+
+        if (reRenderAudit) {
+            const auditModalEl = document.getElementById('auditModal');
+            if (auditModalEl && !auditModalEl.classList.contains('hidden')) {
+                renderModalTable();
+            }
+        }
+    } catch (e) {
+        // Silencioso para no interrumpir la navegación si hay microcorte de red
+    }
+}
+
+/**
  * Determina si el usuario actual puede crear o editar la nota:
  * - Manager: siempre puede crear y editar.
  * - Comprador: puede crear en sus solicitudes asignadas, y editar si él mismo la registró.
@@ -177,10 +253,9 @@ function canCurrentUserEditSolNote(recOrBuyer) {
     const targetNorm = normalizeBuyerText(solBuyerName);
     const isAssignedBuyer = targetNorm !== '' && allowed.some(b => normalizeBuyerText(b) === targetNorm);
 
-    // Si ya existe nota, verificar que sea el mismo usuario que la creó o el comprador asignado
     if (noteInfo.note !== '') {
-        const curUserNorm = normalizeBuyerText(ctx.username || '');
-        const curDispNorm = normalizeBuyerText(ctx.display_name || '');
+        const curUserNorm   = normalizeBuyerText(ctx.username || '');
+        const curDispNorm   = normalizeBuyerText(ctx.display_name || '');
         const authorUsrNorm = normalizeBuyerText(noteInfo.noteUsr || '');
         const authorByNorm  = normalizeBuyerText(noteInfo.noteBy || '');
 
@@ -199,6 +274,17 @@ function canCurrentUserEditSolNote(recOrBuyer) {
 function syncSolNoteInMemory(solId, noteText, noteBy, noteAt, noteUsername = '') {
     const cleanId = String(solId ?? '').trim().toUpperCase();
     if (!cleanId) return;
+
+    if (String(noteText || '').trim() === '') {
+        delete liveSolNotesMap[cleanId];
+    } else {
+        liveSolNotesMap[cleanId] = {
+            note:             noteText,
+            updated_by:       noteBy,
+            updated_username: noteUsername,
+            updated_at:       noteAt
+        };
+    }
 
     const applyUpdate = (item) => {
         if (!item) return;
@@ -529,6 +615,9 @@ function openAuditModal(category, defaultSubFilter) {
     renderModalTabs();
     document.getElementById('auditModal').classList.remove('hidden');
     renderModalTable();
+
+    // Sincronizar en vivo desde el servidor para garantizar que se vean comentarios recientes
+    refreshLiveSolNotes(true);
 }
 
 function closeAuditModal() {

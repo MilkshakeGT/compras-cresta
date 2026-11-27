@@ -165,6 +165,7 @@ class DataProcessor
             $ocSt     = (string)($sr['estado_oc'] ?? '');
             $solSt    = (string)($sr['estado_sol'] ?? '');
             $solRef   = (string)($sr['solicitud'] ?? '');
+            $solKey   = mb_strtoupper(trim($solRef), 'UTF-8');
             $ym       = (string)($sr['ym'] ?? '');
             $ocStLow  = mb_strtolower(trim($ocSt));
 
@@ -172,8 +173,8 @@ class DataProcessor
             $isCajaChica = !empty($sr['is_caja_chica']) || $this->matchesPettyCashProvider($provNorm, $buyerNamesNorm, $pettyAliasesNorm);
             $sr['is_caja_chica'] = $isCajaChica;
 
-            // Inyectar nota de la solicitud origen en spend_records
-            $noteObj = ($solRef !== '' && isset($allNotes[$solRef]) && is_array($allNotes[$solRef])) ? $allNotes[$solRef] : null;
+            // Inyectar nota de la solicitud origen en spend_records (clave normalizada)
+            $noteObj = ($solKey !== '' && isset($allNotes[$solKey]) && is_array($allNotes[$solKey])) ? $allNotes[$solKey] : null;
             $sr['buyer_note'] = $noteObj ? (string)($noteObj['note'] ?? '') : '';
             $sr['note_by']    = $noteObj ? (string)($noteObj['updated_by'] ?? '') : '';
             $sr['note_at']    = $noteObj ? (string)($noteObj['updated_at'] ?? '') : '';
@@ -221,11 +222,12 @@ class DataProcessor
 
         foreach (($cache['records'] ?? []) as &$rec) {
             $recId    = (string)($rec['id'] ?? '');
+            $recKey   = mb_strtoupper(trim($recId), 'UTF-8');
             $solSt    = (string)($rec['estado_sol'] ?? '');
             $included = $this->isPrStatusIncluded($solSt, $prIncluded);
 
-            // Inyectar comentario breve / justificación de la solicitud
-            $noteObj = ($recId !== '' && isset($allNotes[$recId]) && is_array($allNotes[$recId])) ? $allNotes[$recId] : null;
+            // Inyectar comentario breve / justificación de la solicitud (clave normalizada)
+            $noteObj = ($recKey !== '' && isset($allNotes[$recKey]) && is_array($allNotes[$recKey])) ? $allNotes[$recKey] : null;
             $rec['buyer_note'] = $noteObj ? (string)($noteObj['note'] ?? '') : '';
             $rec['note_by']    = $noteObj ? (string)($noteObj['updated_by'] ?? '') : '';
             $rec['note_at']    = $noteObj ? (string)($noteObj['updated_at'] ?? '') : '';
@@ -496,6 +498,7 @@ class DataProcessor
             ? (json_decode((string)file_get_contents($this->detailsCachePath), true) ?: [])
             : [];
 
+        clearstatcache(true, $this->cachePath);
         $mainCache = file_exists($this->cachePath)
             ? (json_decode((string)file_get_contents($this->cachePath), true) ?: [])
             : [];
@@ -504,8 +507,9 @@ class DataProcessor
 
         if ($type === 'sol') {
             $meta = null;
+            $targetKey = mb_strtoupper($id, 'UTF-8');
             foreach (($mainCache['records'] ?? []) as $rec) {
-                if (($rec['id'] ?? '') === $id) {
+                if (mb_strtoupper(trim((string)($rec['id'] ?? '')), 'UTF-8') === $targetKey) {
                     $meta = $rec;
                     break;
                 }
@@ -542,8 +546,9 @@ class DataProcessor
 
         if ($type === 'oc') {
             $meta = null;
+            $targetOcKey = mb_strtoupper($id, 'UTF-8');
             foreach (($mainCache['spend_records'] ?? []) as $srec) {
-                if (($srec['oc_odoo'] ?? '') === $id) {
+                if (mb_strtoupper(trim((string)($srec['oc_odoo'] ?? '')), 'UTF-8') === $targetOcKey) {
                     $meta = $srec;
                     break;
                 }
@@ -556,10 +561,11 @@ class DataProcessor
             }
 
             $solMeta = null;
-            $solId = $meta['solicitud'] ?? '';
+            $solId = trim((string)($meta['solicitud'] ?? ''));
             if ($solId !== '') {
+                $targetSolKey = mb_strtoupper($solId, 'UTF-8');
                 foreach (($mainCache['records'] ?? []) as $rec) {
-                    if (($rec['id'] ?? '') === $solId) {
+                    if (mb_strtoupper(trim((string)($rec['id'] ?? '')), 'UTF-8') === $targetSolKey) {
                         $solMeta = $rec;
                         break;
                     }
@@ -606,16 +612,18 @@ class DataProcessor
             return ['ok' => false, 'error' => 'Solicitud no especificada.'];
         }
 
+        clearstatcache(true, $this->cachePath);
         $mainCache = file_exists($this->cachePath)
             ? (json_decode((string)file_get_contents($this->cachePath), true) ?: [])
             : [];
 
+        $targetKey    = mb_strtoupper($cleanId, 'UTF-8');
         $solBuyerName = '';
-        $found = false;
+        $found        = false;
         foreach (($mainCache['records'] ?? []) as $rec) {
-            if (($rec['id'] ?? '') === $cleanId) {
+            if (mb_strtoupper(trim((string)($rec['id'] ?? '')), 'UTF-8') === $targetKey) {
                 $solBuyerName = (string)($rec['comprador'] ?? '');
-                $found = true;
+                $found        = true;
                 break;
             }
         }
@@ -653,6 +661,7 @@ class DataProcessor
         $details = file_exists($this->detailsCachePath)
             ? (json_decode((string)file_get_contents($this->detailsCachePath), true) ?: [])
             : [];
+        clearstatcache(true, $this->cachePath);
         $mainCache = file_exists($this->cachePath)
             ? (json_decode((string)file_get_contents($this->cachePath), true) ?: [])
             : [];
@@ -685,13 +694,14 @@ class DataProcessor
                 }
             }
 
+            $solKey      = mb_strtoupper(trim((string)$solId), 'UTF-8');
             $fecha       = $meta['fecha'] ?? '';
             $sociedad    = $meta['sociedad'] ?? 'Sin sociedad';
             $comprador   = $meta['comprador'] ?? 'Sin asignar';
             $solicitante = $meta['solicitado_por'] ?? 'Sin solicitante';
             $ocVinculada = $meta['oc_odoo'] ?? '';
             $estado      = $meta['estado_sol'] ?? '';
-            $buyerNote   = isset($allNotes[$solId]['note']) ? (string)$allNotes[$solId]['note'] : '';
+            $buyerNote   = ($solKey !== '' && isset($allNotes[$solKey]['note'])) ? (string)$allNotes[$solKey]['note'] : '';
 
             foreach ($lines as $ln) {
                 $prod = (string)($ln['producto'] ?? '');
@@ -737,13 +747,14 @@ class DataProcessor
                 $sociedad     = $meta['sociedad'] ?? 'Sin sociedad';
                 $comprador    = $meta['comprador'] ?? 'Sin asignar';
                 $solicitante  = $meta['solicitado_por'] ?? 'Sin solicitante';
-                $solVinculada = $meta['solicitud'] ?? '';
+                $solVinculada = (string)($meta['solicitud'] ?? '');
+                $solVincKey   = mb_strtoupper(trim($solVinculada), 'UTF-8');
                 $prov         = trim((string)($meta['proveedor'] ?? ($ocInfo['proveedor'] ?? 'Sin proveedor')));
                 $divisa       = strtoupper(trim((string)($meta['divisa'] ?? ($ocInfo['divisa'] ?? 'GTQ'))));
                 $estado       = $meta['estado_oc'] ?? '';
                 $ocSap        = $meta['oc_sap'] ?? '';
-                $buyerNote    = ($solVinculada !== '' && isset($allNotes[$solVinculada]['note']))
-                    ? (string)$allNotes[$solVinculada]['note']
+                $buyerNote    = ($solVincKey !== '' && isset($allNotes[$solVincKey]['note']))
+                    ? (string)$allNotes[$solVincKey]['note']
                     : '';
 
                 foreach (($ocInfo['lineas'] ?? []) as $ln) {
@@ -754,7 +765,7 @@ class DataProcessor
                         $results[] = [
                             'doc_type'    => 'oc',
                             'doc_id'      => (string)$ocId,
-                            'related_doc' => (string)$solVinculada,
+                            'related_doc' => $solVinculada,
                             'fecha'       => (string)$fecha,
                             'sociedad'    => (string)$sociedad,
                             'comprador'   => (string)$comprador,
@@ -793,6 +804,7 @@ class DataProcessor
         $details = file_exists($this->detailsCachePath)
             ? (json_decode((string)file_get_contents($this->detailsCachePath), true) ?: [])
             : [];
+        clearstatcache(true, $this->cachePath);
         $mainCache = file_exists($this->cachePath)
             ? (json_decode((string)file_get_contents($this->cachePath), true) ?: [])
             : [];
@@ -1009,6 +1021,7 @@ class DataProcessor
         $solMtime   = file_exists($this->solExcelPath) ? filemtime($this->solExcelPath) : 0;
         $ocMtime    = file_exists($this->ocExcelPath) ? filemtime($this->ocExcelPath) : 0;
 
+        clearstatcache(true, $this->cachePath);
         if (!$forceRebuild && file_exists($this->cachePath)) {
             $cached = json_decode((string)file_get_contents($this->cachePath), true);
             if (is_array($cached) && in_array((int)($cached['schema_v'] ?? 0), [16, 17], true)) {
